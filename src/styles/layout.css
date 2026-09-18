@@ -81,7 +81,7 @@
 .cadence-row>div:first-child { display:flex; flex-direction:column; gap:4px; }
 .cadence-row strong { font-size:14px; }
 .cadence-row small { color:var(--muted); }
-.cadence-row>select { width:110px; }
+.cadence-value { width:110px; flex:none; }
 .active-meeting { display:flex; flex-direction:column; gap:18px; }
 .active-toolbar { display:flex; align-items:center; gap:14px; padding:17px 20px; }
 .active-toolbar h3 { font-size:18px; }

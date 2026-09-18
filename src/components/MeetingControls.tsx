@@ -11,6 +11,6 @@ export function MeetingControls({ model }: { model: AppModel }) {
     <div className="divider"/>
     <div className="cadence-row"><div><strong>Nhịp cập nhật tóm tắt</strong><small>Lần đầu: ngay sau đoạn nhận diện đầu tiên.</small></div><div className="row-spacer"/>
       <div className="segmented" role="group" aria-label="Nhịp tóm tắt"><button className={model.summaryCadence === 'minutes' ? 'selected' : ''} onClick={() => model.setSummaryCadence('minutes')} disabled={model.capturing || model.busy}>Phút</button><button className={model.summaryCadence === 'words' ? 'selected' : ''} onClick={() => model.setSummaryCadence('words')} disabled={model.capturing || model.busy}>Số từ</button></div>
-      <select value={model.cadenceValue} onChange={e => model.setCadenceValue(Number(e.target.value))} disabled={model.capturing || model.busy} aria-label="Khoảng cập nhật">{(model.summaryCadence === 'words' ? [30, 60, 120, 200] : [1, 2, 5, 10]).map(value => <option key={value} value={value}>{value} {model.summaryCadence === 'words' ? 'từ' : 'phút'}</option>)}</select></div>
+      <div className="meeting-choice cadence-value"><select value={model.cadenceValue} onChange={e => model.setCadenceValue(Number(e.target.value))} disabled={model.capturing || model.busy} aria-label="Khoảng cập nhật">{(model.summaryCadence === 'words' ? [30, 60, 120, 200] : [1, 2, 5, 10]).map(value => <option key={value} value={value}>{value} {model.summaryCadence === 'words' ? 'từ' : 'phút'}</option>)}</select><ChevronDown size={17}/></div></div>
   </section>
 }
