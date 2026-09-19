@@ -7,15 +7,15 @@ export const emptyStructuredSummary = (): StructuredMeetingSummary => ({
 
 export function formatStructuredSummary(summary: StructuredMeetingSummary): string {
   const blocks: string[] = []
-  if (summary.tldr.trim()) blocks.push(`TL;DR\n${summary.tldr.trim()}`)
+  if (summary.tldr.trim()) blocks.push(`TÓM TẮT NHANH\n${summary.tldr.trim()}`)
   const bullets = (title: string, values: string[]) => { if (values.length) blocks.push(`${title}\n${values.map(value => `• ${value}`).join('\n')}`) }
-  bullets('KEY POINTS', summary.keyPoints.map(item => item.text))
-  bullets('DECISIONS', summary.decisions.map(item => item.text))
-  bullets('TENTATIVE DECISIONS', summary.tentativeDecisions.map(item => item.text))
-  bullets('UNRESOLVED TOPICS', summary.unresolvedTopics.map(item => `${item.topic}${item.options.length ? ` · Options: ${item.options.join(', ')}` : ''} · ${item.status}`))
-  bullets('ACTION ITEMS', summary.actionItems.map(item => [item.owner, item.task, item.deadline].filter(Boolean).join(' → ')))
-  bullets('OPEN QUESTIONS', summary.openQuestions.map(item => item.text))
-  bullets('DEFERRED', summary.deferred.map(item => [item.text, item.target].filter(Boolean).join(' → ')))
+  bullets('Ý CHÍNH', summary.keyPoints.map(item => item.text))
+  bullets('QUYẾT ĐỊNH', summary.decisions.map(item => item.text))
+  bullets('QUYẾT ĐỊNH TẠM THỜI', summary.tentativeDecisions.map(item => item.text))
+  bullets('VẤN ĐỀ CHƯA CHỐT', summary.unresolvedTopics.map(item => `${item.topic}${item.options.length ? ` · Lựa chọn: ${item.options.join(', ')}` : ''} · ${item.status === 'No final decision' ? 'Chưa có quyết định cuối cùng' : item.status}`))
+  bullets('VIỆC CẦN LÀM', summary.actionItems.map(item => [item.owner, item.task, item.deadline].filter(Boolean).join(' → ')))
+  bullets('CÂU HỎI MỞ', summary.openQuestions.map(item => item.text))
+  bullets('NỘI DUNG TẠM HOÃN', summary.deferred.map(item => [item.text, item.target].filter(Boolean).join(' → ')))
   return blocks.join('\n\n')
 }
 
@@ -35,9 +35,10 @@ export function noteMoments(text: string): NoteMoment[] {
     if (!normalized) continue
     const upper = normalized.toLocaleUpperCase('vi-VN')
     if (upper.startsWith('ĐOẠN ')) { flush(); current = { id: moments.length, title: normalized, overview: [], decisions: [], actions: [] }; section = 'overview'; continue }
-    if (upper === 'TÓM TẮT' || upper === 'TÓM TẮT:' || upper === 'TÓM TẮT TỔNG QUAN' || upper === 'TÓM TẮT TỔNG QUAN:') { section = 'overview'; continue }
+    if (upper === 'TÓM TẮT' || upper === 'TÓM TẮT:' || upper === 'TÓM TẮT NHANH' || upper === 'TÓM TẮT NHANH:' || upper === 'TÓM TẮT TỔNG QUAN' || upper === 'TÓM TẮT TỔNG QUAN:' || upper === 'Ý CHÍNH' || upper === 'Ý CHÍNH:') { section = 'overview'; continue }
     if (upper === 'QUYẾT ĐỊNH' || upper === 'QUYẾT ĐỊNH:') { section = 'decisions'; continue }
     if (upper === 'VIỆC CẦN LÀM' || upper === 'VIỆC CẦN LÀM:') { section = 'actions'; continue }
+    if (['QUYẾT ĐỊNH TẠM THỜI', 'VẤN ĐỀ CHƯA CHỐT', 'CÂU HỎI MỞ', 'NỘI DUNG TẠM HOÃN'].includes(upper.replace(/:$/, ''))) continue
     const content = normalized.replace(/^[-•\s]+/, '').trim()
     if (!content || (section !== 'overview' && /^chưa có[ .;:]*$/i.test(content))) continue
     current[section].push(content)

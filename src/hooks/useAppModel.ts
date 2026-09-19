@@ -7,14 +7,20 @@ const now = () => new Date().toISOString()
 const countWords = (text: string) => text.trim().split(/\s+/).filter(Boolean).length
 
 export function useAppModel() {
-  const [status, setStatus] = useState('Đang tải ASR…')
+  const [status, setStatus] = useState('Đang khởi động…')
   const [ready, setReady] = useState(false)
   const [busy, setBusy] = useState(false)
   const [capturing, setCapturing] = useState(false)
   const [meetingActive, setMeetingActive] = useState(false)
+  const [asrKeyAvailable, setAsrKeyAvailable] = useState(false)
+  const [startRequested, setStartRequested] = useState(false)
   const [sourceLanguage, setSourceLanguageState] = useState<Language>('vi')
   const [audioInput, setAudioInputState] = useState<AudioInput>('both')
   const [speechEnabled, setSpeechEnabled] = useState(true)
+  const [speechRate, setSpeechRateState] = useState(() => {
+    const saved = Number(localStorage.getItem('ttsPlaybackRate'))
+    return [1, 1.15, 1.25, 1.4, 1.5].includes(saved) ? saved : 1.25
+  })
   const [entries, setEntries] = useState<Subtitle[]>([])
   const [translationBlocks, setTranslationBlocks] = useState<TranslationBlock[]>([])
   const [summaryHistory, setSummaryHistory] = useState<SummarySnapshot[]>([])
@@ -24,9 +30,12 @@ export function useAppModel() {
   const [cadenceValue, setCadenceValue] = useState(60)
   const [notes, setNotes] = useState<MeetingNote[]>([demoNote])
   const [noteGroups, setNoteGroups] = useState<NoteGroup[]>([])
-  const [vietnameseASRStatus, setVietnameseASRStatus] = useState('Đang kiểm tra model tiếng Việt…')
+  const [savingNoteID, setSavingNoteID] = useState<string | null>(null)
+  const [savingNoteGroupID, setSavingNoteGroupID] = useState<string | null>(null)
+  const [vietnameseASRStatus, setVietnameseASRStatus] = useState('Đang chuẩn bị nhận diện…')
   const [ttsStatus, setTtsStatus] = useState('Đang tải giọng đọc…')
-  const [translationStatus, setTranslationStatus] = useState('Dịch qua API local')
+  const [ttsVoiceName, setTtsVoiceName] = useState('Giọng Nam')
+  const [translationStatus, setTranslationStatus] = useState('Đang chuẩn bị dịch')
   const entriesRef = useRef<Subtitle[]>([])
   const translationBlocksRef = useRef<TranslationBlock[]>([])
   const historyRef = useRef<SummarySnapshot[]>([])
@@ -36,10 +45,12 @@ export function useAppModel() {
   const groupsRef = useRef<NoteGroup[]>([])
   const meetingRef = useRef(false)
   const capturingRef = useRef(false)
+  const asrKeyStatusRef = useRef<'checking' | 'available' | 'missing'>('checking')
   const generationRef = useRef(0)
   const languageRef = useRef<Language>('vi')
   const audioRef = useRef<AudioInput>('both')
   const speechRef = useRef(true)
+  const speechRateRef = useRef(speechRate)
   const cadenceRef = useRef<Cadence>('words')
   const cadenceValueRef = useRef(60)
   const summaryCursor = useRef(0)
@@ -60,25 +71,42 @@ export function useAppModel() {
   const stagedAudio = useRef<AudioBuffer[]>([])
   const stagedDuration = useRef(0)
   const playbackStarted = useRef(false)
+  const activeVoiceRef = useRef('giọng đã chọn')
 
   const publishEntries = (next: Subtitle[]) => { entriesRef.current = next; setEntries(next) }
   const publishTranslationBlocks = (next: TranslationBlock[]) => { translationBlocksRef.current = next; setTranslationBlocks(next) }
   const publishHistory = (next: SummarySnapshot[]) => { historyRef.current = next; setSummaryHistory(next) }
   const publishOverallSummary = (next: string) => { overallSummaryRef.current = next; setOverallSummary(next) }
+  const publishNotes = (nextNotes: MeetingNote[], nextGroups: NoteGroup[]) => {
+    notesRef.current = nextNotes; groupsRef.current = nextGroups
+    setNotes(nextNotes); setNoteGroups(nextGroups)
+  }
+  const notesForStorage = (nextNotes: MeetingNote[]) => nextNotes.filter(note => !note.isDemo).map(({ saving: _saving, ...note }) => note)
   const persist = useCallback((nextNotes: MeetingNote[], nextGroups: NoteGroup[]) => {
     notesRef.current = nextNotes; groupsRef.current = nextGroups
     setNotes(nextNotes); setNoteGroups(nextGroups)
-    if (desktop.isDesktop) void desktop.saveNotes({ notes: nextNotes.filter(note => !note.isDemo), groups: nextGroups }).catch(error => setStatus(`Không lưu được ghi chú: ${error}`))
+    if (desktop.isDesktop) void desktop.saveNotes({ notes: notesForStorage(nextNotes), groups: nextGroups }).catch(error => setStatus(`Không lưu được ghi chú: ${error}`))
   }, [])
 
   useEffect(() => {
-    if (!desktop.isDesktop) { setStatus('Mở bằng Tauri để dùng ASR và lưu dữ liệu'); return }
+    if (!desktop.isDesktop) { setStatus('Hãy mở ứng dụng VietNote để sử dụng'); return }
     let disposed = false
     const unlisten: Array<() => void> = []
     void desktop.loadNotes().then(data => { if (!disposed) persist([demoNote, ...data.notes.filter(n => !n.isDemo)], data.groups) }).catch(error => setStatus(`Không đọc được ghi chú: ${error}`))
     void desktop.onWorker(message => { if (!disposed) handleWorkerRef.current(message) }).then(fn => unlisten.push(fn))
-    void desktop.onStatus(value => { if (!disposed) { setStatus(value); if (/loading|exited|closed|failed|missing/i.test(value)) setReady(false) } }).then(fn => unlisten.push(fn))
-    void desktop.startWorker().catch(error => setStatus(`Không khởi động được ASR: ${error}`))
+    void desktop.onStatus(value => { if (!disposed) { setStatus(/loading/i.test(value) ? 'Đang khởi động…' : /closed|exited/i.test(value) ? 'Đã dừng' : /failed|missing/i.test(value) ? 'Không thể khởi động' : value); if (/loading|exited|closed|failed|missing/i.test(value)) { setReady(false); if (/exited|closed|failed|missing/i.test(value)) { setStartRequested(false); setBusy(false) } } } }).then(fn => unlisten.push(fn))
+    void desktop.aiKeyStatus('groq').then(keyStatus => {
+      if (disposed) return
+      const available = keyStatus === 'saved' || keyStatus === 'environment'
+      asrKeyStatusRef.current = available ? 'available' : 'missing'
+      setAsrKeyAvailable(available)
+      setStatus(available ? 'Sẵn sàng sử dụng' : 'Đang chuẩn bị nhận diện…')
+    }).catch(() => {
+      if (disposed) return
+      asrKeyStatusRef.current = 'missing'; setAsrKeyAvailable(false)
+      setStatus('Đang chuẩn bị nhận diện…')
+    })
+    void desktop.startWorker().catch(() => setStatus('Không khởi động được dịch vụ nhận diện'))
     return () => { disposed = true; unlisten.forEach(fn => fn()) }
   }, [persist])
 
@@ -97,6 +125,10 @@ export function useAppModel() {
   const setCadenceAmount = (value: number) => { cadenceValueRef.current = value; setCadenceValue(value) }
   const clearPlayback = () => { void audioContext.current?.close(); audioContext.current = null; audioNextTime.current = 0; stagedAudio.current = []; stagedDuration.current = 0; playbackStarted.current = false }
   const setSpeech = (value: boolean) => { speechRef.current = value; setSpeechEnabled(value); if (!value) clearPlayback() }
+  const setSpeechRate = (value: number) => {
+    const next = [1, 1.15, 1.25, 1.4, 1.5].includes(value) ? value : 1.25
+    speechRateRef.current = next; setSpeechRateState(next); localStorage.setItem('ttsPlaybackRate', String(next))
+  }
 
   const summarize = async (force = false, manual = false) => {
     if (summaryBusy.current || !meetingRef.current) return
@@ -130,7 +162,7 @@ export function useAppModel() {
         if (latestResult.status === 'rejected' && overallResult.status === 'rejected') throw latestResult.reason
         lastSummaryAt.current = Date.now()
         const partial = latestResult.status === 'rejected' || overallResult.status === 'rejected' ? ' · một phần chưa cập nhật' : ''
-        setSummaryStatus(`Đã cập nhật lúc ${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })} · GPT‑5.5${partial}`)
+        setSummaryStatus(`Đã cập nhật lúc ${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}${partial}`)
       } catch (error) { setSummaryStatus(`Chưa tóm tắt được: ${error}`) }
       finally { summaryBusy.current = false; summaryTaskRef.current = null }
     })()
@@ -160,7 +192,7 @@ export function useAppModel() {
         const translatedText = await desktop.translateParagraph(block.sourceText, language, translationContextRef.current)
         translationContextRef.current = block.sourceText
         publishTranslationBlocks(translationBlocksRef.current.map(item => item.id === block.id ? { ...item, translatedText, pending: false } : item))
-        setTranslationStatus(`${language === 'en' ? 'Anh' : 'Trung'} → Việt theo đoạn · API local`)
+        setTranslationStatus(`${language === 'en' ? 'Anh' : 'Trung'} → Việt theo đoạn`)
         if (meetingRef.current) await summarize(historyRef.current.length === 0)
         const lastEntry = paragraphEntries.at(-1)
         if (speechRef.current && audioRef.current === 'system' && capturingRef.current && lastEntry?.generation === generationRef.current) {
@@ -189,7 +221,8 @@ export function useAppModel() {
       const source = context.createBufferSource()
       source.buffer = buffer; source.connect(context.destination)
       const begin = Math.max(context.currentTime + 0.06, audioNextTime.current)
-      source.start(begin); audioNextTime.current = begin + buffer.duration
+      source.playbackRate.value = speechRateRef.current
+      source.start(begin); audioNextTime.current = begin + buffer.duration / speechRateRef.current
     }
     stagedAudio.current = []; stagedDuration.current = 0; playbackStarted.current = true
   }
@@ -213,11 +246,11 @@ export function useAppModel() {
     switch (message.type) {
       case 'connected':
         setReady(true)
-        setStatus(`Ready — ${message.asr_backend ?? 'Local ASR'} · ${message.asr_model ?? 'Whisper'}`)
-        setVietnameseASRStatus(message.asr_backend === 'Groq Cloud'
-          ? `Groq: ${message.asr_model ?? 'whisper-large-v3'}`
-          : message.vi_model_ready ? 'Local: PhoWhisper-medium' : 'Local: Whisper Turbo (PhoWhisper chưa cài)')
-        setTtsStatus(`ZeroTTS ready — ${message.tts_voice ?? 'Thức Dậy Đi'}`)
+        setStatus('Sẵn sàng sử dụng')
+        setVietnameseASRStatus('Nhận diện sẵn sàng')
+        activeVoiceRef.current = message.tts_voice ?? 'giọng đã chọn'
+        setTtsVoiceName(activeVoiceRef.current)
+        setTtsStatus(`Giọng đọc sẵn sàng — ${activeVoiceRef.current}`)
         break
       case 'transcript': {
         if (!capturingRef.current || message.generation !== generationRef.current || !message.text) break
@@ -235,11 +268,13 @@ export function useAppModel() {
         scheduleTranslationParagraph()
         break
       }
-      case 'tts_begin': if (message.generation === generationRef.current) { clearPlayback(); setTtsStatus(`Speaking — ${message.voice ?? 'Thức Dậy Đi'}`) } break
+      // Keep the existing AudioContext and schedule the next utterance after the
+      // previous one. Closing it here truncates audio that is still playing.
+      case 'tts_begin': if (message.generation === generationRef.current) { activeVoiceRef.current = message.voice ?? activeVoiceRef.current; setTtsVoiceName(activeVoiceRef.current); setTtsStatus(`Speaking — ${activeVoiceRef.current}`) } break
       case 'tts_audio': if (message.pcm && message.generation === generationRef.current) playPCM(message.pcm, message.sample_rate ?? 48000); break
-      case 'tts_end': if (message.generation === generationRef.current) { flushPlayback(); setTtsStatus('ZeroTTS active — Thức Dậy Đi') } break
-      case 'tts_error': setTtsStatus(`ZeroTTS error: ${message.message}`); break
-      case 'warning': case 'error': setStatus(message.message ?? 'ASR error'); break
+      case 'tts_end': if (message.generation === generationRef.current) { flushPlayback(); setTtsStatus(`Đang dùng ${activeVoiceRef.current}`) } break
+      case 'tts_error': setTtsStatus('Giọng đọc tạm thời không khả dụng'); break
+      case 'warning': case 'error': setStatus('Đã xảy ra lỗi xử lý âm thanh'); break
     }
   }
   const handleWorkerRef = useRef(handleWorker)
@@ -257,15 +292,27 @@ export function useAppModel() {
     finally { generationPending.current = false; setBusy(false) }
   }
   const startMeeting = async () => {
+    if (!ready) {
+      if (asrKeyAvailable) { setStartRequested(true); setBusy(true); setStatus('Đang kết nối…') }
+      return
+    }
     publishEntries([]); publishHistory([]); publishOverallSummary(''); overallStructuredRef.current = emptyStructuredSummary(); resetTranslations()
     summaryCursor.current = 0; overallSummaryCursor.current = 0; manualCursor.current = 0; lastSummaryAt.current = Date.now(); meetingStartedAt.current = Date.now()
     setSummaryStatus('Đang lắng nghe · bản tóm tắt bắt đầu sau câu đầu tiên')
-    setTranslationStatus(languageRef.current === 'vi' ? 'Không cần dịch' : `${languageRef.current === 'en' ? 'Anh' : 'Trung'} → Việt theo đoạn · API local`)
+    setTranslationStatus(languageRef.current === 'vi' ? 'Không cần dịch' : `${languageRef.current === 'en' ? 'Anh' : 'Trung'} → Việt theo đoạn`)
     setSpeech(false); meetingRef.current = true; setMeetingActive(true)
     await start()
   }
   const stop = async (saveOptions?: { title: string; groupID: string | null }) => {
     const wasMeeting = meetingRef.current
+    const started = new Date(meetingStartedAt.current)
+    const defaultTitle = `Cuộc họp · ${started.toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' })}`
+    const pendingNoteID = wasMeeting ? crypto.randomUUID() : null
+    if (pendingNoteID) {
+      const pendingNote: MeetingNote = { id: pendingNoteID, title: saveOptions?.title.trim() || defaultTitle, groupID: saveOptions?.groupID ?? null, createdAt: started.toISOString(), updatedAt: now(), duration: 0, summary: '', transcript: '', saving: true }
+      publishNotes([pendingNote, ...notesRef.current], groupsRef.current)
+      setSavingNoteID(pendingNoteID); setSavingNoteGroupID(pendingNote.groupID ?? null)
+    }
     setMeetingActive(false); setBusy(true)
     capturingRef.current = false; setCapturing(false)
     clearPlayback()
@@ -289,13 +336,17 @@ export function useAppModel() {
           publishOverallSummary(formatStructuredSummary(overallStructuredRef.current))
         }
       } catch (error) { setSummaryStatus(`Chưa tạo được bản tổng kết cuối: ${error}`) }
-      const started = new Date(meetingStartedAt.current)
       const summary = formatStructuredSummary(overallStructuredRef.current)
       const sourceTranscript = entriesRef.current.map(entry => `${new Date(entry.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })} · ${entry.audioSource === 'microphone' ? 'Microphone' : 'System audio'}: ${entry.sourceText}`).join('\n')
       const translatedTranscript = languageRef.current === 'vi' ? '' : `\n\nBẢN DỊCH TIẾNG VIỆT THEO ĐOẠN\n${translationBlocksRef.current.map((block, index) => `ĐOẠN ${index + 1}\n${block.translatedText}`).join('\n\n')}`
-      const defaultTitle = `Cuộc họp · ${started.toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' })}`
-      const note: MeetingNote = { id: crypto.randomUUID(), title: saveOptions?.title.trim() || defaultTitle, groupID: saveOptions?.groupID ?? null, createdAt: started.toISOString(), updatedAt: now(), duration: (Date.now() - meetingStartedAt.current) / 1000, summary: summary || 'Chưa có tóm tắt · kiểm tra kết nối API local.', structuredSummary: overallStructuredRef.current, transcriptSegments: entriesRef.current.map(toTranscriptSegment), transcript: sourceTranscript + translatedTranscript }
-      persist([note, ...notesRef.current], groupsRef.current)
+      const note: MeetingNote = { id: pendingNoteID!, title: saveOptions?.title.trim() || defaultTitle, groupID: saveOptions?.groupID ?? null, createdAt: started.toISOString(), updatedAt: now(), duration: (Date.now() - meetingStartedAt.current) / 1000, summary: summary || 'Chưa có tóm tắt · vui lòng kiểm tra kết nối.', structuredSummary: overallStructuredRef.current, transcriptSegments: entriesRef.current.map(toTranscriptSegment), transcript: sourceTranscript + translatedTranscript, saving: true }
+      const completedNotes = notesRef.current.map(item => item.id === note.id ? note : item)
+      publishNotes(completedNotes, groupsRef.current)
+      try {
+        if (desktop.isDesktop) await desktop.saveNotes({ notes: notesForStorage(completedNotes), groups: groupsRef.current })
+        publishNotes(completedNotes.map(item => item.id === note.id ? { ...item, saving: false } : item), groupsRef.current)
+      } catch (error) { setStatus(`Không lưu được ghi chú: ${error}`) }
+      finally { setSavingNoteID(null); setSavingNoteGroupID(null) }
     }
     setBusy(false)
     setStatus(ready ? 'Stopped — ready to restart' : 'Worker unavailable')
@@ -313,10 +364,16 @@ export function useAppModel() {
 
   const readySummaryUnits = entries.length
 
+  useEffect(() => {
+    if (!ready || !startRequested) return
+    setStartRequested(false); setBusy(false)
+    void startMeeting()
+  }, [ready, startRequested])
+
   return { status, ready, busy, capturing, meetingActive, sourceLanguage, setSourceLanguage, audioInput, setAudioInput,
-    speechEnabled, setSpeechEnabled: setSpeech, entries, translationBlocks, summaryHistory, overallSummary, summaryStatus, summaryCadence, setSummaryCadence: setCadence,
-    cadenceValue, setCadenceValue: setCadenceAmount, notes, noteGroups, vietnameseASRStatus, ttsStatus, translationStatus,
-    canSummarizeNow: meetingActive && !summaryBusy.current && (readySummaryUnits > manualCursor.current || (languageRef.current !== 'vi' && entries.length > translationCursorRef.current)),
+    speechEnabled, setSpeechEnabled: setSpeech, speechRate, setSpeechRate, entries, translationBlocks, summaryHistory, overallSummary, summaryStatus, summaryCadence, setSummaryCadence: setCadence,
+    cadenceValue, setCadenceValue: setCadenceAmount, notes, noteGroups, savingNoteID, savingNoteGroupID, vietnameseASRStatus, ttsStatus, ttsVoiceName, translationStatus,
+    canStartMeeting: ready || asrKeyAvailable, canSummarizeNow: meetingActive && !summaryBusy.current && (readySummaryUnits > manualCursor.current || (languageRef.current !== 'vi' && entries.length > translationCursorRef.current)),
     start, startMeeting, stop, summarizeNow: () => void summarizeNow(), newNote, updateNote, deleteNote, createGroup, renameGroup, deleteGroup, meetingStartedAt: meetingStartedAt.current }
 }
 

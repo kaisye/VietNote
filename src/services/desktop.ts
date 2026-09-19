@@ -5,6 +5,9 @@ import type { AudioInput, Language, MeetingNote, NoteGroup, StructuredMeetingSum
 export interface StoredNotes { notes: MeetingNote[]; groups: NoteGroup[] }
 export type SummaryAiProvider = 'nine_router' | 'groq'
 export interface SummaryAiConfig { apiUrl: string; model: string; provider: SummaryAiProvider }
+export type TtsVoiceId = 'thuc-day-di' | 'ngoc-huyen'
+export interface TtsVoiceOption { id: TtsVoiceId; displayName: string; description: string }
+export interface TtsVoiceConfig { selectedId: TtsVoiceId; voices: TtsVoiceOption[] }
 const isDesktop = '__TAURI_INTERNALS__' in window
 let saveQueue: Promise<void> = Promise.resolve()
 
@@ -17,9 +20,13 @@ export const desktop = {
   },
   getSummaryAiConfig: () => invoke<SummaryAiConfig>('get_summary_ai_config'),
   setSummaryAiConfig: (config: SummaryAiConfig) => invoke<SummaryAiConfig>('set_summary_ai_config', { config }),
+  getTtsVoiceConfig: () => invoke<TtsVoiceConfig>('get_tts_voice_config'),
+  setTtsVoice: (voiceId: TtsVoiceId) => invoke<TtsVoiceConfig>('set_tts_voice', { voiceId }),
   startWorker: () => invoke<void>('start_worker'),
   aiKeyStatus: (provider: SummaryAiProvider) => invoke<'saved' | 'environment' | 'none'>('ai_key_status', { provider }),
   setAiApiKey: (provider: SummaryAiProvider, apiKey: string | null) => invoke<'saved' | 'environment' | 'none'>('set_ai_api_key', { provider, apiKey }),
+  accessKeyStatus: () => invoke<boolean>('access_key_status'),
+  setAccessKey: (accessKey: string) => invoke<boolean>('set_access_key', { accessKey }),
   stopWorker: () => invoke<void>('stop_worker'),
   sendWorker: (payload: Record<string, unknown>) => invoke<void>('send_worker', { payload }),
   startCapture: (source: AudioInput) => invoke<void>('start_capture', { source }),

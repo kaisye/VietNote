@@ -17,17 +17,17 @@ function BulletSection({ title, icon: Icon, items, onEvidence, evidenceLabel }: 
 
 function Actions({ items, onEvidence, evidenceLabel }: { items: ActionItem[]; onEvidence?: EvidenceHandler; evidenceLabel?: EvidenceLabel }) {
   if (!items.length) return null
-  return <section className="structured-section"><h4><ListTodo size={15}/>Action Items</h4><ul>{items.map((item, index) => <li key={item.id || `action-${index}`}><span>{[item.owner, item.task, item.deadline].filter(Boolean).join(' → ')}</span><Evidence ids={item.evidenceIds} onEvidence={onEvidence} evidenceLabel={evidenceLabel}/></li>)}</ul></section>
+  return <section className="structured-section"><h4><ListTodo size={15}/>Việc cần làm</h4><ul>{items.map((item, index) => <li key={item.id || `action-${index}`}><span>{[item.owner, item.task, item.deadline].filter(Boolean).join(' → ')}</span><Evidence ids={item.evidenceIds} onEvidence={onEvidence} evidenceLabel={evidenceLabel}/></li>)}</ul></section>
 }
 
 function Unresolved({ items, onEvidence, evidenceLabel }: { items: UnresolvedTopic[]; onEvidence?: EvidenceHandler; evidenceLabel?: EvidenceLabel }) {
   if (!items.length) return null
-  return <section className="structured-section"><h4><GitBranch size={15}/>Unresolved Topics</h4><ul>{items.map((item, index) => <li key={item.id || `unresolved-${index}`}><strong>{item.topic}</strong>{item.options.length > 0 && <small>Options: {item.options.join(', ')}</small>}<small>{item.status}</small><Evidence ids={item.evidenceIds} onEvidence={onEvidence} evidenceLabel={evidenceLabel}/></li>)}</ul></section>
+  return <section className="structured-section"><h4><GitBranch size={15}/>Vấn đề chưa chốt</h4><ul>{items.map((item, index) => <li key={item.id || `unresolved-${index}`}><strong>{item.topic}</strong>{item.options.length > 0 && <small>Lựa chọn: {item.options.join(', ')}</small>}<small>{item.status === 'No final decision' ? 'Chưa có quyết định cuối cùng' : item.status}</small><Evidence ids={item.evidenceIds} onEvidence={onEvidence} evidenceLabel={evidenceLabel}/></li>)}</ul></section>
 }
 
 export function StructuredMeetingSummaryView({ summary, onEvidence, evidenceLabel }: { summary: StructuredMeetingSummary; onEvidence?: EvidenceHandler; evidenceLabel?: EvidenceLabel }) {
   return <div className="structured-summary">
-    {summary.tldr && <section className="structured-tldr"><h4><Sparkles size={15}/>TL;DR</h4><p>{summary.tldr}</p></section>}
+    {summary.tldr && <section className="structured-tldr"><h4><Sparkles size={15}/>Tóm tắt nhanh</h4><p>{summary.tldr}</p></section>}
     <BulletSection title="Ý chính" icon={Text} items={summary.keyPoints} onEvidence={onEvidence} evidenceLabel={evidenceLabel}/>
     <BulletSection title="Quyết định" icon={CheckCheck} items={summary.decisions} onEvidence={onEvidence} evidenceLabel={evidenceLabel}/>
     <BulletSection title="Quyết định dự kiến" icon={Clock3} items={summary.tentativeDecisions} onEvidence={onEvidence} evidenceLabel={evidenceLabel}/>

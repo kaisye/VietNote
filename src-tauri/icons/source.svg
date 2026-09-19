@@ -1,5 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffffff"/><stop offset=".52" stop-color="#ff9fcb"/><stop offset="1" stop-color="#ada8ff"/></linearGradient></defs>
-<rect x="16" y="16" width="480" height="480" rx="116" fill="url(#g)"/>
-<path d="M100 258h38l20-60 33 118 36-190 38 256 30-151 22 69 20-42h75" fill="none" stroke="#131a2e" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <defs>
+    <linearGradient id="brand" x1="72" y1="48" x2="448" y2="472" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset=".52" stop-color="#ff9fcb"/>
+      <stop offset="1" stop-color="#ada8ff"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="116" fill="url(#brand)"/>
+  <g fill="#131a2e">
+    <rect x="116" y="202" width="34" height="108" rx="17"/>
+    <rect x="178" y="157" width="34" height="198" rx="17"/>
+    <rect x="239" y="111" width="34" height="290" rx="17"/>
+    <rect x="300" y="157" width="34" height="198" rx="17"/>
+    <rect x="362" y="202" width="34" height="108" rx="17"/>
+  </g>
 </svg>

@@ -65,8 +65,10 @@ class Recognizer:
             from mlx_whisper.transcribe import ModelHolder
             ModelHolder.model = self.loaded_models[selected]
             ModelHolder.model_path = selected
-        previous = self.context[-120:].strip()
-        initial_prompt = previous or (VI_INITIAL_PROMPT if language == 'vi' else None) or None
+        # Previous recognized speech is output, not a reliable hint about this
+        # audio slice. Feeding it back can make Whisper repeat or paraphrase an
+        # earlier sentence when the next slice is quiet or unclear.
+        initial_prompt = (VI_INITIAL_PROMPT if language == 'vi' else None) or None
         result = self.transcribe(audio, path_or_hf_repo=selected, language=language,
                                 task='transcribe', temperature=0.0,
                                 initial_prompt=initial_prompt,
@@ -113,8 +115,7 @@ class PortableRecognizer:
 
     def recognize(self, audio, overlap, started, language='zh'):
         begin = time.monotonic()
-        previous = self.context[-120:].strip()
-        initial_prompt = previous or (VI_INITIAL_PROMPT if language == 'vi' else None) or None
+        initial_prompt = (VI_INITIAL_PROMPT if language == 'vi' else None) or None
         segments, _ = self.model.transcribe(audio, language=language, task='transcribe',
                                             temperature=0.0, initial_prompt=initial_prompt,
                                             condition_on_previous_text=False, vad_filter=False)
@@ -168,8 +169,7 @@ class GroqRecognizer:
 
     def recognize(self, audio, overlap, started, language='zh'):
         begin = time.monotonic()
-        previous = self.context[-120:].strip()
-        prompt = previous or (VI_INITIAL_PROMPT if language == 'vi' else None) or None
+        prompt = (VI_INITIAL_PROMPT if language == 'vi' else None) or None
         request = dict(
             file=('segment.wav', pcm_wav(audio), 'audio/wav'),
             model=self.model_name,

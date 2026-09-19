@@ -1,0 +1,195 @@
+name: Build installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: macOS Apple Silicon
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      VIETNOTE_BUILTIN_GROQ_API_KEY: ${{ secrets.VIETNOTE_GROQ_API_KEY }}
+      APPLE_SIGNING_IDENTITY: "-"
+    steps:
+      - name: Checkout clean source
+        uses: actions/checkout@v4
+        with:
+          clean: true
+
+      - name: Require release API key
+        shell: bash
+        run: |
+          test -n "$VIETNOTE_BUILTIN_GROQ_API_KEY"
+          test -f voices/thuc-day-di.zip
+          test -f voices/Ngoc-Huyen-7owuK1LaOPOaQjeSzmQ4.zip
+          test -f vendor/cpal/Cargo.toml
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: asr/requirements-release.txt
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build portable audio worker
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check -r asr/requirements-release.txt
+          python -m PyInstaller --noconfirm --clean --onedir \
+            --name vietnote-worker \
+            --distpath worker-dist \
+            --workpath worker-build \
+            --specpath worker-build \
+            --paths "$GITHUB_WORKSPACE/asr" \
+            --collect-all zerotts \
+            --collect-all tokenizers \
+            asr/server.py
+          worker-dist/vietnote-worker/vietnote-worker --help >/dev/null
+
+      - name: Build macOS installer
+        run: npm run tauri build -- --bundles dmg --config src-tauri/tauri.release.conf.json
+
+      - name: Upload macOS installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: VietNote-macOS-arm64
+          path: src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          compression-level: 0
+
+  windows:
+    name: Windows x64
+    runs-on: windows-2022
+    timeout-minutes: 60
+    env:
+      VIETNOTE_BUILTIN_GROQ_API_KEY: ${{ secrets.VIETNOTE_GROQ_API_KEY }}
+    steps:
+      - name: Checkout clean source
+        uses: actions/checkout@v4
+        with:
+          clean: true
+
+      - name: Require release API key
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:VIETNOTE_BUILTIN_GROQ_API_KEY)) {
+            throw "Missing repository secret VIETNOTE_GROQ_API_KEY"
+          }
+          foreach ($file in @('voices/thuc-day-di.zip', 'voices/Ngoc-Huyen-7owuK1LaOPOaQjeSzmQ4.zip', 'vendor/cpal/Cargo.toml')) {
+            if (-not (Test-Path $file)) { throw "Missing release resource: $file" }
+          }
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: asr/requirements-release.txt
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build portable audio worker
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check -r asr/requirements-release.txt
+          python -m PyInstaller --noconfirm --clean --onedir `
+            --name vietnote-worker `
+            --distpath worker-dist `
+            --workpath worker-build `
+            --specpath worker-build `
+            --paths "$env:GITHUB_WORKSPACE\asr" `
+            --collect-all zerotts `
+            --collect-all tokenizers `
+            asr/server.py
+          .\worker-dist\vietnote-worker\vietnote-worker.exe --help | Out-Null
+
+      - name: Build Windows installer
+        run: npm run tauri build -- --bundles nsis --config src-tauri/tauri.release.conf.json
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: VietNote-Windows-x64
+          path: src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          compression-level: 0
+
+  release:
+    name: Publish tagged release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download installers
+        uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+
+      - name: Remove old assets for this tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            while IFS= read -r asset; do
+              if [[ -n "$asset" ]]; then
+                gh release delete-asset "$GITHUB_REF_NAME" "$asset" --repo "$GITHUB_REPOSITORY" --yes
+              fi
+            done < <(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          fi
+
+      - name: Replace release installers
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            installers/*.dmg
+            installers/*-setup.exe
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          overwrite_files: true

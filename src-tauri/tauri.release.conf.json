@@ -1,0 +1,5 @@
+{
+  "bundle": {
+    "resources": ["../asr", "../voices", "../worker-dist"]
+  }
+}

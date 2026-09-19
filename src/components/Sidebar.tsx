@@ -14,6 +14,6 @@ export function Sidebar({ page, setPage, dark, toggleTheme, model }: { page: Pag
     <div className="sidebar-caption">KHÔNG GIAN LÀM VIỆC</div>
     <nav className="sidebar-nav">{pages.map(({ key, title, Icon }) => <button key={key} className={`nav-item ${page === key ? 'active' : ''}`} onClick={() => setPage(key)}><Icon size={18}/><span>{title}</span>{key === 'notes' && <small>{model.notes.length}</small>}</button>)}</nav>
     <div className="sidebar-spacer"/>
-    <div className="worker-badge"><div><span className={`status-dot ${model.ready ? 'ready' : ''}`}/><strong>{model.ready ? 'ASR sẵn sàng' : 'Đang tải ASR'}</strong></div><small>GPT‑5.5 · API local</small></div>
+    <div className="worker-badge"><div><span className={`status-dot ${model.ready ? 'ready' : ''}`}/><strong>{model.ready ? 'Sẵn sàng' : 'Đang khởi động'}</strong></div><small>VietNote</small></div>
   </aside>
 }

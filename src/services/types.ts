@@ -8,7 +8,7 @@ export interface NoteGroup { id: string; name: string }
 export interface MeetingNote {
   id: string; title: string; createdAt: string; updatedAt: string; duration: number;
   summary: string; transcript: string; groupID?: string | null; isDemo?: boolean;
-  structuredSummary?: StructuredMeetingSummary; transcriptSegments?: TranscriptSegment[]
+  structuredSummary?: StructuredMeetingSummary; transcriptSegments?: TranscriptSegment[]; saving?: boolean
 }
 export interface Subtitle {
   id: string; timestamp: string; sourceText: string; audioSource: string;

@@ -13,10 +13,9 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager};
 
-const DEFAULT_SUMMARY_API: &str = "http://127.0.0.1:20128/v1";
-const DEFAULT_SUMMARY_MODEL: &str = "cx/gpt-5.5";
 const GROQ_CHAT_API: &str = "https://api.groq.com/openai/v1";
 const GROQ_GPT_OSS_120B: &str = "openai/gpt-oss-120b";
+const DEFAULT_TTS_VOICE: &str = "thuc-day-di";
 
 #[derive(Default)]
 struct NativeState {
@@ -30,6 +29,7 @@ struct NativeState {
 const AI_KEY_SERVICE: &str = "local.vietnote.desktop";
 const GROQ_KEY_ACCOUNT: &str = "groq-asr-api-key";
 const NINE_ROUTER_KEY_ACCOUNT: &str = "9router-api-key";
+const ACCESS_KEY_ACCOUNT: &str = "vietnote-access-key";
 
 fn normalize_ai_provider(provider: &str) -> Result<&'static str, String> {
     match provider.trim().to_lowercase().as_str() {
@@ -62,14 +62,52 @@ fn provider_env_key(provider: &str) -> Option<String> {
     std::env::var(name).ok().filter(|key| !key.trim().is_empty())
 }
 
-fn stored_groq_key() -> Result<Option<String>, String> { stored_provider_key("groq") }
+fn built_in_groq_key() -> Option<String> {
+    option_env!("VIETNOTE_BUILTIN_GROQ_API_KEY")
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+        .map(str::to_string)
+}
+
+fn resolved_provider_key(provider: &str) -> Option<String> {
+    stored_provider_key(provider).ok().flatten()
+        .or_else(|| provider_env_key(provider))
+        .or_else(|| (provider == "groq").then(built_in_groq_key).flatten())
+}
+
+fn stored_groq_key() -> Option<String> { resolved_provider_key("groq") }
 
 #[tauri::command]
 fn ai_key_status(provider: String) -> Result<String, String> {
     let provider = normalize_ai_provider(&provider)?;
     if stored_provider_key(provider)?.is_some() { return Ok("saved".into()); }
     if provider_env_key(provider).is_some() { return Ok("environment".into()); }
+    if provider == "groq" && built_in_groq_key().is_some() { return Ok("environment".into()); }
     Ok("none".into())
+}
+
+fn access_key_entry() -> Result<keyring::Entry, String> {
+    keyring::Entry::new(AI_KEY_SERVICE, ACCESS_KEY_ACCOUNT)
+        .map_err(|_| "Không truy cập được kho mật khẩu hệ thống".to_string())
+}
+
+#[tauri::command]
+fn access_key_status() -> Result<bool, String> {
+    match access_key_entry()?.get_password() {
+        Ok(value) => Ok(!value.trim().is_empty()),
+        Err(keyring::Error::NoEntry) => Ok(false),
+        Err(_) => Err("Không đọc được key VietNote từ kho mật khẩu hệ thống".into()),
+    }
+}
+
+#[tauri::command]
+fn set_access_key(access_key: String) -> Result<bool, String> {
+    let key = access_key.trim();
+    if key.is_empty() { return Err("Vui lòng nhập key".into()); }
+    if key.chars().any(char::is_whitespace) { return Err("Key không được chứa khoảng trắng".into()); }
+    access_key_entry()?.set_password(key)
+        .map_err(|_| "Không lưu được key vào kho mật khẩu hệ thống")?;
+    Ok(true)
 }
 
 #[tauri::command]
@@ -114,10 +152,79 @@ struct SummaryAiConfig {
     provider: String,
 }
 
-fn default_summary_provider() -> String { "nine_router".into() }
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TtsVoiceOption {
+    id: String,
+    display_name: String,
+    description: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TtsVoiceConfig {
+    selected_id: String,
+    voices: Vec<TtsVoiceOption>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StoredTtsVoice { selected_id: String }
+
+fn tts_voice_definitions() -> [(&'static str, &'static str, &'static str, &'static str); 2] {
+    [
+        ("thuc-day-di", "Giọng Nam", "Trung niên", "thuc-day-di.zip"),
+        ("ngoc-huyen", "Giọng Nữ", "Kể truyện · review phim", "Ngoc-Huyen-7owuK1LaOPOaQjeSzmQ4.zip"),
+    ]
+}
+
+fn selected_tts_voice_id(app: &tauri::AppHandle) -> Result<String, String> {
+    let path = app_data(app)?.join("tts-voice.json");
+    let selected = fs::read(path).ok()
+        .and_then(|data| serde_json::from_slice::<StoredTtsVoice>(&data).ok())
+        .map(|settings| settings.selected_id)
+        .unwrap_or_else(|| DEFAULT_TTS_VOICE.into());
+    Ok(tts_voice_definitions().iter().find(|voice| voice.0 == selected).map(|voice| voice.0).unwrap_or(DEFAULT_TTS_VOICE).into())
+}
+
+fn tts_voice_config(app: &tauri::AppHandle) -> Result<TtsVoiceConfig, String> {
+    Ok(TtsVoiceConfig {
+        selected_id: selected_tts_voice_id(app)?,
+        voices: tts_voice_definitions().iter().map(|voice| TtsVoiceOption {
+            id: voice.0.into(), display_name: voice.1.into(), description: voice.2.into(),
+        }).collect(),
+    })
+}
+
+#[tauri::command]
+fn get_tts_voice_config(app: tauri::AppHandle) -> Result<TtsVoiceConfig, String> { tts_voice_config(&app) }
+
+#[tauri::command]
+fn set_tts_voice(app: tauri::AppHandle, state: tauri::State<'_, NativeState>, voice_id: String) -> Result<TtsVoiceConfig, String> {
+    if !state.captures.lock().map_err(|e| e.to_string())?.is_empty() {
+        return Err("Hãy dừng ghi âm trước khi đổi giọng đọc".into());
+    }
+    let definition = tts_voice_definitions().into_iter().find(|voice| voice.0 == voice_id)
+        .ok_or("Giọng đọc không hợp lệ")?;
+    let root = project_root(&app)?;
+    if !root.join("voices").join(definition.3).exists() {
+        return Err(format!("Không tìm thấy gói giọng {}", definition.1));
+    }
+    let dir = app_data(&app)?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    fs::write(
+        dir.join("tts-voice.json"),
+        serde_json::to_vec(&json!({ "selectedId": definition.0 })).map_err(|e| e.to_string())?,
+    ).map_err(|e| e.to_string())?;
+    stop_worker(state.clone())?;
+    start_worker(app.clone(), state)?;
+    tts_voice_config(&app)
+}
+
+fn default_summary_provider() -> String { "groq".into() }
 
 impl Default for SummaryAiConfig {
-    fn default() -> Self { Self { api_url: DEFAULT_SUMMARY_API.into(), model: DEFAULT_SUMMARY_MODEL.into(), provider: default_summary_provider() } }
+    fn default() -> Self { Self { api_url: GROQ_CHAT_API.into(), model: GROQ_GPT_OSS_120B.into(), provider: default_summary_provider() } }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -274,14 +381,20 @@ fn project_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Err("Không tìm thấy asr/server.py trong tài nguyên ứng dụng".into())
 }
 
-fn python_executable(root: &Path) -> Result<PathBuf, String> {
+fn worker_executable(root: &Path) -> Result<(PathBuf, bool), String> {
+    let packaged = if cfg!(windows) {
+        root.join("worker-dist/vietnote-worker/vietnote-worker.exe")
+    } else {
+        root.join("worker-dist/vietnote-worker/vietnote-worker")
+    };
+    if packaged.exists() { return Ok((packaged, true)); }
     let bundled = if cfg!(windows) { root.join(".venv/Scripts/python.exe") } else { root.join(".venv/bin/python") };
-    if bundled.exists() { return Ok(bundled); }
+    if bundled.exists() { return Ok((bundled, false)); }
     if let Some(path) = std::env::var_os("VIETNOTE_PYTHON") {
         let path = PathBuf::from(path);
-        if path.exists() { return Ok(path); }
+        if path.exists() { return Ok((path, false)); }
     }
-    Err(format!("Thiếu Python runtime ở {}. Chạy bootstrap cho hệ điều hành này hoặc đặt VIETNOTE_PYTHON.", bundled.display()))
+    Err("Thiếu bộ xử lý âm thanh đi kèm ứng dụng".into())
 }
 
 #[tauri::command]
@@ -289,22 +402,31 @@ fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> 
     let mut slot = state.child.lock().map_err(|e| e.to_string())?;
     if slot.as_mut().is_some_and(|child| child.try_wait().ok().flatten().is_none()) { return Ok(()); }
     let root = project_root(&app)?;
-    let python = python_executable(&root)?;
+    let (worker, packaged_worker) = worker_executable(&root)?;
+    let selected_voice = selected_tts_voice_id(&app)?;
+    let voice_file = tts_voice_definitions().into_iter().find(|voice| voice.0 == selected_voice)
+        .map(|voice| voice.3).unwrap_or("thuc-day-di.zip");
     // A locked/unavailable OS credential store must not prevent offline ASR.
-    let groq_key = stored_groq_key().ok().flatten().or_else(|| std::env::var("GROQ_API_KEY").ok());
+    let groq_key = stored_groq_key();
     let token = format!("{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos());
     let logs = app_data(&app)?.join("logs");
     fs::create_dir_all(&logs).map_err(|e| e.to_string())?;
-    let logfile = fs::File::create(logs.join("worker.log")).map_err(|e| e.to_string())?;
+    // Preserve earlier sessions when the worker restarts; otherwise the only
+    // evidence for intermittent ASR repetition disappears on every launch.
+    let mut logfile = fs::OpenOptions::new().create(true).append(true)
+        .open(logs.join("worker.log")).map_err(|e| e.to_string())?;
+    writeln!(logfile, "\n[WORKER START] {} · voice={selected_voice}", chrono::Local::now())
+        .map_err(|e| e.to_string())?;
+    let stderr_log = logfile.try_clone().map_err(|e| e.to_string())?;
     let cache = if root.join(".venv").exists() { root.join(".cache/huggingface") } else { app_data(&app)?.join("cache/huggingface") };
     fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
-    let mut command = Command::new(python);
-    command.args(["-u", "asr/server.py"])
-        .current_dir(&root)
+    let mut command = Command::new(worker);
+    if !packaged_worker { command.args(["-u", "asr/server.py"]); }
+    command.current_dir(&root)
         .env("ASR_TOKEN", &token)
         .env("HF_HOME", cache)
-        .env("TTS_VOICE_PATH", root.join("voices/thuc-day-di.zip"))
-        .stdout(Stdio::piped()).stderr(Stdio::from(logfile));
+        .env("TTS_VOICE_PATH", root.join("voices").join(voice_file))
+        .stdout(Stdio::piped()).stderr(Stdio::from(stderr_log));
     if let Some(key) = groq_key.filter(|key| !key.trim().is_empty()) {
         command.env("GROQ_API_KEY", key);
     } else {
@@ -318,8 +440,11 @@ fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> 
     let epoch_counter = state.worker_epoch.clone();
     let epoch = epoch_counter.fetch_add(1, Ordering::SeqCst) + 1;
     std::thread::spawn(move || {
-        if epoch_counter.load(Ordering::SeqCst) == epoch { let _ = app.emit("worker-status", "Loading ASR + ZeroTTS…"); }
+        if epoch_counter.load(Ordering::SeqCst) == epoch { let _ = app.emit("worker-status", "Loading services…"); }
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            // Python writes ASR/TTS diagnostics to stdout; retain them alongside
+            // stderr so a future repeated segment can be traced to its source.
+            let _ = writeln!(logfile, "{line}");
             if epoch_counter.load(Ordering::SeqCst) != epoch { break; }
             let Ok(event) = serde_json::from_str::<Value>(&line) else { continue };
             if event.get("type").and_then(Value::as_str) != Some("ready") { continue; }
@@ -338,13 +463,13 @@ fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> 
                             }
                             if epoch_counter.load(Ordering::SeqCst) == epoch {
                                 if let Ok(mut slot) = writer.lock() { *slot = None; }
-                                let _ = app.emit("worker-status", "ASR connection closed");
+                                let _ = app.emit("worker-status", "Service connection closed");
                             }
                         }
-                        Err(error) => { let _ = app.emit("worker-status", format!("ASR connection failed: {error}")); }
+                        Err(_) => { let _ = app.emit("worker-status", "Service connection failed"); }
                     }
                 }
-                Err(error) => { let _ = app.emit("worker-status", format!("ASR connection failed: {error}")); }
+                Err(_) => { let _ = app.emit("worker-status", "Service connection failed"); }
             }
             break;
         }
@@ -440,10 +565,10 @@ async fn ai_completion(app: &tauri::AppHandle, system: &str, user: String, max_t
     let client = reqwest::Client::builder().timeout(Duration::from_secs(90)).build().map_err(|e| e.to_string())?;
     let request = client.post(endpoint).json(&body);
     let response = if is_groq {
-        let key = stored_provider_key("groq").ok().flatten().or_else(|| provider_env_key("groq"))
+        let key = resolved_provider_key("groq")
             .filter(|key| !key.trim().is_empty())
-            .ok_or("Chưa có Groq API key. Vào Cài đặt để lưu key trước khi dùng GPT-OSS 120B.")?;
-        request.bearer_auth(key).send().await.map_err(|e| format!("Không gọi được Groq: {e}"))?
+            .ok_or("Dịch vụ xử lý tạm thời chưa sẵn sàng.")?;
+        request.bearer_auth(key).send().await.map_err(|_| "Không kết nối được dịch vụ xử lý".to_string())?
     } else {
         let request = match stored_provider_key("nine_router").ok().flatten().or_else(|| provider_env_key("nine_router")) {
             Some(key) => request.bearer_auth(key),
@@ -453,11 +578,7 @@ async fn ai_completion(app: &tauri::AppHandle, system: &str, user: String, max_t
     };
     if !response.status().is_success() {
         let status = response.status();
-        let detail = response.text().await.unwrap_or_default();
-        let parsed_detail = serde_json::from_str::<Value>(&detail).ok()
-            .and_then(|value| value.pointer("/error/message").and_then(Value::as_str).map(str::to_string))
-            .unwrap_or_else(|| detail.chars().take(300).collect());
-        return Err(format!("{} trả về HTTP {status}: {parsed_detail}", if is_groq { "Groq" } else { "9Router" }));
+        return Err(format!("Dịch vụ xử lý tạm thời không khả dụng (HTTP {status})"));
     }
     let data: Value = response.json().await.map_err(|e| e.to_string())?;
     data.pointer("/choices/0/message/content").and_then(Value::as_str).map(str::trim).filter(|text| !text.is_empty()).map(str::to_string)
@@ -571,7 +692,7 @@ fn open_permission(kind: String) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .manage(NativeState::default())
-        .invoke_handler(tauri::generate_handler![load_notes, save_notes, get_summary_ai_config, set_summary_ai_config, ai_key_status, set_ai_api_key, start_worker, stop_worker, send_worker, start_capture, stop_capture, summarize_segments, translate_text, open_permission])
+        .invoke_handler(tauri::generate_handler![load_notes, save_notes, get_summary_ai_config, set_summary_ai_config, get_tts_voice_config, set_tts_voice, ai_key_status, set_ai_api_key, access_key_status, set_access_key, start_worker, stop_worker, send_worker, start_capture, stop_capture, summarize_segments, translate_text, open_permission])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 let state = window.app_handle().state::<NativeState>();

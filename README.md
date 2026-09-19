@@ -105,6 +105,14 @@ Mở PowerShell trong thư mục dự án và chạy:
 
 Script sẽ tạo `.venv`, cài dependency Python và npm, sau đó build ứng dụng bằng Tauri.
 
+## Bộ cài phát hành qua GitHub Actions
+
+Workflow [build-installers.yml](.github/workflows/build-installers.yml) tạo hai artifact: DMG cho macOS Apple Silicon và EXE NSIS cho Windows x64. Chạy thủ công từ tab Actions hoặc đẩy tag `v*`; tag sẽ tạo GitHub Release và thay toàn bộ asset cũ của tag đó bằng hai bộ cài mới.
+
+Repository cần có secret `VIETNOTE_GROQ_API_KEY` trước khi chạy. Workflow nhúng key này khi biên dịch, không lưu key trong mã nguồn. Hãy đưa `vendor/cpal/` và cả hai tệp ZIP trong `voices/` vào commit phát hành; workflow kiểm tra các tài nguyên này trước khi build.
+
+Bản phát hành đóng gói worker Python cho API nhận diện và ZeroTTS, không cài Whisper cục bộ. Model ZeroTTS được tải và lưu vào cache khi chạy lần đầu. DMG hiện ký ad hoc; muốn người dùng macOS mở trực tiếp mà không gặp cảnh báo Gatekeeper cần thêm chứng chỉ Developer ID và notarization.
+
 ## Cấu hình nhận diện giọng nói
 
 VietNote hỗ trợ hai chế độ ASR:
@@ -112,7 +120,7 @@ VietNote hỗ trợ hai chế độ ASR:
 - **Groq:** dùng `whisper-large-v3` qua API tương thích OpenAI khi có `GROQ_API_KEY`.
 - **Local fallback:** tiếng Việt dùng PhoWhisper-medium; tiếng Anh và tiếng Trung dùng Whisper Turbo.
 
-Người dùng có thể vào **Cài đặt → Tóm tắt & dịch AI**, chọn Groq và nhập API key. Key được lưu riêng trong **macOS Keychain** hoặc **Windows Credential Manager**, không được ghi vào ghi chú, `localStorage` hay repository.
+Trong bản phát hành, key miễn phí được nhúng lúc build từ GitHub Secret. Mục **Nhập Key** trong giao diện dành cho key VietNote nâng hạn mức về sau, không thay đổi key API dịch vụ.
 
 Cũng có thể cung cấp key bằng biến môi trường trước khi chạy ứng dụng:
 

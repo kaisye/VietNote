@@ -33,10 +33,10 @@ describe('noteMoments', () => {
       openQuestions: [],
       deferred: [],
     })
-    expect(text).toContain('DECISIONS\n• Dùng FastAPI.')
-    expect(text).toContain('Qdrant, Chroma · No final decision')
+    expect(text).toContain('QUYẾT ĐỊNH\n• Dùng FastAPI.')
+    expect(text).toContain('Qdrant, Chroma · Chưa có quyết định cuối cùng')
     expect(text).toContain('Minh → Test Qdrant và Chroma')
-    expect(text).not.toContain('TENTATIVE DECISIONS')
+    expect(text).not.toContain('QUYẾT ĐỊNH TẠM THỜI')
     expect(text).not.toContain('undefined')
   })
 })
