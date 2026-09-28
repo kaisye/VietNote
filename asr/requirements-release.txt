@@ -1,4 +1,5 @@
 numpy>=1.26,<3
 openai>=2,<3
+websocket-client>=1.8,<2
 zerotts==0.1.5
 pyinstaller>=6.12,<7

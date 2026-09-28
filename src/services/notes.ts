@@ -1,4 +1,4 @@
-import type { MeetingNote, NoteGroup, StructuredMeetingSummary, TranscriptSegment } from './types'
+import type { MeetingNote, NoteGroup, StructuredMeetingSummary, TranscriptSegment, Subtitle } from './types'
 
 export const emptyStructuredSummary = (): StructuredMeetingSummary => ({
   tldr: '', keyPoints: [], decisions: [], tentativeDecisions: [], unresolvedTopics: [],
@@ -19,8 +19,8 @@ export function formatStructuredSummary(summary: StructuredMeetingSummary): stri
   return blocks.join('\n\n')
 }
 
-export function toTranscriptSegment(entry: { id: string; timestamp: string; startedAt: number; audioSource: string; sourceText: string; rawText?: string }): TranscriptSegment {
-  return { id: entry.id, timestamp: entry.timestamp, startedAt: entry.startedAt, audioSource: entry.audioSource, rawText: entry.rawText ?? entry.sourceText, cleanText: entry.sourceText }
+export function toTranscriptSegment(entry: Pick<Subtitle, 'id' | 'timestamp' | 'startedAt' | 'audioSource' | 'sourceText' | 'rawText' | 'endedAt' | 'speaker' | 'speakerProvisional'>): TranscriptSegment {
+  return { id: entry.id, timestamp: entry.timestamp, startedAt: entry.startedAt, audioSource: entry.audioSource, rawText: entry.rawText ?? entry.sourceText, cleanText: entry.sourceText, endedAt: entry.endedAt, speaker: entry.speaker, speakerProvisional: entry.speakerProvisional }
 }
 
 export interface NoteMoment { id: number; title: string; overview: string[]; decisions: string[]; actions: string[] }

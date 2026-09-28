@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 if [[ "$(uname -m)" != arm64 ]]; then
-  echo 'This checkout targets the inspected Apple Silicon Mac; Intel needs a whisper.cpp backend.' >&2
+  echo 'This checkout targets Apple Silicon Macs.' >&2
   exit 1
 fi
 command -v brew >/dev/null || { echo 'Homebrew required: https://brew.sh'; exit 1; }
@@ -15,4 +15,3 @@ if [[ "${INSTALL_FFMPEG:-0}" == 1 ]] && ! command -v ffmpeg >/dev/null; then bre
 .venv/bin/python -m pip install -r asr/requirements.txt
 mkdir -p .cache/huggingface logs build
 npm install
-.venv/bin/python asr/install_phowhisper.py

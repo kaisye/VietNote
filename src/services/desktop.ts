@@ -1,10 +1,12 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import type { AudioInput, Language, MeetingNote, NoteGroup, StructuredMeetingSummary, TranscriptSegment, WorkerMessage } from './types'
+import type { AudioChunk, AudioInput, SpokenLanguage, MeetingNote, NoteGroup, StructuredMeetingSummary, TranscriptSegment, WorkerMessage } from './types'
 
 export interface StoredNotes { notes: MeetingNote[]; groups: NoteGroup[] }
 export type SummaryAiProvider = 'nine_router' | 'groq'
+export type AiKeyProvider = SummaryAiProvider | 'gemini'
 export interface SummaryAiConfig { apiUrl: string; model: string; provider: SummaryAiProvider }
+export interface AiProviderHealth { ready: boolean; message: string }
 export type TtsVoiceId = 'thuc-day-di' | 'ngoc-huyen'
 export interface TtsVoiceOption { id: TtsVoiceId; displayName: string; description: string }
 export interface TtsVoiceConfig { selectedId: TtsVoiceId; voices: TtsVoiceOption[] }
@@ -20,20 +22,23 @@ export const desktop = {
   },
   getSummaryAiConfig: () => invoke<SummaryAiConfig>('get_summary_ai_config'),
   setSummaryAiConfig: (config: SummaryAiConfig) => invoke<SummaryAiConfig>('set_summary_ai_config', { config }),
+  checkAiProvider: (provider: AiKeyProvider) => invoke<AiProviderHealth>('check_ai_provider', { provider }),
   getTtsVoiceConfig: () => invoke<TtsVoiceConfig>('get_tts_voice_config'),
   setTtsVoice: (voiceId: TtsVoiceId) => invoke<TtsVoiceConfig>('set_tts_voice', { voiceId }),
   startWorker: () => invoke<void>('start_worker'),
-  aiKeyStatus: (provider: SummaryAiProvider) => invoke<'saved' | 'environment' | 'none'>('ai_key_status', { provider }),
-  setAiApiKey: (provider: SummaryAiProvider, apiKey: string | null) => invoke<'saved' | 'environment' | 'none'>('set_ai_api_key', { provider, apiKey }),
+  aiKeyStatus: (provider: AiKeyProvider) => invoke<'saved' | 'environment' | 'none'>('ai_key_status', { provider }),
+  setAiApiKey: (provider: AiKeyProvider, apiKey: string | null) => invoke<'saved' | 'environment' | 'none'>('set_ai_api_key', { provider, apiKey }),
   accessKeyStatus: () => invoke<boolean>('access_key_status'),
   setAccessKey: (accessKey: string) => invoke<boolean>('set_access_key', { accessKey }),
   stopWorker: () => invoke<void>('stop_worker'),
   sendWorker: (payload: Record<string, unknown>) => invoke<void>('send_worker', { payload }),
   startCapture: (source: AudioInput) => invoke<void>('start_capture', { source }),
   stopCapture: () => invoke<void>('stop_capture'),
+  playAudio: (chunks: AudioChunk[], rate: number) => invoke<void>('play_audio', { chunks, rate }),
+  stopAudio: () => invoke<void>('stop_audio'),
   summarizeSegments: (segments: TranscriptSegment[], previousSummary?: StructuredMeetingSummary) =>
     invoke<StructuredMeetingSummary>('summarize_segments', { segments, previousSummary: previousSummary ?? null }),
-  translateParagraph: (text: string, sourceLanguage: Language, previousContext: string) => invoke<string>('translate_text', { text, sourceLanguage, previousContext }),
+  translateParagraph: (text: string, sourceLanguage: SpokenLanguage, previousContext: string) => invoke<string>('translate_text', { text, sourceLanguage, previousContext }),
   openPermission: (kind: 'microphone' | 'screen') => invoke<void>('open_permission', { kind }),
   onWorker: (callback: (event: WorkerMessage) => void): Promise<UnlistenFn> => listen<WorkerMessage>('worker-message', e => callback(e.payload)),
   onStatus: (callback: (status: string) => void): Promise<UnlistenFn> => listen<string>('worker-status', e => callback(e.payload)),

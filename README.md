@@ -8,7 +8,8 @@ Dự án sử dụng **Tauri + React + TypeScript** cho ứng dụng desktop, **
 
 - Thu âm từ **microphone**, **âm thanh hệ thống** hoặc **cả hai**. Nguồn mặc định là cả hai.
 - Nhận diện giọng nói tiếng Việt, tiếng Anh và tiếng Trung theo thời gian thực.
-- Dịch tiếng Anh và tiếng Trung sang tiếng Việt **theo đoạn**: gom đủ ngữ cảnh, chuẩn hóa lỗi nhận diện rồi mới dịch.
+- Dịch trực tiếp tiếng Anh và tiếng Trung sang tiếng Việt bằng **Gemini 3.5 Live Translate**, gồm chữ và âm thanh tiếng Việt độ trễ thấp.
+- Tự động dùng dịch theo đoạn qua API local/Groq khi backend nhận diện không phải Gemini.
 - Tóm tắt trực tiếp theo số từ hoặc khoảng thời gian do người dùng lựa chọn.
 - Hiển thị riêng:
   - **Tổng quan cuộc họp** được cập nhật tích lũy.
@@ -34,11 +35,11 @@ Luồng xử lý chính:
 
 ```text
 Microphone / âm thanh hệ thống
-→ phát hiện và chia đoạn giọng nói bằng VAD
-→ nhận diện giọng nói bằng Groq Whisper hoặc model local
+→ stream PCM 16 kHz trực tiếp tới Gemini Live (hoặc chia đoạn bằng VAD cho backend cũ)
+→ nhận transcript tạm thời và transcript hoàn tất
 → chuẩn hóa thuật ngữ có kiểm soát
 → transcript có ID và thời gian ổn định
-→ dịch theo đoạn nếu ngôn ngữ nguồn không phải tiếng Việt
+→ Gemini Live dịch thẳng Anh/Trung → Việt; backend khác dùng dịch theo đoạn
 → tóm tắt cuộc họp có cấu trúc
 → kiểm tra dẫn chứng và liên kết về transcript
 → lưu ghi chú cuối cùng từ toàn bộ transcript
@@ -75,7 +76,7 @@ cd mac-live-translator
 TASK_CARGO_BIN="$HOME/.cargo/bin" ./scripts/dev-tauri.sh
 ```
 
-`bootstrap.sh` tạo môi trường Python tại `.venv`, cài dependency ASR, cài package npm và tải/chuyển đổi PhoWhisper cho Apple Silicon. Quá trình đầu tiên có thể mất nhiều thời gian vì cần tải model.
+`bootstrap.sh` tạo môi trường Python tại `.venv`, cài dependency ASR, và cài package npm.
 
 Nếu cần `ffmpeg` để chuyển đổi các định dạng âm thanh phục vụ debug:
 
@@ -111,29 +112,34 @@ Workflow [build-installers.yml](.github/workflows/build-installers.yml) tạo ha
 
 Repository cần có secret `VIETNOTE_GROQ_API_KEY` trước khi chạy. Workflow nhúng key này khi biên dịch, không lưu key trong mã nguồn. Hãy đưa `vendor/cpal/` và cả hai tệp ZIP trong `voices/` vào commit phát hành; workflow kiểm tra các tài nguyên này trước khi build.
 
-Bản phát hành đóng gói worker Python cho API nhận diện và ZeroTTS, không cài Whisper cục bộ. Model ZeroTTS được tải và lưu vào cache khi chạy lần đầu. DMG hiện ký ad hoc; muốn người dùng macOS mở trực tiếp mà không gặp cảnh báo Gatekeeper cần thêm chứng chỉ Developer ID và notarization.
+Bản phát hành đóng gói worker Python cho API nhận diện và ZeroTTS, không cần model nhận diện cục bộ. Model ZeroTTS được tải và lưu vào cache khi chạy lần đầu. DMG hiện ký ad hoc; muốn người dùng macOS mở trực tiếp mà không gặp cảnh báo Gatekeeper cần thêm chứng chỉ Developer ID và notarization.
 
 ## Cấu hình nhận diện giọng nói
 
-VietNote hỗ trợ hai chế độ ASR:
+VietNote hỗ trợ hai chế độ ASR, cả hai đều cần API key:
 
+- **Gemini Live (ưu tiên):** stream PCM 16-bit trực tiếp tới `gemini-3.5-transcribe-live`, hiển thị interim transcript và tự nối phiên trước giới hạn 10 phút.
 - **Groq:** dùng `whisper-large-v3` qua API tương thích OpenAI khi có `GROQ_API_KEY`.
-- **Local fallback:** tiếng Việt dùng PhoWhisper-medium; tiếng Anh và tiếng Trung dùng Whisper Turbo.
 
 Trong bản phát hành, key miễn phí được nhúng lúc build từ GitHub Secret. Mục **Nhập Key** trong giao diện dành cho key VietNote nâng hạn mức về sau, không thay đổi key API dịch vụ.
 
 Cũng có thể cung cấp key bằng biến môi trường trước khi chạy ứng dụng:
 
 ```bash
-export GROQ_API_KEY="gsk_..."
+export GEMINI_API_KEY="..."
 TASK_CARGO_BIN="$HOME/.cargo/bin" ./scripts/dev-tauri.sh
 ```
+
+Bạn cũng có thể nhập Gemini API key tại **Cài đặt → Gemini 3.5 Transcribe + Live Translate**. Key được lưu trong Keychain/Credential Manager; frontend không đọc được giá trị key.
 
 Các biến môi trường tùy chọn:
 
 | Biến | Giá trị | Mặc định | Mô tả |
 | --- | --- | --- | --- |
-| `ASR_BACKEND` | `local`, `groq`, `auto` | `auto` | Chọn backend nhận diện giọng nói |
+| `ASR_BACKEND` | `groq`, `gemini`, `auto` | `auto` | Chọn backend; `auto` ưu tiên Gemini, rồi Groq |
+| `GEMINI_API_KEY` | API key Google AI | trống | Bật Gemini Live khi backend là `auto` hoặc `gemini` |
+| `GEMINI_ASR_MODEL` | Tên model Gemini | `gemini-3.5-transcribe-live` | Model Live Transcription cho tiếng Việt |
+| `GEMINI_LIVE_TRANSLATE_MODEL` | Tên model Gemini | `gemini-3.5-live-translate-preview` | Dịch realtime Anh/Trung → Việt |
 | `GROQ_ASR_MODEL` | Tên model Groq | `whisper-large-v3` | Model dùng cho ASR Groq |
 | `GROQ_BASE_URL` | URL API | API chính thức của Groq | Ghi đè endpoint Groq |
 | `VIETNOTE_PYTHON` | Đường dẫn Python | Python trong `.venv` | Ghi đè Python chạy worker |
@@ -155,6 +161,8 @@ Model:    cx/gpt-5.5
 
 Endpoint, model ID và API key đều có thể thay đổi trong ứng dụng. Nếu server local không yêu cầu xác thực thì API key là tùy chọn. Key cũng có thể được cung cấp qua `NINE_ROUTER_API_KEY`.
 
+VietNote không cài hoặc chọn sẵn Qwen/Ollama cho dịch và tóm tắt. Các cấu hình cũ dùng model Qwen được tự động chuyển về API local mặc định ở trên.
+
 ### Groq
 
 Groq sử dụng model `openai/gpt-oss-120b` cho dịch và tóm tắt. Cùng một Groq key được dùng cho ASR mà không đưa key ra phía React.
@@ -174,7 +182,7 @@ Khi thay đổi API key, worker ASR sẽ được khởi động lại. Hãy d�
    - Tiếng Trung → Tiếng Việt
 4. Chọn nhịp cập nhật tóm tắt theo số từ hoặc số phút.
 5. Nhấn **Bắt đầu tóm tắt** và cấp quyền hệ thống khi được yêu cầu.
-6. Theo dõi transcript, bản dịch theo đoạn, tổng quan cuộc họp và nội dung mới nhất.
+6. Theo dõi transcript, bản dịch Gemini Live, tổng quan cuộc họp và nội dung mới nhất.
 7. Nhấn **Kết thúc & lưu** để tạo ghi chú từ toàn bộ transcript.
 
 ## Cách VietNote tạo bản tóm tắt
@@ -234,10 +242,57 @@ File đầu vào cần là WAV mono, PCM16, 16 kHz:
 ./scripts/debug.sh /duong-dan-tuyet-doi/toi/input.wav
 ```
 
+## Nhận diện người nói bằng Nemotron 3
+
+Gemini tiếp tục nhận dạng/dịch; Nemotron 3 nhận cùng audio mono 16 kHz và chạy
+streaming trên máy để gán `Người nói 1`, `Người nói 2`… cho transcript.
+Microphone và System có bộ nhớ người nói riêng; cùng số thứ tự ở hai nguồn
+không chứng minh đó là cùng một người.
+
+Cài một lần trên Mac Apple Silicon (sau bootstrap):
+
+```bash
+bash scripts/setup-diarization.sh
+bash scripts/dev-tauri.sh
+```
+
+Script build runtime C của [NVIDIA NeMo-Speech.cpp](https://github.com/NVIDIA/NeMo-Speech.cpp)
+tại commit cố định, tải model Nemotron 3 Q8 khoảng 103 MiB và xác minh SHA-256.
+Model/runtime nằm trong `.cache/`, không được commit. Build cần Homebrew,
+SentencePiece, Abseil và Xcode Command Line Tools; CMake/Ninja được cài vào `.venv`.
+Lần nạp Metal đầu tiên có thể chậm do biên dịch kernel.
+
+Trong **Cài đặt → Nhận diện người nói · Nemotron 3**, icon xanh xuất hiện khi
+runtime đã nạp đúng model 8 người nói. Không cần API key cho diarization.
+Model sử dụng buffer 0,64 giây; thời gian inference và ghép transcript cộng thêm
+vào độ trễ này. Nhãn tạm có thể được cập nhật, và được hoàn tất trước khi lưu
+ghi chú khi dừng. Nếu model thiếu hoặc lỗi, transcript Gemini vẫn hoạt động.
+
+Các biến môi trường tùy chọn:
+
+- `DIARIZATION_BACKEND=off`: tắt diarization.
+- `NEMOTRON_DEVICE=cpu`: dùng CPU thay GPU.
+- `NEMOTRON_LIBRARY`: đường dẫn tuyệt đối tới thư viện C native.
+- `NEMOTRON_MODEL`: đường dẫn tuyệt đối tới Nemotron 3 GGUF.
+
+App không tự đọc `.env`; export biến trước khi chạy app. Máy khác hoặc bản
+đóng gói cần cài runtime/model riêng và cấu hình đường dẫn tương ứng; script
+hiện tự động hóa Apple Silicon. Chưa đóng gói model vào installer.
+
+Ghép speaker hiện ở **cấp đoạn**, dựa trên timeline audio và biên câu Gemini
+ước lượng, chưa có căn chỉnh từng từ. Đoạn chứa nhiều giọng có thể hiện nhiều
+nhãn; không suy đoán tên thật hoặc người phụ trách từ số người nói.
+
+Kiểm tra adapter và luồng cập nhật/flush:
+
+```bash
+.venv/bin/python -m unittest tests/test_diarization.py tests/test_gemini_live.py
+```
+
 ## Giới hạn hiện tại
 
 - Ứng dụng chưa lưu âm thanh gốc nên không thể phát lại âm thanh từ liên kết bằng chứng.
-- Microphone và âm thanh hệ thống có ngữ cảnh ASR riêng nhưng chưa hỗ trợ phân biệt người nói tự động.
+- Nhận diện người nói tối đa 8 người mỗi nguồn; độ chính xác giảm khi giọng chồng nhau, câu ngắn hoặc nhiều tiếng ồn. Chưa benchmark chất lượng tiếng Việt trên bộ dữ liệu có nhãn.
 - Người phụ trách chỉ được gán khi tên người đó xuất hiện rõ trong transcript.
 - Chuẩn hóa thuật ngữ được thực hiện thận trọng để tránh làm sai nội dung gốc.
 - Âm thanh hệ thống có DRM có thể không được API của hệ điều hành cung cấp.

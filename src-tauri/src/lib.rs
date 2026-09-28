@@ -1,3 +1,4 @@
+mod playback;
 use base64::Engine;
 use clipclip::{start_with_tap, Config, Recording, Source};
 use serde::{Deserialize, Serialize};
@@ -15,6 +16,9 @@ use tauri::{Emitter, Manager};
 
 const GROQ_CHAT_API: &str = "https://api.groq.com/openai/v1";
 const GROQ_GPT_OSS_120B: &str = "openai/gpt-oss-120b";
+const LOCAL_CHAT_API: &str = "http://127.0.0.1:20128/v1";
+const LOCAL_CHAT_MODEL: &str = "cx/gpt-5.5";
+const GEMINI_MODEL_API: &str = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-live-translate-preview";
 const DEFAULT_TTS_VOICE: &str = "thuc-day-di";
 
 #[derive(Default)]
@@ -22,12 +26,14 @@ struct NativeState {
     child: Mutex<Option<Child>>,
     writer: Arc<Mutex<Option<TcpStream>>>,
     captures: Mutex<Vec<Recording>>,
+    capture_forwarder: Mutex<Option<std::thread::JoinHandle<()>>>,
     pending_audio: Arc<AtomicUsize>,
     worker_epoch: Arc<AtomicUsize>,
 }
 
 const AI_KEY_SERVICE: &str = "local.vietnote.desktop";
 const GROQ_KEY_ACCOUNT: &str = "groq-asr-api-key";
+const GEMINI_KEY_ACCOUNT: &str = "gemini-asr-api-key";
 const NINE_ROUTER_KEY_ACCOUNT: &str = "9router-api-key";
 const ACCESS_KEY_ACCOUNT: &str = "vietnote-access-key";
 
@@ -39,9 +45,19 @@ fn normalize_ai_provider(provider: &str) -> Result<&'static str, String> {
     }
 }
 
+fn normalize_key_provider(provider: &str) -> Result<&'static str, String> {
+    match provider.trim().to_lowercase().as_str() {
+        "local" | "nine_router" => Ok("nine_router"),
+        "groq" => Ok("groq"),
+        "gemini" => Ok("gemini"),
+        _ => Err("Nhà cung cấp AI không hợp lệ".into()),
+    }
+}
+
 fn provider_key_entry(provider: &str) -> Result<keyring::Entry, String> {
-    let account = match normalize_ai_provider(provider)? {
+    let account = match normalize_key_provider(provider)? {
         "groq" => GROQ_KEY_ACCOUNT,
+        "gemini" => GEMINI_KEY_ACCOUNT,
         "nine_router" => NINE_ROUTER_KEY_ACCOUNT,
         _ => unreachable!(),
     };
@@ -58,7 +74,11 @@ fn stored_provider_key(provider: &str) -> Result<Option<String>, String> {
 }
 
 fn provider_env_key(provider: &str) -> Option<String> {
-    let name = if normalize_ai_provider(provider).ok()? == "groq" { "GROQ_API_KEY" } else { "NINE_ROUTER_API_KEY" };
+    let name = match normalize_key_provider(provider).ok()? {
+        "groq" => "GROQ_API_KEY",
+        "gemini" => "GEMINI_API_KEY",
+        _ => "NINE_ROUTER_API_KEY",
+    };
     std::env::var(name).ok().filter(|key| !key.trim().is_empty())
 }
 
@@ -79,7 +99,7 @@ fn stored_groq_key() -> Option<String> { resolved_provider_key("groq") }
 
 #[tauri::command]
 fn ai_key_status(provider: String) -> Result<String, String> {
-    let provider = normalize_ai_provider(&provider)?;
+    let provider = normalize_key_provider(&provider)?;
     if stored_provider_key(provider)?.is_some() { return Ok("saved".into()); }
     if provider_env_key(provider).is_some() { return Ok("environment".into()); }
     if provider == "groq" && built_in_groq_key().is_some() { return Ok("environment".into()); }
@@ -115,7 +135,7 @@ fn set_ai_api_key(app: tauri::AppHandle, state: tauri::State<'_, NativeState>, p
     if !state.captures.lock().map_err(|e| e.to_string())?.is_empty() {
         return Err("Hãy dừng ghi âm trước khi đổi API key".into());
     }
-    let provider = normalize_ai_provider(&provider)?;
+    let provider = normalize_key_provider(&provider)?;
     let key = api_key.unwrap_or_default().trim().to_string();
     if !key.is_empty() && key.chars().any(char::is_whitespace) {
         return Err("API key không được chứa khoảng trắng".into());
@@ -132,7 +152,7 @@ fn set_ai_api_key(app: tauri::AppHandle, state: tauri::State<'_, NativeState>, p
     } else {
         entry.set_password(&key).map_err(|_| "Không lưu được API key vào kho mật khẩu hệ thống")?;
     }
-    if provider == "groq" {
+    if provider == "groq" || provider == "gemini" {
         stop_worker(state.clone())?;
         start_worker(app, state)?;
     }
@@ -150,6 +170,13 @@ struct SummaryAiConfig {
     model: String,
     #[serde(default = "default_summary_provider")]
     provider: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AiProviderHealth {
+    ready: bool,
+    message: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -236,6 +263,8 @@ struct TranscriptSegment {
     audio_source: String,
     raw_text: String,
     clean_text: String,
+    #[serde(default)]
+    speaker: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -283,8 +312,20 @@ fn app_data(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 fn summary_ai_config(app: &tauri::AppHandle) -> Result<SummaryAiConfig, String> {
     let path = app_data(app)?.join("summary-ai.json");
-    let mut config: SummaryAiConfig = fs::read(path).ok().and_then(|data| serde_json::from_slice(&data).ok()).unwrap_or_default();
+    let mut config: SummaryAiConfig = fs::read(&path).ok().and_then(|data| serde_json::from_slice(&data).ok()).unwrap_or_default();
     if config.provider == "local" { config.provider = "nine_router".into(); }
+    // Older VietNote builds provisioned a local Qwen/Ollama model. Do not keep
+    // selecting it after upgrading: point those legacy profiles at the generic
+    // OpenAI-compatible local API instead.
+    if config.model.to_ascii_lowercase().contains("qwen") {
+        config = SummaryAiConfig {
+            api_url: LOCAL_CHAT_API.into(),
+            model: LOCAL_CHAT_MODEL.into(),
+            provider: "nine_router".into(),
+        };
+        if let Some(parent) = path.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+        fs::write(&path, serde_json::to_vec(&config).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    }
     Ok(config)
 }
 
@@ -292,10 +333,61 @@ fn summary_ai_config(app: &tauri::AppHandle) -> Result<SummaryAiConfig, String> 
 fn get_summary_ai_config(app: tauri::AppHandle) -> Result<SummaryAiConfig, String> { summary_ai_config(&app) }
 
 #[tauri::command]
+async fn check_ai_provider(app: tauri::AppHandle, provider: String) -> Result<AiProviderHealth, String> {
+    let provider = normalize_key_provider(&provider)?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(8))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let response = match provider {
+        "gemini" => {
+            let Some(key) = resolved_provider_key("gemini") else {
+                return Ok(AiProviderHealth { ready: false, message: "Chưa có Gemini API key".into() });
+            };
+            client.get(GEMINI_MODEL_API).query(&[("key", key)]).send().await
+        }
+        "groq" => {
+            let Some(key) = resolved_provider_key("groq") else {
+                return Ok(AiProviderHealth { ready: false, message: "Chưa có Groq API key".into() });
+            };
+            client.get(format!("{GROQ_CHAT_API}/models")).bearer_auth(key).send().await
+        }
+        "nine_router" => {
+            let config = summary_ai_config(&app)?;
+            let api_url = if config.provider == "nine_router" { config.api_url } else { LOCAL_CHAT_API.into() };
+            let request = client.get(format!("{}/models", api_url.trim_end_matches('/')));
+            let request = match resolved_provider_key("nine_router") {
+                Some(key) => request.bearer_auth(key),
+                None => request,
+            };
+            request.send().await
+        }
+        _ => unreachable!(),
+    };
+    match response {
+        Ok(response) if response.status().is_success() => Ok(AiProviderHealth {
+            ready: true,
+            message: "API sẵn sàng".into(),
+        }),
+        Ok(response) => Ok(AiProviderHealth {
+            ready: false,
+            message: format!("API chưa sẵn sàng (HTTP {})", response.status()),
+        }),
+        Err(_) => Ok(AiProviderHealth {
+            ready: false,
+            message: "Không kết nối được API".into(),
+        }),
+    }
+}
+
+#[tauri::command]
 fn set_summary_ai_config(app: tauri::AppHandle, config: SummaryAiConfig) -> Result<SummaryAiConfig, String> {
     let provider = normalize_ai_provider(&config.provider)?.to_string();
     let model = config.model.trim().to_string();
     if model.is_empty() { return Err("Tên model không được trống".into()); }
+    if model.to_ascii_lowercase().contains("qwen") {
+        return Err("Qwen đã bị loại bỏ; hãy chọn model do API local hoặc Groq cung cấp".into());
+    }
     let api_url = match provider.as_str() {
         "nine_router" => {
             let url = config.api_url.trim().trim_end_matches('/').to_string();
@@ -387,8 +479,11 @@ fn worker_executable(root: &Path) -> Result<(PathBuf, bool), String> {
     } else {
         root.join("worker-dist/vietnote-worker/vietnote-worker")
     };
-    if packaged.exists() { return Ok((packaged, true)); }
     let bundled = if cfg!(windows) { root.join(".venv/Scripts/python.exe") } else { root.join(".venv/bin/python") };
+    // Dev runs must execute the live asr/ sources; a stale worker-dist freeze
+    // would silently hide new worker features (e.g. Nemotron diarization).
+    if cfg!(debug_assertions) && bundled.exists() { return Ok((bundled, false)); }
+    if packaged.exists() { return Ok((packaged, true)); }
     if bundled.exists() { return Ok((bundled, false)); }
     if let Some(path) = std::env::var_os("VIETNOTE_PYTHON") {
         let path = PathBuf::from(path);
@@ -408,6 +503,7 @@ fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> 
         .map(|voice| voice.3).unwrap_or("thuc-day-di.zip");
     // A locked/unavailable OS credential store must not prevent offline ASR.
     let groq_key = stored_groq_key();
+    let gemini_key = resolved_provider_key("gemini");
     let token = format!("{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos());
     let logs = app_data(&app)?.join("logs");
     fs::create_dir_all(&logs).map_err(|e| e.to_string())?;
@@ -431,6 +527,11 @@ fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> 
         command.env("GROQ_API_KEY", key);
     } else {
         command.env_remove("GROQ_API_KEY");
+    }
+    if let Some(key) = gemini_key.filter(|key| !key.trim().is_empty()) {
+        command.env("GEMINI_API_KEY", key);
+    } else {
+        command.env_remove("GEMINI_API_KEY");
     }
     let mut child = command.spawn().map_err(|e| e.to_string())?;
     let stdout = child.stdout.take().ok_or("Không đọc được ASR stdout")?;
@@ -488,6 +589,9 @@ fn send_worker(state: tauri::State<'_, NativeState>, payload: Value) -> Result<(
 fn stop_worker(state: tauri::State<'_, NativeState>) -> Result<(), String> {
     state.worker_epoch.fetch_add(1, Ordering::SeqCst);
     state.captures.lock().map_err(|e| e.to_string())?.clear();
+    if let Some(thread) = state.capture_forwarder.lock().map_err(|e| e.to_string())?.take() {
+        let _ = thread.join();
+    }
     *state.writer.lock().map_err(|e| e.to_string())? = None;
     if let Some(mut child) = state.child.lock().map_err(|e| e.to_string())?.take() {
         if child.try_wait().map_err(|e| e.to_string())?.is_none() {
@@ -524,7 +628,7 @@ fn start_capture(state: tauri::State<'_, NativeState>, source: String) -> Result
     if next.is_empty() { return Err("Nguồn âm thanh không hợp lệ".into()); }
     *captures = next;
     drop(captures);
-    std::thread::spawn(move || {
+    let forwarder = std::thread::spawn(move || {
         while let Ok((source, samples, captured_at)) = rx.recv() {
             if pending.fetch_add(1, Ordering::Relaxed) >= 25 { pending.fetch_sub(1, Ordering::Relaxed); continue; }
             let mut bytes = Vec::with_capacity(samples.len() * 4);
@@ -536,12 +640,16 @@ fn start_capture(state: tauri::State<'_, NativeState>, source: String) -> Result
             pending.fetch_sub(1, Ordering::Relaxed);
         }
     });
+    *state.capture_forwarder.lock().map_err(|e| e.to_string())? = Some(forwarder);
     Ok(())
 }
 
 #[tauri::command]
 fn stop_capture(state: tauri::State<'_, NativeState>) -> Result<(), String> {
     state.captures.lock().map_err(|e| e.to_string())?.clear();
+    if let Some(thread) = state.capture_forwarder.lock().map_err(|e| e.to_string())?.take() {
+        thread.join().map_err(|_| "Audio forwarding failed".to_string())?;
+    }
     Ok(())
 }
 
@@ -626,15 +734,21 @@ fn validate_summary(mut summary: MeetingSummary, segments: &[TranscriptSegment])
 #[tauri::command]
 async fn summarize_segments(app: tauri::AppHandle, segments: Vec<TranscriptSegment>, previous_summary: Option<MeetingSummary>) -> Result<MeetingSummary, String> {
     if segments.is_empty() { return Ok(previous_summary.unwrap_or_default()); }
-    let transcript = segments.iter().map(|segment| format!(
-        "[{}] [{}] [{}] {}", segment.id, segment.timestamp, segment.audio_source, segment.clean_text
-    )).collect::<Vec<_>>().join("\n");
+    let transcript = segments.iter().map(|segment| {
+        let source = match segment.audio_source.as_str() {
+            "system" => "âm thanh máy",
+            "microphone" => "microphone",
+            other => other,
+        };
+        format!("[{}] [{}] [nguồn: {}] [người nói ước lượng: {}] {}", segment.id, segment.timestamp, source, segment.speaker.as_deref().unwrap_or("chưa xác định"), segment.clean_text)
+    }).collect::<Vec<_>>().join("\n");
     let previous = previous_summary.as_ref()
         .map(|summary| serde_json::to_string(summary).unwrap_or_default())
         .unwrap_or_else(|| "null".into());
     let system = r#"Bạn là thư ký cuộc họp AI/Tech cực kỳ thận trọng. Tạo meeting note ngắn, dễ scan và có thể kiểm chứng.
 
 QUY TẮC BẮT BUỘC:
+- Toàn bộ nội dung do bạn viết trong tldr, text, topic, options, task và các trường nội dung khác phải bằng tiếng Việt, bất kể transcript dùng ngôn ngữ nào. Chỉ giữ nguyên tên riêng và thuật ngữ kỹ thuật không nên dịch.
 - Chỉ tạo decision khi transcript có lời chốt/đồng ý rõ ràng. Một người nêu preference không phải consensus.
 - Nếu nhiều option được bàn mà chưa chốt, đưa vào unresolvedTopics với status chính xác là "No final decision".
 - Preference chưa commit phải nằm ở tentativeDecisions, không phải decisions.
@@ -643,6 +757,7 @@ QUY TẮC BẮT BUỘC:
 - Preserve uncertainty. Khi phân vân, dùng unresolved thay vì đoán.
 - Mỗi decision, tentative decision, unresolved topic, action item và deferred item phải có evidenceIds lấy nguyên văn từ ID trong dấu [] ở transcript.
 - Không dùng nhãn microphone/system làm tên người. Chỉ ghi owner khi tên người xuất hiện rõ trong lời nói.
+- Nhãn Người nói N là ước lượng âm thanh, riêng theo từng nguồn; không suy ra tên thật hoặc owner từ nhãn này. Một đoạn có thể chứa nhiều người nói.
 - Previous summary chỉ là bản nháp để hợp nhất và có thể sai; transcript mới cùng evidence mới là nguồn sự thật.
 - Không tạo section giả để lấp chỗ trống. Dùng mảng rỗng.
 
@@ -692,7 +807,7 @@ fn open_permission(kind: String) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .manage(NativeState::default())
-        .invoke_handler(tauri::generate_handler![load_notes, save_notes, get_summary_ai_config, set_summary_ai_config, get_tts_voice_config, set_tts_voice, ai_key_status, set_ai_api_key, access_key_status, set_access_key, start_worker, stop_worker, send_worker, start_capture, stop_capture, summarize_segments, translate_text, open_permission])
+        .invoke_handler(tauri::generate_handler![load_notes, save_notes, get_summary_ai_config, set_summary_ai_config, check_ai_provider, get_tts_voice_config, set_tts_voice, ai_key_status, set_ai_api_key, access_key_status, set_access_key, start_worker, stop_worker, send_worker, start_capture, stop_capture, summarize_segments, translate_text, open_permission, playback::play_audio, playback::stop_audio])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 let state = window.app_handle().state::<NativeState>();
@@ -712,7 +827,7 @@ mod tests {
     use super::*;
 
     fn segment(id: &str) -> TranscriptSegment {
-        TranscriptSegment { id: id.into(), timestamp: "09:00".into(), started_at: 0.0, audio_source: "system".into(), raw_text: "raw".into(), clean_text: "clean".into() }
+        TranscriptSegment { id: id.into(), timestamp: "09:00".into(), started_at: 0.0, audio_source: "system".into(), raw_text: "raw".into(), clean_text: "clean".into(), speaker: None }
     }
 
     #[test]
@@ -739,5 +854,11 @@ mod tests {
         };
         let validated = validate_summary(summary, &[segment("s1")]);
         assert_eq!(validated.unresolved_topics[0].status, "No final decision");
+    }
+
+    #[test]
+    fn default_local_ai_does_not_use_qwen() {
+        assert!(!LOCAL_CHAT_MODEL.to_ascii_lowercase().contains("qwen"));
+        assert!(!LOCAL_CHAT_API.contains("11434"));
     }
 }

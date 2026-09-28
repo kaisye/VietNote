@@ -14,3 +14,8 @@ src-tauri/target/
 worker-build/
 worker-dist/
 *.tsbuildinfo
+
+# Generated marketing media (rebuild with marketing/*.py and render.mjs)
+marketing/*.mp4
+marketing/*.wav
+marketing/vo/

@@ -1,4 +1,4 @@
-mlx-whisper==0.4.3
 numpy>=1.26,<3
 openai>=2,<3
+websocket-client>=1.8,<2
 zerotts==0.1.5
