@@ -1,5 +1,6 @@
 {
   "bundle": {
-    "resources": ["../asr", "../voices", "../worker-dist"]
+    "resources": ["../asr", "../voices", "../worker-dist"],
+    "createUpdaterArtifacts": true
   }
 }

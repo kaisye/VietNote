@@ -368,9 +368,13 @@ class GeminiLiveStream:
             self.flush_requested.clear()
 
     def connect(self):
+        import certifi
         import websocket
+        # The frozen worker has no system CA path (dev only works via Homebrew's
+        # OpenSSL bundle), so pin certifi's CA file explicitly.
         ws = websocket.create_connection(f'{GEMINI_LIVE_URL}?key={self.api_key}',
-                                         timeout=10, enable_multithread=True)
+                                         timeout=10, enable_multithread=True,
+                                         sslopt={'ca_certs': certifi.where()})
         ws.send(json.dumps(self.setup_message()))
         response = json.loads(ws.recv())
         if 'setupComplete' not in response and 'setup_complete' not in response:

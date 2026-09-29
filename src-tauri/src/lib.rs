@@ -806,6 +806,8 @@ fn open_permission(kind: String) -> Result<(), String> {
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(NativeState::default())
         .invoke_handler(tauri::generate_handler![load_notes, save_notes, get_summary_ai_config, set_summary_ai_config, check_ai_provider, get_tts_voice_config, set_tts_voice, ai_key_status, set_ai_api_key, access_key_status, set_access_key, start_worker, stop_worker, send_worker, start_capture, stop_capture, summarize_segments, translate_text, open_permission, playback::play_audio, playback::stop_audio])
         .on_window_event(|window, event| {

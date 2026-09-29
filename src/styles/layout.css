@@ -270,3 +270,5 @@
 .saved-transcript .raw-transcript { display:block; margin-top:5px; font-style:italic; }
 @media (max-width:1100px) { .sidebar { width:210px; } .page-wrap { padding:24px; } .cadence-row { flex-wrap:wrap; } .active-toolbar { flex-wrap:wrap; } }
 @media (max-width:850px) { .sidebar { width:190px; padding:12px; } .notes-list-panel { width:230px; } .live-panels { grid-template-columns:1fr; } .live-panel { max-height:350px; } }
+.update-banner { position:absolute; z-index:20; top:16px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:12px; max-width:calc(100% - 32px); padding:8px 8px 8px 16px; border-radius:100px; border:1px solid var(--border); background:var(--glass-strong); color:var(--ink); box-shadow:0 10px 24px var(--shadow); backdrop-filter:blur(18px); font-size:13px; font-weight:600; }
+.update-banner .pill-btn { height:32px; }
