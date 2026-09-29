@@ -200,6 +200,13 @@ jobs:
           path: installers
           merge-multiple: true
 
+      # The macOS artifact spans bundle/dmg and bundle/macos, so it keeps those subfolders.
+      - name: Flatten installers
+        shell: bash
+        run: |
+          find installers -mindepth 2 -type f -exec mv {} installers/ \;
+          ls -la installers
+
       - name: Remove old assets for this tag
         env:
           GH_TOKEN: ${{ github.token }}
