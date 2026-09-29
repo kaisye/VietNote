@@ -45,6 +45,12 @@ fi
   -DNEMO_SPEECH_BUILD_TTS=OFF -DNEMO_SPEECH_BUILD_CLI=OFF
 .venv/bin/cmake --build .cache/nemo-build -j 4
 .venv/bin/cmake --install .cache/nemo-build
+# Release CI only needs the runtime: users download the pinned model from Settings.
+if [[ "${NEMOTRON_SKIP_MODEL:-}" == 1 ]]; then
+  echo 'Nemotron 3 runtime built (model download skipped).'
+  exit 0
+fi
+# Keep TASK_MODEL_REV / TASK_MODEL_SHA in sync with src-tauri/src/diarization_model.rs.
 TASK_MODEL=.cache/models/Nemotron-3-Diarization.q8_0.gguf
 if [[ ! -f "$TASK_MODEL" ]]; then
   curl --fail --location --retry 3 --output "$TASK_MODEL.partial" \

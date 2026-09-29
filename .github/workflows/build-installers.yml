@@ -85,6 +85,16 @@ jobs:
             asr/server.py
           worker-dist/vietnote-worker/vietnote-worker --help >/dev/null
 
+      # Only the native runtime ships in the app; the GGUF weights are downloaded
+      # from Settings, pinned to the revision/SHA in src-tauri/src/diarization_model.rs.
+      - name: Build Nemotron 3 diarization runtime
+        shell: bash
+        run: |
+          python -m venv .venv
+          NEMOTRON_SKIP_MODEL=1 bash scripts/setup-diarization.sh
+          python scripts/bundle-diarization-libs.py
+          node -e 'const fs=require("fs"),f="src-tauri/tauri.release.conf.json",c=JSON.parse(fs.readFileSync(f));c.bundle.resources.push("../nemotron-dist");fs.writeFileSync(f,JSON.stringify(c,null,2))'
+
       - name: Build macOS installer
         run: npm run tauri build -- --bundles app,dmg --config src-tauri/tauri.release.conf.json
 

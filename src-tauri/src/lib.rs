@@ -1,3 +1,4 @@
+mod diarization_model;
 mod playback;
 use base64::Engine;
 use clipclip::{start_with_tap, Config, Recording, Source};
@@ -533,6 +534,8 @@ fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> 
     } else {
         command.env_remove("GEMINI_API_KEY");
     }
+    if let Some(model) = diarization_model::installed_model(&app, &root) { command.env("NEMOTRON_MODEL", model); }
+    if let Some(library) = diarization_model::runtime_library(&root) { command.env("NEMOTRON_LIBRARY", library); }
     let mut child = command.spawn().map_err(|e| e.to_string())?;
     let stdout = child.stdout.take().ok_or("Không đọc được ASR stdout")?;
     *slot = Some(child);
@@ -576,6 +579,37 @@ fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> 
         }
     });
     Ok(())
+}
+
+#[tauri::command]
+fn diarization_model_status(app: tauri::AppHandle) -> Result<diarization_model::DiarizationModelStatus, String> {
+    let root = project_root(&app)?;
+    diarization_model::status(&app, &root)
+}
+
+/// Reloads the worker so Nemotron picks up (or drops) the model, unless a recording is running.
+fn reload_worker_when_idle(app: &tauri::AppHandle) -> Result<(), String> {
+    let state = app.state::<NativeState>();
+    if !state.captures.lock().map_err(|e| e.to_string())?.is_empty() { return Ok(()); }
+    stop_worker(state.clone())?;
+    start_worker(app.clone(), state)
+}
+
+#[tauri::command]
+async fn download_diarization_model(app: tauri::AppHandle) -> Result<diarization_model::DiarizationModelStatus, String> {
+    diarization_model::download(&app).await?;
+    reload_worker_when_idle(&app)?;
+    diarization_model_status(app)
+}
+
+#[tauri::command]
+fn cancel_diarization_download() { diarization_model::cancel(); }
+
+#[tauri::command]
+fn remove_diarization_model(app: tauri::AppHandle) -> Result<diarization_model::DiarizationModelStatus, String> {
+    diarization_model::remove(&app)?;
+    reload_worker_when_idle(&app)?;
+    diarization_model_status(app)
 }
 
 #[tauri::command]
@@ -809,7 +843,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(NativeState::default())
-        .invoke_handler(tauri::generate_handler![load_notes, save_notes, get_summary_ai_config, set_summary_ai_config, check_ai_provider, get_tts_voice_config, set_tts_voice, ai_key_status, set_ai_api_key, access_key_status, set_access_key, start_worker, stop_worker, send_worker, start_capture, stop_capture, summarize_segments, translate_text, open_permission, playback::play_audio, playback::stop_audio])
+        .invoke_handler(tauri::generate_handler![load_notes, save_notes, get_summary_ai_config, set_summary_ai_config, check_ai_provider, get_tts_voice_config, set_tts_voice, ai_key_status, set_ai_api_key, access_key_status, set_access_key, start_worker, stop_worker, send_worker, start_capture, stop_capture, summarize_segments, translate_text, open_permission, diarization_model_status, download_diarization_model, cancel_diarization_download, remove_diarization_model, playback::play_audio, playback::stop_audio])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 let state = window.app_handle().state::<NativeState>();

@@ -10,6 +10,8 @@ export interface AiProviderHealth { ready: boolean; message: string }
 export type TtsVoiceId = 'thuc-day-di' | 'ngoc-huyen'
 export interface TtsVoiceOption { id: TtsVoiceId; displayName: string; description: string }
 export interface TtsVoiceConfig { selectedId: TtsVoiceId; voices: TtsVoiceOption[] }
+export interface DiarizationModelStatus { installed: boolean; runtimeAvailable: boolean; downloading: boolean; partialBytes: number; sizeBytes: number; removable: boolean }
+export interface DownloadProgress { downloaded: number; total: number }
 const isDesktop = '__TAURI_INTERNALS__' in window
 let saveQueue: Promise<void> = Promise.resolve()
 
@@ -39,6 +41,11 @@ export const desktop = {
   summarizeSegments: (segments: TranscriptSegment[], previousSummary?: StructuredMeetingSummary) =>
     invoke<StructuredMeetingSummary>('summarize_segments', { segments, previousSummary: previousSummary ?? null }),
   translateParagraph: (text: string, sourceLanguage: SpokenLanguage, previousContext: string) => invoke<string>('translate_text', { text, sourceLanguage, previousContext }),
+  diarizationModelStatus: () => invoke<DiarizationModelStatus>('diarization_model_status'),
+  downloadDiarizationModel: () => invoke<DiarizationModelStatus>('download_diarization_model'),
+  cancelDiarizationDownload: () => invoke<void>('cancel_diarization_download'),
+  removeDiarizationModel: () => invoke<DiarizationModelStatus>('remove_diarization_model'),
+  onDiarizationDownload: (callback: (progress: DownloadProgress) => void): Promise<UnlistenFn> => listen<DownloadProgress>('diarization-download', e => callback(e.payload)),
   openPermission: (kind: 'microphone' | 'screen') => invoke<void>('open_permission', { kind }),
   onWorker: (callback: (event: WorkerMessage) => void): Promise<UnlistenFn> => listen<WorkerMessage>('worker-message', e => callback(e.payload)),
   onStatus: (callback: (status: string) => void): Promise<UnlistenFn> => listen<string>('worker-status', e => callback(e.payload)),

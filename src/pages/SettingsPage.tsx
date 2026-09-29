@@ -1,20 +1,15 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, Circle, LoaderCircle, XCircle } from 'lucide-react'
+import { Circle } from 'lucide-react'
 import type { AppModel } from '../hooks/useAppModel'
 import type { Appearance } from '../services/types'
-import { desktop, type AiKeyProvider, type AiProviderHealth, type SummaryAiConfig, type SummaryAiProvider } from '../services/desktop'
+import { ApiHealthIcon, type Health } from '../components/ApiHealthIcon'
+import { DiarizationModelCard } from '../components/DiarizationModelCard'
+import { desktop, type AiKeyProvider, type SummaryAiConfig, type SummaryAiProvider } from '../services/desktop'
 
 const LOCAL_AI: SummaryAiConfig = { provider: 'nine_router', apiUrl: 'http://127.0.0.1:20128/v1', model: 'cx/gpt-5.5' }
 const GROQ_AI: SummaryAiConfig = { provider: 'groq', apiUrl: 'https://api.groq.com/openai/v1', model: 'openai/gpt-oss-120b' }
-type Health = AiProviderHealth & { checking: boolean }
 const CHECKING: Health = { ready: false, checking: true, message: 'Đang kiểm tra API…' }
 
-function ApiHealthIcon({ health }: { health: Health }) {
-  if (health.checking) return <LoaderCircle className="api-health-icon checking" size={18} aria-label={health.message}/>
-  return health.ready
-    ? <CheckCircle2 className="api-health-icon ready" size={18} aria-label={health.message}/>
-    : <XCircle className="api-health-icon unavailable" size={18} aria-label={health.message}/>
-}
 
 export function SettingsPage({ model, appearance, setAppearance }: { model: AppModel; appearance: Appearance; setAppearance: (value: Appearance) => void }) {
   const [accessKey, setAccessKey] = useState('')
@@ -143,11 +138,7 @@ export function SettingsPage({ model, appearance, setAppearance }: { model: AppM
       {geminiKeyStatus && <small role="status" className="groq-key-message">{geminiKeyStatus}</small>}
     </section>
 
-    <section className="glass-card settings-card">
-      <div className="settings-heading"><h3>Nhận diện người nói · Nemotron 3</h3><ApiHealthIcon health={{ ready: model.diarizationReady, checking: false, message: model.diarizationStatus }}/></div>
-      <small role="status">{model.diarizationStatus}</small>
-      <p className="muted">Xử lý trên máy, tối đa 8 người nói mỗi nguồn. Nhãn người nói là ước lượng và có thể được cập nhật trong phiên; không phải tên thật.</p>
-    </section>
+    <DiarizationModelCard model={model}/>
 
     <section className="glass-card settings-card">
       <h3>Dịch và tóm tắt AI</h3>

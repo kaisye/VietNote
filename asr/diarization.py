@@ -1,6 +1,7 @@
 """Optional Nemotron 3 streaming diarization through NVIDIA's native C ABI.
 
-No model downloads at app startup. Install with scripts/setup-diarization.sh.
+No model downloads at app startup: the app fetches the pinned weights from
+Settings (or run scripts/setup-diarization.sh for development).
 All native handles are owned by one background thread; ASR never waits on inference.
 """
 import ctypes as C
@@ -32,8 +33,10 @@ class NativeDiarizer:
         library = Path(os.environ.get('NEMOTRON_LIBRARY', str(default)))
         model = Path(os.environ.get('NEMOTRON_MODEL', str(
             ROOT / '.cache/models/Nemotron-3-Diarization.q8_0.gguf')))
-        if not library.is_file() or not model.is_file():
-            raise RuntimeError('Chưa cài Nemotron 3. Chạy bash scripts/setup-diarization.sh rồi khởi động lại app.')
+        if not library.is_file():
+            raise RuntimeError('Bản cài này chưa kèm bộ chạy Nemotron 3 (chỉ hỗ trợ Mac Apple Silicon).')
+        if not model.is_file():
+            raise RuntimeError('Chưa tải model nhận diện người nói. Vào Cài đặt để tải (~107 MB).')
         self.lib = C.CDLL(str(library))
         self.model = C.c_void_p()
         signatures = {

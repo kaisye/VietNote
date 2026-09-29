@@ -28,6 +28,7 @@ export function useAppModel() {
     const saved = Number(localStorage.getItem('ttsPlaybackRate'))
     return [1, 1.15, 1.25, 1.4, 1.5].includes(saved) ? saved : 1.25
   })
+  const [translateForeign, setTranslateForeignState] = useState(() => localStorage.getItem('translateForeign') !== 'false')
   const [entries, setEntries] = useState<Subtitle[]>([])
   const [interimTranscripts, setInterimTranscripts] = useState<InterimTranscript[]>([])
   const [liveTranslations, setLiveTranslations] = useState<LiveTranslation[]>([])
@@ -82,6 +83,9 @@ export function useAppModel() {
   const playbackStarted = useRef(false)
   const activeVoiceRef = useRef('giọng đã chọn')
   const liveTranslationRef = useRef(false)
+  const translateForeignRef = useRef(translateForeign)
+  // The switch lives in the meeting UI; the standalone translator always translates.
+  const translating = () => languageRef.current !== 'vi' && (!meetingRef.current || translateForeignRef.current)
 
   const publishEntries = (next: Subtitle[]) => { entriesRef.current = next; setEntries(next) }
   const publishTranslationBlocks = (next: TranslationBlock[]) => { translationBlocksRef.current = next; setTranslationBlocks(next) }
@@ -135,6 +139,13 @@ export function useAppModel() {
   }
   const spokenLanguage = (message: WorkerMessage): SpokenLanguage =>
     message.language ?? (languageRef.current === 'auto' ? 'vi' : languageRef.current)
+  const setTranslateForeign = (value: boolean) => {
+    translateForeignRef.current = value; setTranslateForeignState(value); localStorage.setItem('translateForeign', String(value))
+    // Toggling never back-fills: only speech after the switch is (not) translated.
+    clearTranslationTimers(); translationCursorRef.current = entriesRef.current.length
+    if (!value) { setLiveTranslations([]); publishTranslationBlocks(translationBlocksRef.current.filter(block => !block.pending)); clearPlayback() }
+    if (meetingRef.current) setTranslationStatus(value ? 'Đã bật dịch sang tiếng Việt' : 'Đã tắt dịch tiếng nước ngoài')
+  }
   const setAudioInput = (value: AudioInput) => { audioRef.current = value; setAudioInputState(value); publishEntries([]); setInterimTranscripts([]); resetTranslations() }
   const setCadence = (value: Cadence) => { cadenceRef.current = value; setSummaryCadence(value); cadenceValueRef.current = value === 'words' ? 60 : 1; setCadenceValue(cadenceValueRef.current) }
   const setCadenceAmount = (value: number) => { cadenceValueRef.current = value; setCadenceValue(value) }
@@ -186,7 +197,7 @@ export function useAppModel() {
   }
 
   const flushTranslationParagraph = () => {
-    if (languageRef.current === 'vi') return
+    if (!translating()) return
     clearTranslationTimers()
     const start = translationCursorRef.current
     // Auto mode mixes languages; Vietnamese utterances need no translation.
@@ -227,6 +238,7 @@ export function useAppModel() {
   }
 
   const scheduleTranslationParagraph = () => {
+    if (!translating()) return
     const pendingEntries = entriesRef.current.slice(translationCursorRef.current).filter(entry => entry.language !== 'vi')
     if (!pendingEntries.length) return
     if (!translationMaxTimerRef.current) translationMaxTimerRef.current = setTimeout(flushTranslationParagraph, 20000)
@@ -289,7 +301,7 @@ export function useAppModel() {
         if (meetingRef.current && countWords(text) >= 8 && entriesRef.current.slice(-20).some(entry => entry.sourceText.toLocaleLowerCase() === text.toLocaleLowerCase() && Date.now() - new Date(entry.timestamp).getTime() < 90000)) break
         const language = spokenLanguage(message)
         spokenLanguageRef.current.set(message.id ?? '', language)
-        const needsTranslation = language !== 'vi'
+        const needsTranslation = language !== 'vi' && translating()
         const startedAt = message.started_at ?? Date.now() / 1000
         const entry: Subtitle = { id: message.id ?? crypto.randomUUID(), timestamp: new Date(startedAt * 1000).toISOString(), sourceText: text, rawText: message.raw_text ?? text, audioSource: message.source ?? 'system', translatedText: '', startedAt, generation: generationRef.current, endedAt: message.ended_at, speaker: message.speaker, speakerProvisional: message.speaker_provisional, language }
         publishEntries(meetingRef.current || languageRef.current !== 'vi' ? [...entriesRef.current, entry] : [...entriesRef.current, entry].slice(-8))
@@ -312,11 +324,11 @@ export function useAppModel() {
       case 'translation_mode':
         if (message.generation !== generationRef.current) break
         liveTranslationRef.current = Boolean(message.live)
-        setTranslationStatus(message.live ? (languageRef.current === 'auto' ? 'Gemini Live · tự động nhận diện → Việt' : 'Gemini Live · Anh/Trung → Việt') : languageRef.current === 'vi' ? 'Không cần dịch' : 'Dịch theo đoạn')
+        setTranslationStatus(languageRef.current !== 'vi' && !translating() ? 'Đã tắt dịch tiếng nước ngoài' : message.live ? (languageRef.current === 'auto' ? 'Gemini Live · tự động nhận diện → Việt' : 'Gemini Live · Anh/Trung → Việt') : languageRef.current === 'vi' ? 'Không cần dịch' : 'Dịch theo đoạn')
         break
       case 'live_translation': {
         if (!(capturingRef.current || meetingRef.current) || message.generation !== generationRef.current || !message.id || !message.text) break
-        if (spokenLanguageRef.current.get(message.id) === 'vi') break
+        if (spokenLanguageRef.current.get(message.id) === 'vi' || !translating()) break
         const item: LiveTranslation = { id: message.id, text: message.text, source: message.source ?? 'system', startedAt: message.started_at ?? Date.now() / 1000, final: Boolean(message.final) }
         setLiveTranslations(current => [...current.filter(value => value.id !== item.id), item])
         const block: TranslationBlock = { id: item.id, entryIds: [item.id], sourceText: '', translatedText: item.text, createdAt: new Date(item.startedAt * 1000).toISOString(), pending: !item.final, kind: 'live' }
@@ -329,7 +341,7 @@ export function useAppModel() {
         break
       }
       case 'live_translation_audio':
-        if (message.pcm && message.generation === generationRef.current && spokenLanguageRef.current.get(message.id ?? '') !== 'vi') playPCM16(message.pcm, message.sample_rate ?? 24000)
+        if (message.pcm && message.generation === generationRef.current && spokenLanguageRef.current.get(message.id ?? '') !== 'vi' && translating()) playPCM16(message.pcm, message.sample_rate ?? 24000)
         break
       // Keep the existing AudioContext and schedule the next utterance after the
       // previous one. Closing it here truncates audio that is still playing.
@@ -363,7 +375,7 @@ export function useAppModel() {
     setInterimTranscripts([]); setLiveTranslations([])
     summaryCursor.current = 0; overallSummaryCursor.current = 0; manualCursor.current = 0; lastSummaryAt.current = Date.now(); meetingStartedAt.current = Date.now()
     setSummaryStatus('Đang lắng nghe · bản tóm tắt bắt đầu sau câu đầu tiên')
-    setTranslationStatus(languageRef.current === 'vi' ? 'Không cần dịch' : languageRef.current === 'auto' ? 'Tự động nhận diện → Việt' : `${languageRef.current === 'en' ? 'Anh' : 'Trung'} → Việt theo đoạn`)
+    setTranslationStatus(languageRef.current === 'vi' ? 'Không cần dịch' : !translateForeignRef.current ? 'Đã tắt dịch tiếng nước ngoài' : languageRef.current === 'auto' ? 'Tự động nhận diện → Việt' : `${languageRef.current === 'en' ? 'Anh' : 'Trung'} → Việt theo đoạn`)
     setSpeech(false); meetingRef.current = true; setMeetingActive(true)
     await start()
   }
@@ -442,7 +454,7 @@ export function useAppModel() {
   const renameGroup = (id: string, raw: string) => { const name = raw.trim(); if (!name || groupsRef.current.some(g => g.id !== id && g.name.toLocaleLowerCase() === name.toLocaleLowerCase())) return false; persist(notesRef.current, groupsRef.current.map(g => g.id === id ? { ...g, name } : g)); return true }
   const deleteGroup = (id: string) => persist(notesRef.current.map(note => note.groupID === id ? { ...note, groupID: null } : note), groupsRef.current.filter(g => g.id !== id))
   const summarizeNow = async () => {
-    if (languageRef.current !== 'vi') { flushTranslationParagraph(); await translationQueueRef.current }
+    if (translating()) { flushTranslationParagraph(); await translationQueueRef.current }
     await summarize(true, true)
   }
 
@@ -454,10 +466,10 @@ export function useAppModel() {
     void startMeeting()
   }, [ready, startRequested])
 
-  return { status, ready, diarizationReady, diarizationStatus, busy, capturing, meetingActive, sourceLanguage, setSourceLanguage, audioInput, setAudioInput,
+  return { status, ready, diarizationReady, diarizationStatus, busy, capturing, meetingActive, sourceLanguage, setSourceLanguage, translateForeign, setTranslateForeign, audioInput, setAudioInput,
     speechEnabled, setSpeechEnabled: setSpeech, speechRate, setSpeechRate, entries, interimTranscripts, liveTranslations, translationBlocks, summaryHistory, overallSummary, summaryStatus, summaryCadence, setSummaryCadence: setCadence,
     cadenceValue, setCadenceValue: setCadenceAmount, notes, noteGroups, savingNoteID, savingNoteGroupID, vietnameseASRStatus, ttsStatus, ttsVoiceName, translationStatus,
-    canStartMeeting: ready || asrKeyAvailable, canSummarizeNow: meetingActive && !summaryBusy.current && (readySummaryUnits > manualCursor.current || (languageRef.current !== 'vi' && entries.length > translationCursorRef.current)),
+    canStartMeeting: ready || asrKeyAvailable, canSummarizeNow: meetingActive && !summaryBusy.current && (readySummaryUnits > manualCursor.current || (translating() && entries.length > translationCursorRef.current)),
     start, startMeeting, stop, summarizeNow: () => void summarizeNow(), newNote, updateNote, deleteNote, createGroup, renameGroup, deleteGroup, meetingStartedAt: meetingStartedAt.current }
 }
 
