@@ -16,7 +16,7 @@ use std::time::Duration;
 #[serde(rename_all = "camelCase")]
 pub struct AudioChunk {
     pcm: String,
-    /// "f32" (ZeroTTS, little-endian Float32) or "s16" (Gemini Live, little-endian Int16).
+    /// "f32" (ZeroTTS, little-endian Float32) or "s16" (little-endian Int16).
     format: String,
     sample_rate: u32,
 }

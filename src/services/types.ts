@@ -1,6 +1,6 @@
 export type Page = 'home' | 'notes' | 'translate' | 'settings'
 export type Appearance = 'system' | 'light' | 'dark'
-/** Meeting setting; 'auto' lets Gemini Live Translate detect the spoken language. */
+/** Meeting setting; 'auto' lets the streaming ASR (Soniox) detect the spoken language. */
 export type Language = 'auto' | 'zh' | 'en' | 'vi'
 export type SpokenLanguage = Exclude<Language, 'auto'>
 export type AudioInput = 'microphone' | 'system' | 'both'
@@ -38,22 +38,19 @@ export interface StructuredMeetingSummary {
 export interface TranslationBlock {
   id: string; entryIds: string[]; sourceText: string; translatedText: string;
   createdAt: string; pending: boolean
-  /** 'live' = per-utterance Gemini Live Translate; otherwise an LLM paragraph translation (saved to notes). */
+  /** 'live' = per-utterance streaming translation (Soniox); otherwise an LLM paragraph translation (saved to notes). */
   kind?: 'live' | 'paragraph'
   failed?: boolean
-}
-export interface SummarySnapshot {
-  id: string; createdAt: string; text: string; entryCount: number; isManual: boolean
 }
 export interface WorkerMessage {
   type: string; message?: string; generation?: number; source?: string; text?: string;
   raw_text?: string; started_at?: number; vi_model_ready?: boolean; tts_voice?: string;
   asr_backend?: string; asr_model?: string; id?: string; pcm?: string; sample_rate?: number; voice?: string;
-  final?: boolean; live?: boolean; model?: string; language?: SpokenLanguage; pcm_format?: 'f32le' | 's16le';
+  final?: boolean; live?: boolean; live_audio?: boolean; provider?: string; model?: string; language?: SpokenLanguage; pcm_format?: 'f32le' | 's16le';
   ready?: boolean; ended_at?: number; speaker?: string | null; speaker_provisional?: boolean
 }
-export interface InterimTranscript { id: string; text: string; source: string; startedAt: number; speaker?: string | null }
-export interface LiveTranslation { id: string; text: string; source: string; startedAt: number; final: boolean }
+// showSource is false for foreign speech being translated: only its live translation is shown.
+export interface InterimTranscript { id: string; text: string; source: string; startedAt: number; speaker?: string | null; showSource: boolean }
 
-/** Base64 little-endian PCM handed to the native player (f32 = ZeroTTS, s16 = Gemini Live). */
+/** Base64 little-endian PCM handed to the native player (f32 = ZeroTTS, s16 = 16-bit PCM). */
 export type AudioChunk = { pcm: string; format: 'f32' | 's16'; sampleRate: number }

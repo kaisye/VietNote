@@ -4,7 +4,7 @@ use base64::Engine;
 use clipclip::{start_with_tap, Config, Recording, Source};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
@@ -19,7 +19,6 @@ const GROQ_CHAT_API: &str = "https://api.groq.com/openai/v1";
 const GROQ_GPT_OSS_120B: &str = "openai/gpt-oss-120b";
 const LOCAL_CHAT_API: &str = "http://127.0.0.1:20128/v1";
 const LOCAL_CHAT_MODEL: &str = "cx/gpt-5.5";
-const GEMINI_MODEL_API: &str = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-live-translate-preview";
 const DEFAULT_TTS_VOICE: &str = "thuc-day-di";
 
 #[derive(Default)]
@@ -34,7 +33,8 @@ struct NativeState {
 
 const AI_KEY_SERVICE: &str = "local.vietnote.desktop";
 const GROQ_KEY_ACCOUNT: &str = "groq-asr-api-key";
-const GEMINI_KEY_ACCOUNT: &str = "gemini-asr-api-key";
+const SONIOX_KEY_ACCOUNT: &str = "soniox-asr-api-key";
+const SONIOX_MODELS_API: &str = "https://api.soniox.com/v1/models";
 const NINE_ROUTER_KEY_ACCOUNT: &str = "9router-api-key";
 const ACCESS_KEY_ACCOUNT: &str = "vietnote-access-key";
 
@@ -50,7 +50,7 @@ fn normalize_key_provider(provider: &str) -> Result<&'static str, String> {
     match provider.trim().to_lowercase().as_str() {
         "local" | "nine_router" => Ok("nine_router"),
         "groq" => Ok("groq"),
-        "gemini" => Ok("gemini"),
+        "soniox" => Ok("soniox"),
         _ => Err("Nhà cung cấp AI không hợp lệ".into()),
     }
 }
@@ -58,7 +58,7 @@ fn normalize_key_provider(provider: &str) -> Result<&'static str, String> {
 fn provider_key_entry(provider: &str) -> Result<keyring::Entry, String> {
     let account = match normalize_key_provider(provider)? {
         "groq" => GROQ_KEY_ACCOUNT,
-        "gemini" => GEMINI_KEY_ACCOUNT,
+        "soniox" => SONIOX_KEY_ACCOUNT,
         "nine_router" => NINE_ROUTER_KEY_ACCOUNT,
         _ => unreachable!(),
     };
@@ -77,7 +77,7 @@ fn stored_provider_key(provider: &str) -> Result<Option<String>, String> {
 fn provider_env_key(provider: &str) -> Option<String> {
     let name = match normalize_key_provider(provider).ok()? {
         "groq" => "GROQ_API_KEY",
-        "gemini" => "GEMINI_API_KEY",
+        "soniox" => "SONIOX_API_KEY",
         _ => "NINE_ROUTER_API_KEY",
     };
     std::env::var(name).ok().filter(|key| !key.trim().is_empty())
@@ -153,7 +153,7 @@ fn set_ai_api_key(app: tauri::AppHandle, state: tauri::State<'_, NativeState>, p
     } else {
         entry.set_password(&key).map_err(|_| "Không lưu được API key vào kho mật khẩu hệ thống")?;
     }
-    if provider == "groq" || provider == "gemini" {
+    if matches!(provider, "groq" | "soniox") {
         stop_worker(state.clone())?;
         start_worker(app, state)?;
     }
@@ -341,11 +341,11 @@ async fn check_ai_provider(app: tauri::AppHandle, provider: String) -> Result<Ai
         .build()
         .map_err(|e| e.to_string())?;
     let response = match provider {
-        "gemini" => {
-            let Some(key) = resolved_provider_key("gemini") else {
-                return Ok(AiProviderHealth { ready: false, message: "Chưa có Gemini API key".into() });
+        "soniox" => {
+            let Some(key) = resolved_provider_key("soniox") else {
+                return Ok(AiProviderHealth { ready: false, message: "Chưa có Soniox API key".into() });
             };
-            client.get(GEMINI_MODEL_API).query(&[("key", key)]).send().await
+            client.get(SONIOX_MODELS_API).bearer_auth(key).send().await
         }
         "groq" => {
             let Some(key) = resolved_provider_key("groq") else {
@@ -483,9 +483,10 @@ fn worker_executable(root: &Path) -> Result<(PathBuf, bool), String> {
     let bundled = if cfg!(windows) { root.join(".venv/Scripts/python.exe") } else { root.join(".venv/bin/python") };
     // Dev runs must execute the live asr/ sources; a stale worker-dist freeze
     // would silently hide new worker features (e.g. Nemotron diarization).
-    if cfg!(debug_assertions) && bundled.exists() { return Ok((bundled, false)); }
-    if packaged.exists() { return Ok((packaged, true)); }
+    // Local release builds resolve the root to this source tree too, so they must
+    // not run the freeze either; installed apps have no .venv and use it.
     if bundled.exists() { return Ok((bundled, false)); }
+    if packaged.exists() { return Ok((packaged, true)); }
     if let Some(path) = std::env::var_os("VIETNOTE_PYTHON") {
         let path = PathBuf::from(path);
         if path.exists() { return Ok((path, false)); }
@@ -504,7 +505,7 @@ fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> 
         .map(|voice| voice.3).unwrap_or("thuc-day-di.zip");
     // A locked/unavailable OS credential store must not prevent offline ASR.
     let groq_key = stored_groq_key();
-    let gemini_key = resolved_provider_key("gemini");
+    let soniox_key = resolved_provider_key("soniox");
     let token = format!("{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos());
     let logs = app_data(&app)?.join("logs");
     fs::create_dir_all(&logs).map_err(|e| e.to_string())?;
@@ -529,10 +530,10 @@ fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> 
     } else {
         command.env_remove("GROQ_API_KEY");
     }
-    if let Some(key) = gemini_key.filter(|key| !key.trim().is_empty()) {
-        command.env("GEMINI_API_KEY", key);
+    if let Some(key) = soniox_key.filter(|key| !key.trim().is_empty()) {
+        command.env("SONIOX_API_KEY", key);
     } else {
-        command.env_remove("GEMINI_API_KEY");
+        command.env_remove("SONIOX_API_KEY");
     }
     if let Some(model) = diarization_model::installed_model(&app, &root) { command.env("NEMOTRON_MODEL", model); }
     if let Some(library) = diarization_model::runtime_library(&root) { command.env("NEMOTRON_LIBRARY", library); }
@@ -742,8 +743,44 @@ fn keep_evidence(ids: &mut Vec<String>, allowed: &HashSet<String>) {
     ids.dedup();
 }
 
-fn validate_summary(mut summary: MeetingSummary, segments: &[TranscriptSegment]) -> MeetingSummary {
+fn evidence_lists(summary: &mut MeetingSummary) -> Vec<&mut Vec<String>> {
+    let mut lists: Vec<&mut Vec<String>> = Vec::new();
+    for items in [&mut summary.key_points, &mut summary.decisions, &mut summary.tentative_decisions, &mut summary.open_questions] {
+        lists.extend(items.iter_mut().map(|item| &mut item.evidence_ids));
+    }
+    lists.extend(summary.unresolved_topics.iter_mut().map(|item| &mut item.evidence_ids));
+    lists.extend(summary.action_items.iter_mut().map(|item| &mut item.evidence_ids));
+    lists.extend(summary.deferred.iter_mut().map(|item| &mut item.evidence_ids));
+    lists
+}
+
+/// Rewrites evidence IDs through `map`, dropping IDs it does not know.
+fn map_evidence(summary: &mut MeetingSummary, map: &HashMap<String, String>) {
+    for ids in evidence_lists(summary) {
+        *ids = ids.iter().filter_map(|id| map.get(id).cloned()).collect();
+    }
+}
+
+/// Drops empty strings, nulls and empty arrays so an unchanged previous summary costs fewer tokens.
+fn compact_json(value: Value) -> Value {
+    match value {
+        Value::Object(map) => Value::Object(map.into_iter()
+            .map(|(key, value)| (key, compact_json(value)))
+            .filter(|(_, value)| !matches!(value, Value::Null) && value.as_array().map_or(true, |items| !items.is_empty()) && value.as_str().map_or(true, |text| !text.is_empty()))
+            .collect()),
+        Value::Array(items) => Value::Array(items.into_iter().map(compact_json).collect()),
+        other => other,
+    }
+}
+
+#[cfg(test)]
+fn validate_summary(summary: MeetingSummary, segments: &[TranscriptSegment]) -> MeetingSummary {
     let allowed: HashSet<String> = segments.iter().map(|segment| segment.id.clone()).collect();
+    validate_summary_with(summary, &allowed)
+}
+
+fn validate_summary_with(mut summary: MeetingSummary, allowed: &HashSet<String>) -> MeetingSummary {
+    let allowed = allowed.clone();
     let validate_bullets = |items: &mut Vec<SummaryBullet>, evidence_required: bool| {
         for item in items.iter_mut() { keep_evidence(&mut item.evidence_ids, &allowed); }
         items.retain(|item| !item.text.trim().is_empty() && (!evidence_required || !item.evidence_ids.is_empty()));
@@ -768,17 +805,41 @@ fn validate_summary(mut summary: MeetingSummary, segments: &[TranscriptSegment])
 #[tauri::command]
 async fn summarize_segments(app: tauri::AppHandle, segments: Vec<TranscriptSegment>, previous_summary: Option<MeetingSummary>) -> Result<MeetingSummary, String> {
     if segments.is_empty() { return Ok(previous_summary.unwrap_or_default()); }
+    // Segment IDs are UUIDs; the model sees short aliases (s1, s2, …) instead, which
+    // are mapped back after parsing. Evidence already cited by the previous summary
+    // keeps its alias so incremental merges can carry old items forward.
+    let mut previous_summary = previous_summary;
+    let mut alias_of: HashMap<String, String> = HashMap::new();
+    let mut real_of: HashMap<String, String> = HashMap::new();
+    let mut alias = |id: &str| -> String {
+        if let Some(existing) = alias_of.get(id) { return existing.clone(); }
+        let short = format!("s{}", alias_of.len() + 1);
+        alias_of.insert(id.to_string(), short.clone());
+        real_of.insert(short.clone(), id.to_string());
+        short
+    };
+    let mut allowed: HashSet<String> = segments.iter().map(|segment| segment.id.clone()).collect();
+    if let Some(summary) = previous_summary.as_mut() {
+        for ids in evidence_lists(summary) {
+            allowed.extend(ids.iter().cloned());
+            *ids = ids.iter().map(|id| alias(id)).collect();
+        }
+    }
     let transcript = segments.iter().map(|segment| {
-        let source = match segment.audio_source.as_str() {
-            "system" => "âm thanh máy",
-            "microphone" => "microphone",
-            other => other,
-        };
-        format!("[{}] [{}] [nguồn: {}] [người nói ước lượng: {}] {}", segment.id, segment.timestamp, source, segment.speaker.as_deref().unwrap_or("chưa xác định"), segment.clean_text)
+        let source = if segment.audio_source == "microphone" { "mic" } else { "máy" };
+        let speaker = segment.speaker.as_deref().map(|speaker| format!(" {speaker}")).unwrap_or_default();
+        format!("[{}]{speaker} ({source}): {}", alias(&segment.id), segment.clean_text)
     }).collect::<Vec<_>>().join("\n");
+    let incremental = previous_summary.is_some();
     let previous = previous_summary.as_ref()
-        .map(|summary| serde_json::to_string(summary).unwrap_or_default())
+        .and_then(|summary| serde_json::to_value(summary).ok())
+        .map(|value| compact_json(value).to_string())
         .unwrap_or_else(|| "null".into());
+    let merge_rule = if incremental {
+        "- BẢN TÓM TẮT HIỆN CÓ đã bao quát phần trước của cuộc họp; transcript cũ không được gửi lại. Giữ nguyên các mục cũ cùng evidenceIds của chúng, chỉ sửa hoặc bỏ khi transcript mới phủ định, chốt lại hay làm rõ. Thêm mục mới từ transcript mới và cập nhật tldr cho toàn bộ cuộc họp."
+    } else {
+        "- Transcript là nguồn sự thật duy nhất."
+    };
     let system = r#"Bạn là thư ký cuộc họp AI/Tech cực kỳ thận trọng. Tạo meeting note ngắn, dễ scan và có thể kiểm chứng.
 
 QUY TẮC BẮT BUỘC:
@@ -790,18 +851,24 @@ QUY TẮC BẮT BUỘC:
 - Action item chỉ có owner/deadline khi transcript nói rõ. Dùng null khi thiếu.
 - Preserve uncertainty. Khi phân vân, dùng unresolved thay vì đoán.
 - Mỗi decision, tentative decision, unresolved topic, action item và deferred item phải có evidenceIds lấy nguyên văn từ ID trong dấu [] ở transcript.
-- Không dùng nhãn microphone/system làm tên người. Chỉ ghi owner khi tên người xuất hiện rõ trong lời nói.
+- Không dùng nhãn nguồn (mic)/(máy) làm tên người. Chỉ ghi owner khi tên người xuất hiện rõ trong lời nói.
 - Nhãn Người nói N là ước lượng âm thanh, riêng theo từng nguồn; không suy ra tên thật hoặc owner từ nhãn này. Một đoạn có thể chứa nhiều người nói.
-- Previous summary chỉ là bản nháp để hợp nhất và có thể sai; transcript mới cùng evidence mới là nguồn sự thật.
+MERGE_RULE
 - Không tạo section giả để lấp chỗ trống. Dùng mảng rỗng.
 
 Chỉ trả về một JSON object, không markdown, đúng camelCase schema:
 {"tldr":"string","keyPoints":[{"id":"string","text":"string","evidenceIds":["segment-id"]}],"decisions":[],"tentativeDecisions":[],"unresolvedTopics":[{"id":"string","text":"string","topic":"string","options":["string"],"status":"No final decision","evidenceIds":["segment-id"]}],"actionItems":[{"id":"string","owner":null,"task":"string","deadline":null,"evidenceIds":["segment-id"]}],"openQuestions":[],"deferred":[{"id":"string","text":"string","target":null,"evidenceIds":["segment-id"]}]}"#;
-    let user = format!("BẢN NHÁP TRƯỚC (có thể null):\n{previous}\n\nTRANSCRIPT CÓ ID:\n{transcript}");
-    let raw = ai_completion(&app, system, user, 1800).await?;
+    let system = system.replace("MERGE_RULE", merge_rule);
+    let user = if incremental {
+        format!("BẢN TÓM TẮT HIỆN CÓ:\n{previous}\n\nTRANSCRIPT MỚI CÓ ID:\n{transcript}")
+    } else {
+        format!("TRANSCRIPT CÓ ID:\n{transcript}")
+    };
+    let raw = ai_completion(&app, &system, user, 1800).await?;
     let value = parse_json_object(&raw)?;
-    let summary: MeetingSummary = serde_json::from_value(value).map_err(|error| format!("Summary không đúng schema: {error}"))?;
-    Ok(validate_summary(summary, &segments))
+    let mut summary: MeetingSummary = serde_json::from_value(value).map_err(|error| format!("Summary không đúng schema: {error}"))?;
+    map_evidence(&mut summary, &real_of);
+    Ok(validate_summary_with(summary, &allowed))
 }
 
 #[tauri::command]
@@ -890,6 +957,22 @@ mod tests {
         };
         let validated = validate_summary(summary, &[segment("s1")]);
         assert_eq!(validated.unresolved_topics[0].status, "No final decision");
+    }
+
+    #[test]
+    fn incremental_merge_keeps_prior_evidence_and_drops_unknown_aliases() {
+        let mut summary = MeetingSummary {
+            decisions: vec![SummaryBullet { id: "d1".into(), text: "Use FastAPI".into(), evidence_ids: vec!["s1".into(), "s9".into()] }],
+            ..MeetingSummary::default()
+        };
+        let real_of = HashMap::from([("s1".to_string(), "old-uuid".to_string())]);
+        map_evidence(&mut summary, &real_of);
+        let allowed = HashSet::from(["old-uuid".to_string(), "new-uuid".to_string()]);
+        let validated = validate_summary_with(summary, &allowed);
+        assert_eq!(validated.decisions[0].evidence_ids, vec!["old-uuid".to_string()]);
+        let compact = compact_json(serde_json::to_value(&validated).unwrap());
+        assert!(compact.get("actionItems").is_none());
+        assert!(compact.get("decisions").is_some());
     }
 
     #[test]

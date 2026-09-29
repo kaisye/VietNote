@@ -16,12 +16,12 @@ export function SettingsPage({ model, appearance, setAppearance }: { model: AppM
   const [accessKeySaved, setAccessKeySaved] = useState(false)
   const [keyMessage, setKeyMessage] = useState('')
   const [savingKey, setSavingKey] = useState(false)
-  const [geminiKey, setGeminiKey] = useState('')
-  const [geminiKeyStatus, setGeminiKeyStatus] = useState('')
+  const [sonioxKey, setSonioxKey] = useState('')
+  const [sonioxKeyStatus, setSonioxKeyStatus] = useState('')
   const [summaryAi, setSummaryAi] = useState<SummaryAiConfig>(LOCAL_AI)
   const [summaryKey, setSummaryKey] = useState('')
   const [summaryAiStatus, setSummaryAiStatus] = useState('')
-  const [providerHealth, setProviderHealth] = useState<Record<AiKeyProvider, Health>>({ gemini: CHECKING, nine_router: CHECKING, groq: CHECKING })
+  const [providerHealth, setProviderHealth] = useState<Record<AiKeyProvider, Health>>({ soniox: CHECKING, nine_router: CHECKING, groq: CHECKING })
 
   const refreshHealth = async (provider: AiKeyProvider) => {
     setProviderHealth(current => ({ ...current, [provider]: CHECKING }))
@@ -42,9 +42,9 @@ export function SettingsPage({ model, appearance, setAppearance }: { model: AppM
     }).catch(error => {
       if (active) setKeyMessage(`Không đọc được cài đặt: ${error}`)
     })
-    void desktop.aiKeyStatus('gemini').then(status => {
-      if (active) setGeminiKeyStatus(status === 'none' ? '' : status === 'saved' ? 'Gemini API key đã được lưu an toàn.' : 'Đang dùng GEMINI_API_KEY từ môi trường.')
-    }).catch(error => { if (active) setGeminiKeyStatus(`Không đọc được Gemini key: ${error}`) })
+    void desktop.aiKeyStatus('soniox').then(status => {
+      if (active) setSonioxKeyStatus(status === 'none' ? '' : status === 'saved' ? 'Soniox API key đã được lưu an toàn.' : 'Đang dùng SONIOX_API_KEY từ môi trường.')
+    }).catch(error => { if (active) setSonioxKeyStatus(`Không đọc được Soniox key: ${error}`) })
     void desktop.getSummaryAiConfig().then(config => {
       if (!active) return
       setSummaryAi(config)
@@ -52,7 +52,7 @@ export function SettingsPage({ model, appearance, setAppearance }: { model: AppM
         if (active) setSummaryAiStatus(status === 'saved' ? 'API key đã được lưu an toàn.' : status === 'environment' ? 'Đang dùng API key từ môi trường hoặc bản build.' : '')
       })
     }).catch(error => { if (active) setSummaryAiStatus(`Không đọc được cấu hình AI: ${error}`) })
-    void refreshHealth('gemini')
+    void refreshHealth('soniox')
     void refreshHealth('nine_router')
     void refreshHealth('groq')
     return () => { active = false }
@@ -75,15 +75,15 @@ export function SettingsPage({ model, appearance, setAppearance }: { model: AppM
     }
   }
 
-  const saveGeminiKey = async () => {
+  const saveSonioxKey = async () => {
     setSavingKey(true)
     try {
-      const status = await desktop.setAiApiKey('gemini', geminiKey.trim() || null)
-      setGeminiKey('')
-      setGeminiKeyStatus(status === 'saved' ? 'Đã lưu Gemini API key và khởi động lại nhận diện.' : status === 'environment' ? 'Đang dùng GEMINI_API_KEY từ môi trường.' : 'Đã xóa Gemini API key.')
-      await refreshHealth('gemini')
+      const status = await desktop.setAiApiKey('soniox', sonioxKey.trim() || null)
+      setSonioxKey('')
+      setSonioxKeyStatus(status === 'saved' ? 'Đã lưu Soniox API key và khởi động lại nhận diện.' : status === 'environment' ? 'Đang dùng SONIOX_API_KEY từ môi trường.' : 'Đã xóa Soniox API key.')
+      await refreshHealth('soniox')
     } catch (error) {
-      setGeminiKeyStatus(`Không lưu được Gemini key: ${error}`)
+      setSonioxKeyStatus(`Không lưu được Soniox key: ${error}`)
     } finally {
       setSavingKey(false)
     }
@@ -129,14 +129,15 @@ export function SettingsPage({ model, appearance, setAppearance }: { model: AppM
     </section>
 
     <section className="glass-card settings-card">
-      <div className="settings-heading"><h3>Gemini 3.5 Transcribe + Live Translate</h3><ApiHealthIcon health={providerHealth.gemini}/><small>{providerHealth.gemini.message}</small></div>
-      <small className="muted">Dịch trực tiếp tiếng Anh/Trung sang tiếng Việt. API key chỉ được lưu trong kho mật khẩu hệ thống.</small>
+      <div className="settings-heading"><h3>Soniox nhận diện + dịch</h3><ApiHealthIcon health={providerHealth.soniox}/><small>{providerHealth.soniox.message}</small></div>
+      <small className="muted">Chép lời realtime và dịch Anh/Trung sang tiếng Việt (~$0.12/giờ). Bản dịch được đọc bằng giọng ZeroTTS trên máy.</small>
       <div className="groq-key-actions">
-        <input aria-label="Gemini API key" type="password" autoComplete="off" spellCheck={false} placeholder="Nhập Gemini API key" value={geminiKey} onChange={event => setGeminiKey(event.target.value)} disabled={disabled}/>
-        <button className="pill-btn primary" disabled={disabled || !geminiKey.trim()} onClick={() => void saveGeminiKey()}>Lưu key</button>
+        <input aria-label="Soniox API key" type="password" autoComplete="off" spellCheck={false} placeholder="Nhập Soniox API key" value={sonioxKey} onChange={event => setSonioxKey(event.target.value)} disabled={disabled}/>
+        <button className="pill-btn primary" disabled={disabled || !sonioxKey.trim()} onClick={() => void saveSonioxKey()}>Lưu key</button>
       </div>
-      {geminiKeyStatus && <small role="status" className="groq-key-message">{geminiKeyStatus}</small>}
+      {sonioxKeyStatus && <small role="status" className="groq-key-message">{sonioxKeyStatus}</small>}
     </section>
+
 
     <DiarizationModelCard model={model}/>
 

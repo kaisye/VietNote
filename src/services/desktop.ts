@@ -4,7 +4,7 @@ import type { AudioChunk, AudioInput, SpokenLanguage, MeetingNote, NoteGroup, St
 
 export interface StoredNotes { notes: MeetingNote[]; groups: NoteGroup[] }
 export type SummaryAiProvider = 'nine_router' | 'groq'
-export type AiKeyProvider = SummaryAiProvider | 'gemini'
+export type AiKeyProvider = SummaryAiProvider | 'soniox'
 export interface SummaryAiConfig { apiUrl: string; model: string; provider: SummaryAiProvider }
 export interface AiProviderHealth { ready: boolean; message: string }
 export type TtsVoiceId = 'thuc-day-di' | 'ngoc-huyen'

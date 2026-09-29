@@ -70,3 +70,15 @@ export function formatTime(date: string, datePart = true): string {
   const value = new Date(date)
   return Number.isNaN(value.getTime()) ? date : new Intl.DateTimeFormat('vi-VN', datePart ? { dateStyle: 'medium', timeStyle: 'short' } : { timeStyle: 'short' }).format(value)
 }
+
+/** Plain text for "copy content": title, meeting time and the note body. */
+export function noteContentText(note: MeetingNote): string {
+  const body = note.structuredSummary ? formatStructuredSummary(note.structuredSummary) : note.summary.trim()
+  return [note.title || 'Chưa có tiêu đề', formatTime(note.createdAt), body].filter(Boolean).join('\n\n')
+}
+
+/** Plain text for "copy transcript": one timestamped line per segment, with the speaker when known. */
+export function noteTranscriptText(note: MeetingNote): string {
+  if (!note.transcriptSegments?.length) return note.transcript.trim()
+  return note.transcriptSegments.map(segment => `[${formatTime(segment.timestamp, false)}] ${segment.speaker ? `${segment.speaker}: ` : ''}${segment.cleanText}`).join('\n')
+}

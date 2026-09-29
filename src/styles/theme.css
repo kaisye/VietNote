@@ -16,7 +16,7 @@ h2 { font-size:21px; }
 h3 { font-size:17px; font-weight:700; }
 p { line-height:1.5; }
 small { font-size:12px; }
-select, .note-search, .note-title-input, .note-textarea { color:var(--ink); background:var(--input-bg); border:1px solid var(--border); border-radius:9px; }
+select, .note-search, .note-textarea { color:var(--ink); background:var(--input-bg); border:1px solid var(--border); border-radius:9px; }
 select { min-height:35px; padding:5px 28px 5px 11px; }
 .muted, .page-subtitle { color:var(--muted); }
 .accent-text { color:var(--accent); }

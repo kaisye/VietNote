@@ -27,16 +27,10 @@ VI_INITIAL_PROMPT = os.environ.get(
 )
 GROQ_BASE_URL = 'https://api.groq.com/openai/v1'
 GROQ_ASR_MODEL = 'whisper-large-v3'
-GEMINI_LIVE_MODEL = 'gemini-3.5-transcribe-live'
-GEMINI_LIVE_TRANSLATE_MODEL = 'gemini-3.5-live-translate-preview'
-# Live Translate only ends a turn on a real pause, so continuous speech (podcasts,
+# Streaming ASR only ends a turn on a real pause, so continuous speech (podcasts,
 # monologues) would otherwise become one endless interim spanning every speaker.
 LIVE_SEGMENT_WORDS = 25
 LIVE_SEGMENT_SECONDS = 10.0
-# Input transcription trails the captured audio by roughly this much.
-LIVE_TRANSCRIPT_LAG = 0.8
-GEMINI_LIVE_URL = ('wss://generativelanguage.googleapis.com/ws/'
-                   'google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent')
 
 def log(message):
     print(message, flush=True)
@@ -106,43 +100,6 @@ class GroqRecognizer:
         return message
 
 
-def gemini_transcriptions(payload):
-    """Return (interim, final) text from a Live API server message."""
-    content = payload.get('serverContent') or payload.get('server_content') or {}
-    interim = content.get('interimInputTranscription') or content.get('interim_input_transcription') or {}
-    final = content.get('inputTranscription') or content.get('input_transcription') or {}
-    return str(interim.get('text') or '').strip(), str(final.get('text') or '').strip()
-
-
-def gemini_translation(payload):
-    """Return source text, Vietnamese text, PCM audio parts and turn state."""
-    content = payload.get('serverContent') or payload.get('server_content') or {}
-    source = content.get('inputTranscription') or content.get('input_transcription') or {}
-    translated = content.get('outputTranscription') or content.get('output_transcription') or {}
-    model_turn = content.get('modelTurn') or content.get('model_turn') or {}
-    audio = []
-    for part in model_turn.get('parts') or []:
-        inline = part.get('inlineData') or part.get('inline_data') or {}
-        mime_type = str(inline.get('mimeType') or inline.get('mime_type') or '')
-        data = inline.get('data')
-        if data and mime_type.startswith('audio/pcm'):
-            audio.append((data, mime_type))
-    turn_complete = bool(content.get('turnComplete') or content.get('turn_complete'))
-    return (str(source.get('text') or ''), str(translated.get('text') or ''),
-            audio, turn_complete)
-
-
-def append_stream_text(current, chunk):
-    """Accept either delta chunks or cumulative transcript snapshots."""
-    if not chunk:
-        return current
-    if chunk.startswith(current):
-        return chunk
-    if current.endswith(chunk):
-        return current
-    return current + chunk
-
-
 VI_LETTERS = set('ăâđêôơưàáạảãằắặẳẵầấậẩẫèéẹẻẽềếệểễìíịỉĩòóọỏõồốộổỗờớợởỡùúụủũừứựửữỳýỵỷỹ')
 
 
@@ -171,214 +128,290 @@ def segment_size(text):
     return max(words, len(text.replace(' ', '')) // 2) if any('\u4e00' <= c <= '\u9fff' for c in text) else words
 
 
-class GeminiLiveStream:
-    """One resilient Gemini Live WebSocket for one physical audio source."""
-    def __init__(self, api_key, model, translation_model, source, generation, language, send):
+SONIOX_URL = 'wss://stt-rt.soniox.com/transcribe-websocket'
+SONIOX_MODEL = 'stt-rt-v5'
+SONIOX_HINTS = {'vi': ['vi', 'en'], 'en': ['en'], 'zh': ['zh'], 'auto': ['vi', 'en', 'zh']}
+# Soniox streams translation chunk by chunk with no end marker, so an utterance's
+# translation is closed once it goes quiet (or ends a sentence) for this long.
+SONIOX_TRANSLATION_IDLE = 1.2
+SONIOX_TRANSLATION_TIMEOUT = 6.0
+SENTENCE_END = ('.', '!', '?', '…', '。', '！', '？')
+
+
+def soniox_tokens(payload):
+    """Split a Soniox response into (final originals, interim originals, final translation,
+    interim translation, endpoint, finalized)."""
+    final, interim, final_tr, interim_tr = [], [], [], []
+    endpoint = finalized = False
+    for token in payload.get('tokens') or []:
+        text = token.get('text') or ''
+        if text == '<end>':
+            endpoint = True
+            continue
+        if text == '<fin>':
+            finalized = True
+            continue
+        if token.get('translation_status') == 'translation':
+            (final_tr if token.get('is_final') else interim_tr).append(token)
+        else:
+            (final if token.get('is_final') else interim).append(token)
+    return final, interim, final_tr, interim_tr, endpoint, finalized
+
+
+def token_text(tokens):
+    return ''.join(token.get('text') or '' for token in tokens)
+
+
+class SpeakerLabels:
+    """Soniox numbers speakers per stream; give each (source, speaker) one meeting-wide label."""
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.labels = {}
+
+    def label(self, source, tokens):
+        counts = {}
+        for token in tokens:
+            if token.get('speaker') is not None:
+                speaker = str(token['speaker'])
+                counts[speaker] = counts.get(speaker, 0) + len(token.get('text') or '')
+        if not counts:
+            return None
+        key = (source, max(counts, key=counts.get))
+        with self.lock:
+            if key not in self.labels:
+                self.labels[key] = f'Người nói {len(self.labels) + 1}'
+            return self.labels[key]
+
+
+class ProviderDiarization:
+    """Stands in for the local Nemotron diarizer when the ASR provider labels speakers itself."""
+    def __init__(self, send, provider):
+        self.send = send
+        self.lock = threading.RLock()
+        self.generation = 0
+        send(dict(type='diarization_status', ready=True,
+                  message=f'{provider} nhận diện người nói · không cần tải model'))
+
+    def reset(self, generation):
+        self.generation = generation
+
+    def observe(self, message):
+        pass
+
+    def push(self, audio, captured_at, source):
+        pass
+
+    def finish(self, request_id):
+        # The recognizer flush already delivered final speaker labels with the transcripts.
+        self.send(dict(type='diarization_finished', id=request_id, generation=self.generation))
+
+    def close(self):
+        pass
+
+
+class SonioxStream:
+    """One Soniox real-time WebSocket (transcription + one-way translation) per audio source."""
+    def __init__(self, api_key, model, source, generation, language, send, speakers=None):
         self.api_key = api_key
         self.model = model
-        self.translation_model = translation_model
         self.source = source
         self.generation = generation
         self.language = language
         self.send = send
+        self.speakers = speakers or SpeakerLabels()
+        self.translate = language in ('en', 'zh', 'auto')
         self.audio = queue.Queue(maxsize=500)
         self.closed = threading.Event()
-        self.started_at = None
-        self.latest_captured_at = None
-        self.utterance = 0
-        # 'auto' also uses Live Translate: it detects the spoken language itself and
-        # (echoTargetLanguage=False) stays silent when the speech is already Vietnamese.
-        self.translation_mode = language in ('en', 'zh', 'auto')
-        self.source_buffer = ''
-        self.translation_buffer = ''
-        # (buffer length after a chunk, capture clock when it arrived) for timestamping cuts.
-        self.source_marks = []
-        # Segment cut from a running turn whose translation is still arriving.
-        self.carry_id = None
-        self.carry_text = ''
-        self.text_lock = threading.RLock()
-        self.last_text_at = 0.0
         self.flush_requested = threading.Event()
         self.flushed = threading.Event()
-        self.thread = threading.Thread(target=self.run, daemon=True,
-                                       name=f'gemini-{source}')
+        self.lock = threading.RLock()
+        self.utterance = 0
+        self.origin = None
+        self.latest_captured_at = None
+        self.finalize_at = None
+        self.reset_turn()
+        # Utterances whose source is final but whose translation is still streaming:
+        # [id, started_at, finalized_monotonic]. Translation tokens go to the oldest.
+        self.pending = []
+        self.translation = ''
+        self.translation_interim = ''
+        self.last_translation_at = 0.0
+        self.thread = threading.Thread(target=self.run, daemon=True, name=f'soniox-{source}')
         self.thread.start()
+
+    def reset_turn(self):
+        self.tokens = []            # final original tokens of the running utterance
+        self.interim_tokens = []
 
     def put(self, pcm, captured_at):
         try:
             self.audio.put_nowait((pcm, captured_at))
         except queue.Full:
-            self.send(dict(type='warning', message='Gemini audio queue full; dropped a chunk.'))
+            self.send(dict(type='warning', message='Soniox audio queue full; dropped a chunk.'))
 
-    def setup_message(self):
-        if self.translation_mode:
-            return {'setup': {
-                'model': f'models/{self.translation_model}',
-                'generationConfig': {
-                    'responseModalities': ['AUDIO'],
-                    'translationConfig': {
-                        'targetLanguageCode': 'vi',
-                        'echoTargetLanguage': False,
-                    },
-                },
-                # Despite the raw WebSocket snippet in the Live Translate guide,
-                # the v1beta wire schema (and both official SDK converters) keep
-                # transcription configs at setup level.
-                'inputAudioTranscription': {},
-                'outputAudioTranscription': {},
-            }}
-        codes = {'vi': ['vi-VN'], 'en': ['en-US'], 'zh': ['zh-CN']}
-        return {'setup': {
-            'model': f'models/{self.model}',
-            'generationConfig': {'responseModalities': ['TEXT']},
-            'inputAudioTranscription': {
-                'languageCodes': codes.get(self.language, []),
-                'mode': 'SMART',
-            },
-        }}
+    def config(self):
+        config = {
+            'api_key': self.api_key,
+            'model': self.model,
+            'audio_format': 'pcm_s16le',
+            'sample_rate': RATE,
+            'num_channels': 1,
+            'language_hints': SONIOX_HINTS.get(self.language, ['vi']),
+            'enable_language_identification': True,
+            'enable_endpoint_detection': True,
+            'enable_speaker_diarization': True,
+        }
+        if self.translate:
+            config['translation'] = {'type': 'one_way', 'target_language': 'vi'}
+        return config
 
-    def emit_transcript(self, text, final, ended_at=None):
+    def utterance_id(self, index=None):
+        return f'{self.generation}:{self.source}:{self.utterance if index is None else index}'
+
+    def spoken_language(self, tokens, text):
+        counts = {}
+        for token in tokens:
+            lang = token.get('language')
+            if lang:
+                counts[lang] = counts.get(lang, 0) + len(token.get('text') or '')
+        best = max(counts, key=counts.get) if counts else None
+        if best in ('vi', 'en', 'zh'):
+            return best
+        if self.language != 'auto':
+            return self.language
+        return detect_language(text)
+
+    def clock(self, tokens, key, fallback):
+        values = [token[key] for token in tokens if isinstance(token.get(key), (int, float))]
+        if not values or self.origin is None:
+            return fallback
+        return self.origin + (min(values) if key == 'start_ms' else max(values)) / 1000
+
+    def emit_transcript(self, tokens, final):
+        text = token_text(tokens).strip()
         if not text:
-            return
-        now = time.time()
-        if self.started_at is None:
-            self.started_at = max(0, (self.latest_captured_at or now) - 1.5)
-        spoken = detect_language(text) if self.language == 'auto' else self.language
+            return None
+        now = self.latest_captured_at or time.time()
+        spoken = self.spoken_language(tokens, text)
         cleaned = normalize_meeting_terms(text, spoken)
         if not cleaned:
-            return
+            return None
         self.send(dict(
             type='transcript' if final else 'transcript_interim',
-            language=spoken,
-            id=f'{self.generation}:{self.source}:{self.utterance}',
-            text=cleaned,
-            raw_text=text,
-            started_at=self.started_at or now,
-            ended_at=ended_at or self.latest_captured_at or now,
-            generation=self.generation,
-            source=self.source,
+            language=spoken, id=self.utterance_id(), text=cleaned, raw_text=text,
+            started_at=self.clock(tokens, 'start_ms', now), ended_at=self.clock(tokens, 'end_ms', now),
+            generation=self.generation, source=self.source,
+            speaker=self.speakers.label(self.source, tokens), speaker_provisional=not final,
         ))
-        if final:
-            self.utterance += 1
-            self.started_at = None
+        return spoken
 
-    def emit_live_translation(self, text, final, utterance_id=None):
-        if not text:
+    def finish_utterance(self):
+        """Finalize the running utterance's source text; its translation may still follow."""
+        if not self.tokens:
+            self.interim_tokens = []
             return
-        now = time.time()
-        if self.started_at is None:
-            self.started_at = max(0, (self.latest_captured_at or now) - 1.5)
-        self.send(dict(
-            type='live_translation',
-            id=utterance_id or f'{self.generation}:{self.source}:{self.utterance}',
-            text=text.strip(),
-            final=final,
-            started_at=self.started_at or now,
-            generation=self.generation,
-            source=self.source,
-        ))
+        started_at = self.clock(self.tokens, 'start_ms', time.time())
+        spoken = self.emit_transcript(self.tokens, True)
+        if spoken and spoken != 'vi' and self.translate:
+            self.pending.append([self.utterance_id(), started_at, time.monotonic()])
+        self.utterance += 1
+        self.reset_turn()
 
-    def handle_translation(self, payload):
-        with self.text_lock:
-            self._handle_translation(payload)
-
-    def _handle_translation(self, payload):
-        source, translated, audio_parts, turn_complete = gemini_translation(payload)
-        if source or translated:
-            self.last_text_at = time.monotonic()
-        if source:
-            self.source_buffer = append_stream_text(self.source_buffer, source)
-            self.source_marks.append((len(self.source_buffer), self.latest_captured_at or time.time()))
-            if not turn_complete:
-                self.cut_segment()
-            if self.source_buffer.strip():
-                self.emit_transcript(self.source_buffer.strip(), False)
-        if translated:
-            self.translation_buffer = append_stream_text(self.translation_buffer, translated)
-            self.hand_over_translation()
-            self.emit_live_translation(self.translation_buffer, False)
-        for pcm, mime_type in audio_parts:
-            self.send(dict(
-                type='live_translation_audio',
-                id=f'{self.generation}:{self.source}:{self.utterance}',
-                pcm=pcm,
-                sample_rate=24000,
-                pcm_format='s16le',
-                mime_type=mime_type,
-                generation=self.generation,
-                source=self.source,
-            ))
-        if turn_complete:
-            self.finish_turn()
-
-    def finish_turn(self):
-        if self.translation_buffer.strip():
-            self.emit_live_translation(self.translation_buffer, True)
-        # Final source and translation must share the same utterance id.
-        # emit_transcript advances the counter, so it is intentionally last.
-        if self.source_buffer.strip():
-            self.emit_transcript(self.source_buffer.strip(), True)
-        elif self.translation_buffer.strip():
-            self.utterance += 1
-            self.started_at = None
-        self.source_buffer = ''
-        self.translation_buffer = ''
-        self.source_marks = []
-        self.carry_id = None
-        self.carry_text = ''
-
-    def hand_over_translation(self):
-        """Complete translated sentences trail the source, so they belong to the segment cut last."""
-        if not self.carry_id:
+    def cut_long_turn(self):
+        """Continuous speech never hits an endpoint; finalize completed sentences instead."""
+        text = token_text(self.tokens)
+        started = self.clock(self.tokens, 'start_ms', 0)
+        ended = self.clock(self.tokens, 'end_ms', 0)
+        if segment_size(text) < LIVE_SEGMENT_WORDS and ended - started < LIVE_SEGMENT_SECONDS:
             return
-        cuts = sentence_boundaries(self.translation_buffer)
-        if not cuts:
-            return
-        self.carry_text = f'{self.carry_text} {self.translation_buffer[:cuts[-1]].strip()}'.strip()
-        self.translation_buffer = self.translation_buffer[cuts[-1]:].lstrip()
-        self.emit_live_translation(self.carry_text, True, self.carry_id)
-
-    def cut_segment(self):
-        """Finalize completed sentences once the running turn is long enough."""
-        boundaries = sentence_boundaries(self.source_buffer)
+        boundaries = sentence_boundaries(text)
         if not boundaries:
             return
-        cut = boundaries[-1]
-        head = self.source_buffer[:cut].strip()
-        arrived = next((at for length, at in self.source_marks if length >= cut), self.latest_captured_at or time.time())
-        ended_at = arrived - LIVE_TRANSCRIPT_LAG
-        started_at = self.started_at or ended_at
-        if segment_size(head) < LIVE_SEGMENT_WORDS and ended_at - started_at < LIVE_SEGMENT_SECONDS:
-            return
-        ended_at = max(ended_at, started_at)
-        self.carry_id, self.carry_text = f'{self.generation}:{self.source}:{self.utterance}', ''
-        self.emit_transcript(head, True, ended_at=ended_at)
-        self.hand_over_translation()
-        self.source_buffer = self.source_buffer[cut:]
-        self.source_marks = [(length - cut, at) for length, at in self.source_marks if length > cut]
-        self.started_at = ended_at
+        cut, length, split = boundaries[-1], 0, len(self.tokens)
+        for index, token in enumerate(self.tokens):
+            length += len(token.get('text') or '')
+            if length >= cut:
+                split = index + 1
+                break
+        head, tail = self.tokens[:split], self.tokens[split:]
+        self.tokens = head
+        self.finish_utterance()
+        self.tokens = tail
 
-    def flush(self, timeout=3.0):
-        """Finalize the running turn when capture stops; Gemini never ends it on its own."""
+    def emit_translation(self, final):
+        target = self.pending[0] if self.pending else None
+        text = (self.translation + ('' if final else self.translation_interim)).strip()
+        if not text:
+            return
+        self.send(dict(
+            type='live_translation',
+            id=target[0] if target else self.utterance_id(),
+            text=text, final=final,
+            started_at=target[1] if target else self.clock(self.tokens, 'start_ms', time.time()),
+            generation=self.generation, source=self.source,
+        ))
+
+    def close_translation(self):
+        if self.pending:
+            self.emit_translation(True)
+            self.pending.pop(0)
+        self.translation = ''
+
+    def maybe_close_translation(self, force=False):
+        while self.pending:
+            head = self.pending[0]
+            idle = time.monotonic() - max(self.last_translation_at, head[2])
+            done = self.translation.strip() and not self.translation_interim and (
+                self.translation.rstrip().endswith(SENTENCE_END) or idle > SONIOX_TRANSLATION_IDLE)
+            if not (force or done or idle > SONIOX_TRANSLATION_TIMEOUT):
+                return
+            self.close_translation()
+
+    def handle(self, payload):
+        if payload.get('error_code'):
+            raise RuntimeError(f"Soniox {payload.get('error_code')}: {payload.get('error_message')}")
+        final, interim, final_tr, interim_tr, endpoint, finalized = soniox_tokens(payload)
+        with self.lock:
+            for token in final:
+                # A new speaker starts a new utterance so each line keeps one label.
+                previous = self.tokens[-1].get('speaker') if self.tokens else None
+                if previous is not None and token.get('speaker') not in (None, previous):
+                    self.finish_utterance()
+                self.tokens.append(token)
+            self.interim_tokens = interim
+            if final_tr or interim_tr:
+                self.last_translation_at = time.monotonic()
+                self.translation += token_text(final_tr)
+                self.translation_interim = token_text(interim_tr)
+                self.emit_translation(False)
+            if endpoint or finalized:
+                self.finish_utterance()
+            else:
+                self.cut_long_turn()
+                if self.tokens or self.interim_tokens:
+                    self.emit_transcript(self.tokens + self.interim_tokens, False)
+            self.maybe_close_translation()
+            if finalized and self.flush_requested.is_set():
+                self.finalize_at = time.monotonic()
+
+    def flush(self, timeout=4.0):
+        """Ask Soniox to finalize pending audio when capture stops, then close all turns."""
+        self.finalize_at = None
         self.flushed.clear()
         self.flush_requested.set()
-        if not self.flushed.wait(timeout):
-            with self.text_lock:
-                self.finish_turn()
-            self.flush_requested.clear()
+        self.flushed.wait(timeout)
+        with self.lock:
+            self.tokens += self.interim_tokens
+            self.finish_utterance()
+            self.maybe_close_translation(force=True)
+        self.flush_requested.clear()
 
     def connect(self):
         import certifi
         import websocket
-        # The frozen worker has no system CA path (dev only works via Homebrew's
-        # OpenSSL bundle), so pin certifi's CA file explicitly.
-        ws = websocket.create_connection(f'{GEMINI_LIVE_URL}?key={self.api_key}',
-                                         timeout=10, enable_multithread=True,
+        ws = websocket.create_connection(SONIOX_URL, timeout=10, enable_multithread=True,
                                          sslopt={'ca_certs': certifi.where()})
-        ws.send(json.dumps(self.setup_message()))
-        response = json.loads(ws.recv())
-        if 'setupComplete' not in response and 'setup_complete' not in response:
-            raise RuntimeError(f'Gemini Live setup failed: {response}')
+        ws.send(json.dumps(self.config()))
         ws.settimeout(.01)
         return ws
 
@@ -389,49 +422,55 @@ class GeminiLiveStream:
             ws = None
             try:
                 ws = self.connect()
-                connected_at = time.monotonic()
-                retry = 1.0
-                while not self.closed.is_set() and time.monotonic() - connected_at < 9 * 60 + 30:
+                self.origin = None
+                self.latest_captured_at = None
+                sent_finalize = False
+                last_sent = time.monotonic()
+                while not self.closed.is_set():
                     for _ in range(10):
                         try:
                             pcm, captured_at = self.audio.get_nowait()
                         except queue.Empty:
                             break
+                        if self.origin is None:
+                            # Soniox token times are relative to the first byte of this connection.
+                            self.origin = captured_at - len(pcm) / 2 / RATE
                         self.latest_captured_at = captured_at
-                        # Anchor the utterance to captured speech, not socket response time.
-                        # Gemini has no word alignment here; these remain approximate boundaries.
-                        samples = np.frombuffer(pcm, dtype='<i2')
-                        if self.started_at is None and len(samples) and np.sqrt(np.mean(samples.astype(np.float32) ** 2)) > 200:
-                            self.started_at = captured_at - len(samples) / RATE
-                        ws.send(json.dumps({'realtimeInput': {'audio': {
-                            'data': base64.b64encode(pcm).decode('ascii'),
-                            'mimeType': f'audio/pcm;rate={RATE}',
-                        }}}))
-                    if (self.flush_requested.is_set() and self.audio.empty()
-                            and time.monotonic() - self.last_text_at > 1.0):
-                        with self.text_lock:
-                            self.finish_turn()
-                        self.flush_requested.clear()
-                        self.flushed.set()
+                        ws.send_binary(pcm)
+                        last_sent = time.monotonic()
+                    if self.flush_requested.is_set() and self.audio.empty():
+                        if not sent_finalize:
+                            ws.send(json.dumps({'type': 'finalize'}))
+                            sent_finalize = True
+                        elif self.finalize_at is not None:
+                            self.flushed.set()
+                    elif sent_finalize and not self.flush_requested.is_set():
+                        sent_finalize = False
+                    if time.monotonic() - last_sent > 8:
+                        ws.send(json.dumps({'type': 'keepalive'}))
+                        last_sent = time.monotonic()
                     try:
-                        payload = json.loads(ws.recv())
-                        if self.translation_mode:
-                            self.handle_translation(payload)
-                        else:
-                            interim, final = gemini_transcriptions(payload)
-                            if interim:
-                                self.emit_transcript(interim, False)
-                            if final:
-                                self.emit_transcript(final, True)
+                        message = ws.recv()
+                        if message:
+                            payload = json.loads(message)
+                            self.handle(payload)
+                            if payload.get('finished'):
+                                break
+                        with self.lock:
+                            self.maybe_close_translation()
                     except (websocket.WebSocketTimeoutException, TimeoutError):
-                        pass
-                if not self.closed.is_set():
-                    log(f'[GEMINI] Rotating {self.source} session before 10-minute limit')
+                        with self.lock:
+                            self.maybe_close_translation()
+                retry = 1.0
             except Exception as exc:
                 if not self.closed.is_set():
-                    safe_error = str(exc).replace(self.api_key, '[redacted]')
-                    log(f'[GEMINI] {self.source} connection error: {safe_error}')
-                    self.send(dict(type='warning', message='Gemini Live reconnecting…'))
+                    log(f'[SONIOX] {self.source} connection error: {str(exc).replace(self.api_key, "[redacted]")}')
+                    self.send(dict(type='warning', message='Soniox reconnecting…'))
+                    with self.lock:
+                        # Token clocks restart with the next connection.
+                        self.tokens += self.interim_tokens
+                        self.finish_utterance()
+                        self.maybe_close_translation(force=True)
                     self.closed.wait(retry)
                     retry = min(retry * 2, 15.0)
             finally:
@@ -444,47 +483,50 @@ class GeminiLiveStream:
         self.thread.join(timeout=3)
 
 
-class GeminiLiveRecognizer:
-    """Gemini streaming transcription plus English/Chinese live translation."""
-    streaming = True
+class SonioxRecognizer:
+    """Soniox real-time transcription with built-in one-way translation to Vietnamese.
 
-    def __init__(self, api_key, model=GEMINI_LIVE_MODEL,
-                 translation_model=GEMINI_LIVE_TRANSLATE_MODEL):
+    Soniox returns text only; spoken Vietnamese audio comes from the local ZeroTTS voice.
+    """
+    streaming = True
+    diarizes = True
+
+    def __init__(self, api_key, model=SONIOX_MODEL):
         if not api_key:
-            raise RuntimeError('GEMINI_API_KEY is required when ASR_BACKEND=gemini')
+            raise RuntimeError('SONIOX_API_KEY is required when ASR_BACKEND=soniox')
         self.api_key = api_key
         self.model_name = model
-        self.translation_model = translation_model
-        self.backend_name = 'Gemini Live'
+        self.backend_name = 'Soniox'
         self.vi_model_ready = True
         self.streams = {}
         self.send = None
         self.generation = 0
         self.language = 'vi'
-        log(f'[MODEL READY] Gemini Live {model} + {translation_model}')
-
-    def bind(self, send):
-        self.send = send
+        self.speakers = SpeakerLabels()
+        log(f'[MODEL READY] Soniox {model}')
 
     def reset(self, generation, language):
         self.close_streams()
         self.generation = generation
         self.language = language
+        self.speakers = SpeakerLabels()
         if self.send:
             self.send(dict(type='translation_mode', generation=generation,
-                           live=language in ('en', 'zh', 'auto'),
-                           model=self.translation_model if language in ('en', 'zh', 'auto') else self.model_name))
+                           live=language in ('en', 'zh', 'auto'), live_audio=False,
+                           provider='Soniox', model=self.model_name))
 
     def push_audio(self, audio, captured_at, source):
         if self.send is None:
             return
         stream = self.streams.get(source)
         if stream is None:
-            stream = GeminiLiveStream(self.api_key, self.model_name, self.translation_model, source,
-                                      self.generation, self.language, self.send)
+            stream = SonioxStream(self.api_key, self.model_name, source,
+                                  self.generation, self.language, self.send, self.speakers)
             self.streams[source] = stream
-        pcm = (np.clip(audio, -1, 1) * 32767).astype('<i2').tobytes()
-        stream.put(pcm, captured_at)
+        stream.put((np.clip(audio, -1, 1) * 32767).astype('<i2').tobytes(), captured_at)
+
+    def bind(self, send):
+        self.send = send
 
     def flush(self):
         streams = list(self.streams.values())
@@ -561,8 +603,11 @@ def serve(recognizer, synthesizer, token):
             def send(data):
                 with send_lock:
                     conn.sendall(encode(data))
-            from diarization import DiarizationWorker
-            diarizer = DiarizationWorker(send)
+            if getattr(recognizer, 'diarizes', False):
+                diarizer = ProviderDiarization(send, recognizer.backend_name)
+            else:
+                from diarization import DiarizationWorker
+                diarizer = DiarizationWorker(send)
             def send_transcript(data):
                 with diarizer.lock:
                     diarizer.observe(data)
@@ -665,7 +710,7 @@ def serve(recognizer, synthesizer, token):
                         generation = int(message['generation'])
                         requested_language = message.get('language', 'zh')
                         if requested_language == 'auto' and not streaming:
-                            # Automatic detection is implemented for Gemini Live only.
+                            # Automatic detection needs the streaming (Soniox) backend.
                             requested_language = 'vi'
                         if requested_language not in ('zh', 'vi', 'en', 'auto'):
                             send(dict(type='error', message='Unsupported ASR language'))
@@ -721,7 +766,7 @@ def serve(recognizer, synthesizer, token):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--backend', choices=('auto', 'groq', 'gemini'),
+    parser.add_argument('--backend', choices=('auto', 'groq', 'soniox'),
                         default=os.environ.get('ASR_BACKEND', 'auto'))
     parser.add_argument('--tts-model', default=os.environ.get('TTS_MODEL', 'zeroweight-ai/ZeroTTS'))
     parser.add_argument('--tts-voice', default=os.environ.get('TTS_VOICE_PATH', str(ROOT / 'voices' / 'thuc-day-di.zip')))
@@ -731,14 +776,12 @@ def main():
     if hasattr(signal, 'pthread_sigmask'):
         signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM, signal.SIGINT})
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(SystemExit(0)))
-    use_gemini = args.backend == 'gemini' or (args.backend == 'auto' and bool(os.environ.get('GEMINI_API_KEY')))
-    use_groq = args.backend == 'groq' or (args.backend == 'auto' and not use_gemini and bool(os.environ.get('GROQ_API_KEY')))
-    if use_gemini:
-        recognizer = GeminiLiveRecognizer(
-            os.environ.get('GEMINI_API_KEY'),
-            model=os.environ.get('GEMINI_ASR_MODEL', GEMINI_LIVE_MODEL),
-            translation_model=os.environ.get('GEMINI_LIVE_TRANSLATE_MODEL', GEMINI_LIVE_TRANSLATE_MODEL),
-        )
+    # Soniox is preferred when configured: cheapest real-time ASR with translation included.
+    use_soniox = args.backend == 'soniox' or (args.backend == 'auto' and bool(os.environ.get('SONIOX_API_KEY')))
+    use_groq = args.backend == 'groq' or (args.backend == 'auto' and not use_soniox and bool(os.environ.get('GROQ_API_KEY')))
+    if use_soniox:
+        recognizer = SonioxRecognizer(os.environ.get('SONIOX_API_KEY'),
+                                      model=os.environ.get('SONIOX_MODEL', SONIOX_MODEL))
     elif use_groq:
         recognizer = GroqRecognizer(
             os.environ.get('GROQ_API_KEY'),
@@ -746,7 +789,7 @@ def main():
             base_url=os.environ.get('GROQ_BASE_URL', GROQ_BASE_URL),
         )
     else:
-        raise SystemExit('Speech recognition needs GEMINI_API_KEY or GROQ_API_KEY')
+        raise SystemExit('Speech recognition needs SONIOX_API_KEY or GROQ_API_KEY')
     if args.debug_wav: debug(recognizer, args.debug_wav, args.language)
     else:
         synthesizer = SpeechSynthesizer(args.tts_model, args.tts_voice)

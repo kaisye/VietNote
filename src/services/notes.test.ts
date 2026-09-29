@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { formatStructuredSummary, noteMoments } from './notes'
+import { formatStructuredSummary, noteContentText, noteMoments, noteTranscriptText } from './notes'
+import type { MeetingNote } from './types'
 
 describe('noteMoments', () => {
   it('maps legacy staged summaries into structured moments', () => {
@@ -38,5 +39,24 @@ describe('noteMoments', () => {
     expect(text).toContain('Minh → Test Qdrant và Chroma')
     expect(text).not.toContain('QUYẾT ĐỊNH TẠM THỜI')
     expect(text).not.toContain('undefined')
+  })
+})
+
+describe('note copy text', () => {
+  const note: MeetingNote = { id: 'n', title: 'Họp sản phẩm', createdAt: '2026-09-30T03:43:00Z', updatedAt: '2026-09-30T03:43:00Z', duration: 0, summary: 'Nội dung cũ', transcript: 'a b',
+    transcriptSegments: [{ id: 's1', timestamp: '2026-09-30T03:43:00Z', startedAt: 0, audioSource: 'system', rawText: 'Hello', cleanText: 'Hello', speaker: 'Người nói 1' }, { id: 's2', timestamp: '2026-09-30T03:44:00Z', startedAt: 1, audioSource: 'system', rawText: 'Hi', cleanText: 'Hi' }] }
+
+  it('copies title, time and body', () => {
+    const text = noteContentText(note)
+    expect(text.startsWith('Họp sản phẩm\n\n')).toBe(true)
+    expect(text.endsWith('\n\nNội dung cũ')).toBe(true)
+  })
+
+  it('copies one transcript line per segment with its speaker', () => {
+    const lines = noteTranscriptText(note).split('\n')
+    expect(lines).toHaveLength(2)
+    expect(lines[0]).toMatch(/^\[.+\] Người nói 1: Hello$/)
+    expect(lines[1]).toMatch(/^\[.+\] Hi$/)
+    expect(noteTranscriptText({ ...note, transcriptSegments: [] })).toBe('a b')
   })
 })
