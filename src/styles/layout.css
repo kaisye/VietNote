@@ -165,8 +165,6 @@
 .settings-heading small { margin-left:auto; color:var(--muted); }
 .appearance-picker { width:min(330px,100%); }
 .appearance-picker button { flex:1; }
-.summary-provider-picker { width:min(330px,100%); }
-.summary-provider-picker button { flex:1; display:inline-flex; align-items:center; justify-content:center; gap:6px; }
 .api-health-icon { flex:none; }
 .api-health-icon.ready { color:#22c55e !important; filter:drop-shadow(0 0 4px rgba(34,197,94,.35)); }
 .api-health-icon.unavailable { color:var(--muted); opacity:.58; }
@@ -204,7 +202,8 @@
 .group-menu-button { border:0; background:transparent; color:var(--bar-text); padding:6px; border-radius:8px; }
 .group-menu-button:hover { background:rgba(77,94,190,.12); }
 .group-popover { position:fixed; z-index:30; min-width:120px; padding:5px; border-radius:10px; background:var(--bar); border:1px solid var(--border); box-shadow:0 9px 24px var(--shadow); }
-.group-popover button { display:block; width:100%; border:0; background:transparent; color:var(--ink); padding:8px; text-align:left; border-radius:6px; }
+.group-popover button { display:block; width:100%; border:0; background:transparent; color:var(--ink); padding:7px 10px; text-align:left; border-radius:6px; font-size:13px; font-weight:600; white-space:nowrap; }
+.group-popover button.danger { color:#e5484d; }
 .group-popover button:hover { background:rgba(173,168,255,.2); }
 .add-group { flex:none; width:36px; height:36px; display:grid; place-items:center; border:0; border-radius:50%; background:transparent; color:var(--bar-text); transition:transform .18s ease; }
 .notes-columns { display:flex; gap:12px; min-height:0; flex:1; }
@@ -235,6 +234,12 @@
 .app-dialog input { width:100%; min-height:38px; padding:7px 10px; color:var(--ink); background:var(--input-bg); border:1px solid var(--border); border-radius:9px; }
 .app-dialog p { color:var(--muted); }
 .app-dialog .dialog-error { color:#e45b75; }
+.title-suggestions { display:flex; flex-wrap:wrap; gap:6px; margin-top:-10px; }
+.title-suggestions small { display:inline-flex; align-items:center; gap:6px; }
+.title-chip { display:inline-flex; align-items:center; gap:5px; max-width:100%; padding:4px 10px; border-radius:100px; border:1px solid var(--border); background:transparent; color:var(--muted); font-size:12px; font-weight:600; text-align:left; transition:background .15s ease, color .15s ease; }
+.title-chip:hover { background:rgba(173,168,255,.16); color:var(--ink); }
+.title-chip.selected { background:rgba(173,168,255,.27); color:var(--ink); border-color:var(--accent); }
+.title-chip svg { flex:none; color:var(--accent); }
 .dialog-actions { display:flex; justify-content:flex-end; gap:8px; }
 .note-group-row { display:flex; align-items:center; gap:15px; }
 .note-group-row span, .note-group-row small, .note-date { color:var(--muted); font-size:12px; }

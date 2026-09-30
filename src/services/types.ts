@@ -26,6 +26,7 @@ export interface UnresolvedTopic extends SummaryBullet { topic: string; options:
 export interface ActionItem { id: string; owner?: string | null; task: string; deadline?: string | null; evidenceIds: string[] }
 export interface DeferredItem extends SummaryBullet { target?: string | null }
 export interface StructuredMeetingSummary {
+  title?: string;
   tldr: string;
   keyPoints: SummaryBullet[];
   decisions: SummaryBullet[];

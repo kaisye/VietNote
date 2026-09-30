@@ -4,10 +4,9 @@ import type { AppModel } from '../hooks/useAppModel'
 import type { Appearance } from '../services/types'
 import { ApiHealthIcon, type Health } from '../components/ApiHealthIcon'
 import { DiarizationModelCard } from '../components/DiarizationModelCard'
-import { desktop, type AiKeyProvider, type SummaryAiConfig, type SummaryAiProvider } from '../services/desktop'
+import { desktop, type SummaryAiConfig } from '../services/desktop'
 
-const LOCAL_AI: SummaryAiConfig = { provider: 'nine_router', apiUrl: 'http://127.0.0.1:20128/v1', model: 'cx/gpt-5.5' }
-const GROQ_AI: SummaryAiConfig = { provider: 'groq', apiUrl: 'https://api.groq.com/openai/v1', model: 'openai/gpt-oss-120b' }
+const OPENROUTER_AI: SummaryAiConfig = { provider: 'openrouter', apiUrl: 'https://openrouter.ai/api/v1', model: 'qwen/qwen3.7-flash' }
 const CHECKING: Health = { ready: false, checking: true, message: 'Đang kiểm tra API…' }
 
 
@@ -18,12 +17,12 @@ export function SettingsPage({ model, appearance, setAppearance }: { model: AppM
   const [savingKey, setSavingKey] = useState(false)
   const [sonioxKey, setSonioxKey] = useState('')
   const [sonioxKeyStatus, setSonioxKeyStatus] = useState('')
-  const [summaryAi, setSummaryAi] = useState<SummaryAiConfig>(LOCAL_AI)
+  const [summaryAi, setSummaryAi] = useState<SummaryAiConfig>(OPENROUTER_AI)
   const [summaryKey, setSummaryKey] = useState('')
   const [summaryAiStatus, setSummaryAiStatus] = useState('')
-  const [providerHealth, setProviderHealth] = useState<Record<AiKeyProvider, Health>>({ soniox: CHECKING, nine_router: CHECKING, groq: CHECKING })
+  const [providerHealth, setProviderHealth] = useState<Record<'soniox' | 'openrouter', Health>>({ soniox: CHECKING, openrouter: CHECKING })
 
-  const refreshHealth = async (provider: AiKeyProvider) => {
+  const refreshHealth = async (provider: 'soniox' | 'openrouter') => {
     setProviderHealth(current => ({ ...current, [provider]: CHECKING }))
     try {
       const health = await desktop.checkAiProvider(provider)
@@ -53,8 +52,7 @@ export function SettingsPage({ model, appearance, setAppearance }: { model: AppM
       })
     }).catch(error => { if (active) setSummaryAiStatus(`Không đọc được cấu hình AI: ${error}`) })
     void refreshHealth('soniox')
-    void refreshHealth('nine_router')
-    void refreshHealth('groq')
+    void refreshHealth('openrouter')
     return () => { active = false }
   }, [])
 
@@ -89,15 +87,6 @@ export function SettingsPage({ model, appearance, setAppearance }: { model: AppM
     }
   }
 
-  const selectSummaryProvider = (provider: SummaryAiProvider) => {
-    setSummaryAi(provider === 'groq' ? GROQ_AI : LOCAL_AI)
-    setSummaryKey('')
-    setSummaryAiStatus('')
-    void desktop.aiKeyStatus(provider).then(status => {
-      setSummaryAiStatus(status === 'saved' ? 'API key đã được lưu an toàn.' : status === 'environment' ? 'Đang dùng API key từ môi trường hoặc bản build.' : '')
-    }).catch(error => setSummaryAiStatus(`Không đọc được API key: ${error}`))
-  }
-
   const saveSummaryAi = async () => {
     setSavingKey(true)
     setSummaryAiStatus('')
@@ -108,7 +97,7 @@ export function SettingsPage({ model, appearance, setAppearance }: { model: AppM
         await desktop.setAiApiKey(saved.provider, summaryKey.trim())
         setSummaryKey('')
       }
-      setSummaryAiStatus(saved.provider === 'groq' ? 'Đã lưu Groq cho dịch và tóm tắt.' : 'Đã lưu API local cho dịch và tóm tắt.')
+      setSummaryAiStatus('Đã lưu cấu hình OpenRouter.')
       await refreshHealth(saved.provider)
     } catch (error) {
       setSummaryAiStatus(`Không lưu được cấu hình AI: ${error}`)
@@ -142,19 +131,13 @@ export function SettingsPage({ model, appearance, setAppearance }: { model: AppM
     <DiarizationModelCard model={model}/>
 
     <section className="glass-card settings-card">
-      <h3>Dịch và tóm tắt AI</h3>
-      <small className="muted">Chọn API local tương thích OpenAI hoặc provider dùng API key. Ứng dụng không còn cài hay chọn model Qwen/Ollama.</small>
-      <div className="segmented summary-provider-picker">
-        <button className={summaryAi.provider === 'nine_router' ? 'selected' : ''} onClick={() => selectSummaryProvider('nine_router')} disabled={disabled}>API local <ApiHealthIcon health={providerHealth.nine_router}/></button>
-        <button className={summaryAi.provider === 'groq' ? 'selected' : ''} onClick={() => selectSummaryProvider('groq')} disabled={disabled}>Groq <ApiHealthIcon health={providerHealth.groq}/></button>
-      </div>
-      <label className="groq-key-label">Base URL</label>
-      <input className="summary-config-input" aria-label="Base URL dịch và tóm tắt" value={summaryAi.apiUrl} onChange={event => setSummaryAi({ ...summaryAi, apiUrl: event.target.value })} disabled={disabled || summaryAi.provider === 'groq'}/>
+      <div className="settings-heading"><h3>OpenRouter dịch và tóm tắt</h3><ApiHealthIcon health={providerHealth.openrouter}/><small>{providerHealth.openrouter.message}</small></div>
+      <small className="muted">Chuẩn hóa bản dịch theo đoạn và tóm tắt cuộc họp. Mặc định Qwen3.7 Flash, đã tắt chế độ suy nghĩ.</small>
       <label className="groq-key-label">Model</label>
-      <input className="summary-config-input" aria-label="Model dịch và tóm tắt" value={summaryAi.model} onChange={event => setSummaryAi({ ...summaryAi, model: event.target.value })} disabled={disabled || summaryAi.provider === 'groq'}/>
-      <label className="groq-key-label">API key {summaryAi.provider === 'nine_router' && '(không bắt buộc)'}</label>
+      <input className="summary-config-input" aria-label="Model dịch và tóm tắt" placeholder="qwen/qwen3.7-flash" value={summaryAi.model} onChange={event => setSummaryAi({ ...summaryAi, model: event.target.value })} disabled={disabled}/>
+      <label className="groq-key-label">API key</label>
       <div className="groq-key-actions">
-        <input aria-label="API key dịch và tóm tắt" type="password" autoComplete="off" spellCheck={false} placeholder={summaryAi.provider === 'groq' ? 'Nhập Groq API key' : 'Để trống nếu API local không yêu cầu key'} value={summaryKey} onChange={event => setSummaryKey(event.target.value)} disabled={disabled}/>
+        <input aria-label="OpenRouter API key" type="password" autoComplete="off" spellCheck={false} placeholder="Nhập OpenRouter API key" value={summaryKey} onChange={event => setSummaryKey(event.target.value)} disabled={disabled}/>
         <button className="pill-btn primary" disabled={disabled} onClick={() => void saveSummaryAi()}>Lưu cấu hình</button>
       </div>
       {summaryAiStatus && <small role="status" className="groq-key-message">{summaryAiStatus}</small>}

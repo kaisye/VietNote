@@ -3,8 +3,9 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { AudioChunk, AudioInput, SpokenLanguage, MeetingNote, NoteGroup, StructuredMeetingSummary, TranscriptSegment, WorkerMessage } from './types'
 
 export interface StoredNotes { notes: MeetingNote[]; groups: NoteGroup[] }
-export type SummaryAiProvider = 'nine_router' | 'groq'
-export type AiKeyProvider = SummaryAiProvider | 'soniox'
+export type SummaryAiProvider = 'openrouter'
+// Groq remains only as the speech-recognition fallback key.
+export type AiKeyProvider = SummaryAiProvider | 'soniox' | 'groq'
 export interface SummaryAiConfig { apiUrl: string; model: string; provider: SummaryAiProvider }
 export interface AiProviderHealth { ready: boolean; message: string }
 export type TtsVoiceId = 'thuc-day-di' | 'ngoc-huyen'
@@ -40,6 +41,7 @@ export const desktop = {
   stopAudio: () => invoke<void>('stop_audio'),
   summarizeSegments: (segments: TranscriptSegment[], previousSummary?: StructuredMeetingSummary) =>
     invoke<StructuredMeetingSummary>('summarize_segments', { segments, previousSummary: previousSummary ?? null }),
+  suggestTitle: (transcript: string) => invoke<string>('suggest_title', { transcript }),
   translateParagraph: (text: string, sourceLanguage: SpokenLanguage, previousContext: string) => invoke<string>('translate_text', { text, sourceLanguage, previousContext }),
   diarizationModelStatus: () => invoke<DiarizationModelStatus>('diarization_model_status'),
   downloadDiarizationModel: () => invoke<DiarizationModelStatus>('download_diarization_model'),

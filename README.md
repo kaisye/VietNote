@@ -18,7 +18,7 @@ Dự án sử dụng **Tauri + React + TypeScript** cho ứng dụng desktop, **
 - Liên kết các nội dung quan trọng với đoạn transcript làm bằng chứng.
 - Lưu và quản lý ghi chú cuộc họp trên máy.
 - Hỗ trợ giao diện sáng, tối hoặc tự động theo hệ thống.
-- Cho phép lựa chọn **9Router** hoặc **Groq** để dịch và tóm tắt.
+- Dịch theo đoạn và tóm tắt qua **OpenRouter** (mặc định Qwen3.7 Flash).
 
 ## Kiến trúc dự án
 
@@ -147,26 +147,16 @@ Không đưa API key vào mã nguồn hoặc commit lên repository.
 
 ## Cấu hình dịch và tóm tắt AI
 
-VietNote cho phép chọn nhà cung cấp tại **Cài đặt → Tóm tắt & dịch AI**.
-
-### 9Router
-
-Cấu hình mặc định:
+VietNote dùng **OpenRouter** cho dịch theo đoạn và tóm tắt, cấu hình tại **Cài đặt → OpenRouter dịch và tóm tắt**.
 
 ```text
-Base URL: http://127.0.0.1:20128/v1
-Model:    cx/gpt-5.5
+Endpoint: https://openrouter.ai/api/v1
+Model:    qwen/qwen3.7-flash
 ```
 
-Endpoint, model ID và API key đều có thể thay đổi trong ứng dụng. Nếu server local không yêu cầu xác thực thì API key là tùy chọn. Key cũng có thể được cung cấp qua `NINE_ROUTER_API_KEY`.
+Model có thể đổi sang bất kỳ model nào trên OpenRouter (dạng `nhà-cung-cấp/model`). API key được lưu trong Keychain hoặc đọc từ `OPENROUTER_API_KEY`. VietNote tắt chế độ suy nghĩ của model (`reasoning.effort = none`) và yêu cầu trả JSON khi tóm tắt.
 
-VietNote không cài hoặc chọn sẵn Qwen/Ollama cho dịch và tóm tắt. Các cấu hình cũ dùng model Qwen được tự động chuyển về API local mặc định ở trên.
-
-### Groq
-
-Groq sử dụng model `openai/gpt-oss-120b` cho dịch và tóm tắt. Cùng một Groq key được dùng cho ASR mà không đưa key ra phía React.
-
-Khi thay đổi API key, worker ASR sẽ được khởi động lại. Hãy dừng phiên ghi âm trước khi đổi key hoặc cấu hình nhà cung cấp.
+Cấu hình cũ dùng API local (9Router) hoặc Groq được tự động chuyển sang OpenRouter. Groq vẫn chỉ được dùng cho ASR Whisper khi không có Soniox key.
 
 ## Cách sử dụng
 
@@ -296,5 +286,4 @@ Kiểm tra adapter và luồng cập nhật/flush:
 - Chuẩn hóa thuật ngữ được thực hiện thận trọng để tránh làm sai nội dung gốc.
 - Âm thanh hệ thống có DRM có thể không được API của hệ điều hành cung cấp.
 - Hiệu năng và độ trễ của model local phụ thuộc vào cấu hình máy.
-- Khi dùng 9Router local, dịch vụ API và model tương ứng phải được khởi động riêng.
-- Khi dùng Groq, chất lượng và khả năng hoạt động phụ thuộc vào kết nối mạng, quota và chính sách của nhà cung cấp.
+- Dịch theo đoạn và tóm tắt phụ thuộc vào kết nối mạng, credit và chính sách của OpenRouter cùng nhà cung cấp model.

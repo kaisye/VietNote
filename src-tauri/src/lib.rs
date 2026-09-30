@@ -15,10 +15,8 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager};
 
-const GROQ_CHAT_API: &str = "https://api.groq.com/openai/v1";
-const GROQ_GPT_OSS_120B: &str = "openai/gpt-oss-120b";
-const LOCAL_CHAT_API: &str = "http://127.0.0.1:20128/v1";
-const LOCAL_CHAT_MODEL: &str = "cx/gpt-5.5";
+const OPENROUTER_CHAT_API: &str = "https://openrouter.ai/api/v1";
+const OPENROUTER_DEFAULT_MODEL: &str = "qwen/qwen3.7-flash";
 const DEFAULT_TTS_VOICE: &str = "thuc-day-di";
 
 #[derive(Default)]
@@ -35,21 +33,20 @@ const AI_KEY_SERVICE: &str = "local.vietnote.desktop";
 const GROQ_KEY_ACCOUNT: &str = "groq-asr-api-key";
 const SONIOX_KEY_ACCOUNT: &str = "soniox-asr-api-key";
 const SONIOX_MODELS_API: &str = "https://api.soniox.com/v1/models";
-const NINE_ROUTER_KEY_ACCOUNT: &str = "9router-api-key";
+const OPENROUTER_KEY_ACCOUNT: &str = "openrouter-api-key";
 const ACCESS_KEY_ACCOUNT: &str = "vietnote-access-key";
 
 fn normalize_ai_provider(provider: &str) -> Result<&'static str, String> {
     match provider.trim().to_lowercase().as_str() {
-        "local" | "nine_router" => Ok("nine_router"),
-        "groq" => Ok("groq"),
+        "openrouter" => Ok("openrouter"),
         _ => Err("Nhà cung cấp AI không hợp lệ".into()),
     }
 }
 
 fn normalize_key_provider(provider: &str) -> Result<&'static str, String> {
     match provider.trim().to_lowercase().as_str() {
-        "local" | "nine_router" => Ok("nine_router"),
         "groq" => Ok("groq"),
+        "openrouter" => Ok("openrouter"),
         "soniox" => Ok("soniox"),
         _ => Err("Nhà cung cấp AI không hợp lệ".into()),
     }
@@ -59,7 +56,7 @@ fn provider_key_entry(provider: &str) -> Result<keyring::Entry, String> {
     let account = match normalize_key_provider(provider)? {
         "groq" => GROQ_KEY_ACCOUNT,
         "soniox" => SONIOX_KEY_ACCOUNT,
-        "nine_router" => NINE_ROUTER_KEY_ACCOUNT,
+        "openrouter" => OPENROUTER_KEY_ACCOUNT,
         _ => unreachable!(),
     };
     keyring::Entry::new(AI_KEY_SERVICE, account)
@@ -78,7 +75,7 @@ fn provider_env_key(provider: &str) -> Option<String> {
     let name = match normalize_key_provider(provider).ok()? {
         "groq" => "GROQ_API_KEY",
         "soniox" => "SONIOX_API_KEY",
-        _ => "NINE_ROUTER_API_KEY",
+        _ => "OPENROUTER_API_KEY",
     };
     std::env::var(name).ok().filter(|key| !key.trim().is_empty())
 }
@@ -249,10 +246,10 @@ fn set_tts_voice(app: tauri::AppHandle, state: tauri::State<'_, NativeState>, vo
     tts_voice_config(&app)
 }
 
-fn default_summary_provider() -> String { "groq".into() }
+fn default_summary_provider() -> String { "openrouter".into() }
 
 impl Default for SummaryAiConfig {
-    fn default() -> Self { Self { api_url: GROQ_CHAT_API.into(), model: GROQ_GPT_OSS_120B.into(), provider: default_summary_provider() } }
+    fn default() -> Self { Self { api_url: OPENROUTER_CHAT_API.into(), model: OPENROUTER_DEFAULT_MODEL.into(), provider: default_summary_provider() } }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -297,6 +294,8 @@ struct DeferredItem { id: String, text: String, target: Option<String>, evidence
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct MeetingSummary {
+    /// Short meeting name suggested to the user when saving.
+    title: String,
     tldr: String,
     key_points: Vec<SummaryBullet>,
     decisions: Vec<SummaryBullet>,
@@ -314,16 +313,9 @@ fn app_data(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 fn summary_ai_config(app: &tauri::AppHandle) -> Result<SummaryAiConfig, String> {
     let path = app_data(app)?.join("summary-ai.json");
     let mut config: SummaryAiConfig = fs::read(&path).ok().and_then(|data| serde_json::from_slice(&data).ok()).unwrap_or_default();
-    if config.provider == "local" { config.provider = "nine_router".into(); }
-    // Older VietNote builds provisioned a local Qwen/Ollama model. Do not keep
-    // selecting it after upgrading: point those legacy profiles at the generic
-    // OpenAI-compatible local API instead.
-    if config.model.to_ascii_lowercase().contains("qwen") {
-        config = SummaryAiConfig {
-            api_url: LOCAL_CHAT_API.into(),
-            model: LOCAL_CHAT_MODEL.into(),
-            provider: "nine_router".into(),
-        };
+    // Profiles saved for the removed local API or Groq fall back to OpenRouter.
+    if config.provider != "openrouter" {
+        config = SummaryAiConfig::default();
         if let Some(parent) = path.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
         fs::write(&path, serde_json::to_vec(&config).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     }
@@ -334,7 +326,7 @@ fn summary_ai_config(app: &tauri::AppHandle) -> Result<SummaryAiConfig, String> 
 fn get_summary_ai_config(app: tauri::AppHandle) -> Result<SummaryAiConfig, String> { summary_ai_config(&app) }
 
 #[tauri::command]
-async fn check_ai_provider(app: tauri::AppHandle, provider: String) -> Result<AiProviderHealth, String> {
+async fn check_ai_provider(provider: String) -> Result<AiProviderHealth, String> {
     let provider = normalize_key_provider(&provider)?;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(8))
@@ -347,23 +339,13 @@ async fn check_ai_provider(app: tauri::AppHandle, provider: String) -> Result<Ai
             };
             client.get(SONIOX_MODELS_API).bearer_auth(key).send().await
         }
-        "groq" => {
-            let Some(key) = resolved_provider_key("groq") else {
-                return Ok(AiProviderHealth { ready: false, message: "Chưa có Groq API key".into() });
+        "openrouter" => {
+            let Some(key) = resolved_provider_key("openrouter") else {
+                return Ok(AiProviderHealth { ready: false, message: "Chưa có OpenRouter API key".into() });
             };
-            client.get(format!("{GROQ_CHAT_API}/models")).bearer_auth(key).send().await
+            client.get(format!("{OPENROUTER_CHAT_API}/key")).bearer_auth(key).send().await
         }
-        "nine_router" => {
-            let config = summary_ai_config(&app)?;
-            let api_url = if config.provider == "nine_router" { config.api_url } else { LOCAL_CHAT_API.into() };
-            let request = client.get(format!("{}/models", api_url.trim_end_matches('/')));
-            let request = match resolved_provider_key("nine_router") {
-                Some(key) => request.bearer_auth(key),
-                None => request,
-            };
-            request.send().await
-        }
-        _ => unreachable!(),
+        _ => return Err("Không kiểm tra được nhà cung cấp này".into()),
     };
     match response {
         Ok(response) if response.status().is_success() => Ok(AiProviderHealth {
@@ -386,22 +368,8 @@ fn set_summary_ai_config(app: tauri::AppHandle, config: SummaryAiConfig) -> Resu
     let provider = normalize_ai_provider(&config.provider)?.to_string();
     let model = config.model.trim().to_string();
     if model.is_empty() { return Err("Tên model không được trống".into()); }
-    if model.to_ascii_lowercase().contains("qwen") {
-        return Err("Qwen đã bị loại bỏ; hãy chọn model do API local hoặc Groq cung cấp".into());
-    }
-    let api_url = match provider.as_str() {
-        "nine_router" => {
-            let url = config.api_url.trim().trim_end_matches('/').to_string();
-            if !(url.starts_with("http://") || url.starts_with("https://")) { return Err("API phải bắt đầu bằng http:// hoặc https://".into()); }
-            url
-        }
-        "groq" => {
-            if model != GROQ_GPT_OSS_120B { return Err("Hiện Groq chỉ được cấu hình sẵn cho openai/gpt-oss-120b".into()); }
-            GROQ_CHAT_API.into()
-        }
-        _ => unreachable!(),
-    };
-    let next = SummaryAiConfig { api_url, model, provider };
+    if !model.contains('/') { return Err("Model OpenRouter có dạng nhà-cung-cấp/model, ví dụ qwen/qwen3.7-flash".into()); }
+    let next = SummaryAiConfig { api_url: OPENROUTER_CHAT_API.into(), model, provider };
     let dir = app_data(&app)?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     fs::write(dir.join("summary-ai.json"), serde_json::to_vec(&next).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
@@ -554,29 +522,34 @@ fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> 
             let Ok(event) = serde_json::from_str::<Value>(&line) else { continue };
             if event.get("type").and_then(Value::as_str) != Some("ready") { continue; }
             let Some(port) = event.get("port").and_then(Value::as_u64) else { continue };
-            match TcpStream::connect(("127.0.0.1", port as u16)) {
-                Ok(mut stream) => {
-                    let _ = stream.set_nodelay(true);
-                    let hello = json!({"type":"hello", "token":token});
-                    let _ = writeln!(stream, "{hello}");
-                    match stream.try_clone() {
-                        Ok(reader) => {
-                            if let Ok(mut slot) = writer.lock() { if epoch_counter.load(Ordering::SeqCst) == epoch { *slot = Some(stream); } }
-                            for line in BufReader::new(reader).lines().map_while(Result::ok) {
-                                if epoch_counter.load(Ordering::SeqCst) != epoch { break; }
-                                if let Ok(message) = serde_json::from_str::<Value>(&line) { let _ = app.emit("worker-message", message); }
+            // Serve the socket on its own thread and keep draining stdout: an unread
+            // pipe blocks the worker's print() once it fills, and the log would lose
+            // every diagnostic written after startup.
+            let (app, writer, epoch_counter, token) = (app.clone(), writer.clone(), epoch_counter.clone(), token.clone());
+            std::thread::spawn(move || {
+                match TcpStream::connect(("127.0.0.1", port as u16)) {
+                    Ok(mut stream) => {
+                        let _ = stream.set_nodelay(true);
+                        let hello = json!({"type":"hello", "token":token});
+                        let _ = writeln!(stream, "{hello}");
+                        match stream.try_clone() {
+                            Ok(reader) => {
+                                if let Ok(mut slot) = writer.lock() { if epoch_counter.load(Ordering::SeqCst) == epoch { *slot = Some(stream); } }
+                                for line in BufReader::new(reader).lines().map_while(Result::ok) {
+                                    if epoch_counter.load(Ordering::SeqCst) != epoch { break; }
+                                    if let Ok(message) = serde_json::from_str::<Value>(&line) { let _ = app.emit("worker-message", message); }
+                                }
+                                if epoch_counter.load(Ordering::SeqCst) == epoch {
+                                    if let Ok(mut slot) = writer.lock() { *slot = None; }
+                                    let _ = app.emit("worker-status", "Service connection closed");
+                                }
                             }
-                            if epoch_counter.load(Ordering::SeqCst) == epoch {
-                                if let Ok(mut slot) = writer.lock() { *slot = None; }
-                                let _ = app.emit("worker-status", "Service connection closed");
-                            }
+                            Err(_) => { let _ = app.emit("worker-status", "Service connection failed"); }
                         }
-                        Err(_) => { let _ = app.emit("worker-status", "Service connection failed"); }
                     }
+                    Err(_) => { let _ = app.emit("worker-status", "Service connection failed"); }
                 }
-                Err(_) => { let _ = app.emit("worker-status", "Service connection failed"); }
-            }
-            break;
+            });
         }
     });
     Ok(())
@@ -688,40 +661,25 @@ fn stop_capture(state: tauri::State<'_, NativeState>) -> Result<(), String> {
     Ok(())
 }
 
-async fn ai_completion(app: &tauri::AppHandle, system: &str, user: String, max_tokens: u32) -> Result<String, String> {
+/// `json` asks providers that support it to constrain the reply to a JSON object.
+async fn ai_completion(app: &tauri::AppHandle, system: &str, user: String, max_tokens: u32, json: bool) -> Result<String, String> {
     let config = summary_ai_config(app)?;
     let endpoint = if config.api_url.ends_with("/chat/completions") { config.api_url } else { format!("{}/chat/completions", config.api_url) };
-    let is_groq = config.provider == "groq";
-    let body = if is_groq {
-        // GPT-OSS spends completion tokens on reasoning before producing content. Low effort plus
-        // a larger cap prevents short translations from ending with an empty content field.
-        json!({
-            "model": config.model,
-            "messages": [{"role":"user","content":format!("{system}\n\n{user}")}],
-            "max_completion_tokens": max_tokens.saturating_mul(2).max(1024),
-            "reasoning_effort": "low",
-            "include_reasoning": false
-        })
-    } else {
-        json!({"model":config.model, "messages":[{"role":"system","content":system},{"role":"user","content":user}], "max_tokens":max_tokens})
-    };
+    // Qwen Flash thinks by default and bills it as output; notes and paragraph
+    // translation do not need it, and it can eat the max_tokens budget.
+    let mut body = json!({"model":config.model, "messages":[{"role":"system","content":system},{"role":"user","content":user}], "max_tokens":max_tokens, "reasoning":{"effort":"none"}});
+    if json { body["response_format"] = json!({"type":"json_object"}); }
     let client = reqwest::Client::builder().timeout(Duration::from_secs(90)).build().map_err(|e| e.to_string())?;
     let request = client.post(endpoint).json(&body);
-    let response = if is_groq {
-        let key = resolved_provider_key("groq")
-            .filter(|key| !key.trim().is_empty())
-            .ok_or("Dịch vụ xử lý tạm thời chưa sẵn sàng.")?;
-        request.bearer_auth(key).send().await.map_err(|_| "Không kết nối được dịch vụ xử lý".to_string())?
-    } else {
-        let request = match stored_provider_key("nine_router").ok().flatten().or_else(|| provider_env_key("nine_router")) {
-            Some(key) => request.bearer_auth(key),
-            None => request,
-        };
-        request.send().await.map_err(|e| format!("Không gọi được 9Router: {e}"))?
-    };
+    let key = resolved_provider_key("openrouter").ok_or("Chưa có OpenRouter API key")?;
+    let response = request.bearer_auth(key).header("X-Title", "VietNote").send().await.map_err(|e| format!("Không gọi được OpenRouter: {e}"))?;
     if !response.status().is_success() {
         let status = response.status();
-        return Err(format!("Dịch vụ xử lý tạm thời không khả dụng (HTTP {status})"));
+        // OpenRouter explains rejections (no credits, unsupported parameter) in error.message.
+        let detail = response.json::<Value>().await.ok()
+            .and_then(|data| data.pointer("/error/message").and_then(Value::as_str).map(|message| format!(": {message}")))
+            .unwrap_or_default();
+        return Err(format!("Dịch vụ xử lý tạm thời không khả dụng (HTTP {status}){detail}"));
     }
     let data: Value = response.json().await.map_err(|e| e.to_string())?;
     data.pointer("/choices/0/message/content").and_then(Value::as_str).map(str::trim).filter(|text| !text.is_empty()).map(str::to_string)
@@ -779,8 +737,14 @@ fn validate_summary(summary: MeetingSummary, segments: &[TranscriptSegment]) -> 
     validate_summary_with(summary, &allowed)
 }
 
+fn clean_title(title: &str) -> String {
+    let title = title.trim().trim_matches(|c: char| matches!(c, '"' | '\'' | '“' | '”' | '.' | '#' | '*')).trim();
+    title.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(80).collect()
+}
+
 fn validate_summary_with(mut summary: MeetingSummary, allowed: &HashSet<String>) -> MeetingSummary {
     let allowed = allowed.clone();
+    summary.title = clean_title(&summary.title);
     let validate_bullets = |items: &mut Vec<SummaryBullet>, evidence_required: bool| {
         for item in items.iter_mut() { keep_evidence(&mut item.evidence_ids, &allowed); }
         items.retain(|item| !item.text.trim().is_empty() && (!evidence_required || !item.evidence_ids.is_empty()));
@@ -853,22 +817,38 @@ QUY TẮC BẮT BUỘC:
 - Mỗi decision, tentative decision, unresolved topic, action item và deferred item phải có evidenceIds lấy nguyên văn từ ID trong dấu [] ở transcript.
 - Không dùng nhãn nguồn (mic)/(máy) làm tên người. Chỉ ghi owner khi tên người xuất hiện rõ trong lời nói.
 - Nhãn Người nói N là ước lượng âm thanh, riêng theo từng nguồn; không suy ra tên thật hoặc owner từ nhãn này. Một đoạn có thể chứa nhiều người nói.
+- title: tên cuộc họp tiếng Việt 3–8 từ nêu chủ đề chính và mục đích (ví dụ "Chốt kiến trúc thanh toán quý 4"), không ngày giờ, không dấu ngoặc kép, không chung chung kiểu "Cuộc họp nhóm". Chưa rõ chủ đề thì để rỗng.
 MERGE_RULE
 - Không tạo section giả để lấp chỗ trống. Dùng mảng rỗng.
 
 Chỉ trả về một JSON object, không markdown, đúng camelCase schema:
-{"tldr":"string","keyPoints":[{"id":"string","text":"string","evidenceIds":["segment-id"]}],"decisions":[],"tentativeDecisions":[],"unresolvedTopics":[{"id":"string","text":"string","topic":"string","options":["string"],"status":"No final decision","evidenceIds":["segment-id"]}],"actionItems":[{"id":"string","owner":null,"task":"string","deadline":null,"evidenceIds":["segment-id"]}],"openQuestions":[],"deferred":[{"id":"string","text":"string","target":null,"evidenceIds":["segment-id"]}]}"#;
+{"title":"string","tldr":"string","keyPoints":[{"id":"string","text":"string","evidenceIds":["segment-id"]}],"decisions":[],"tentativeDecisions":[],"unresolvedTopics":[{"id":"string","text":"string","topic":"string","options":["string"],"status":"No final decision","evidenceIds":["segment-id"]}],"actionItems":[{"id":"string","owner":null,"task":"string","deadline":null,"evidenceIds":["segment-id"]}],"openQuestions":[],"deferred":[{"id":"string","text":"string","target":null,"evidenceIds":["segment-id"]}]}"#;
     let system = system.replace("MERGE_RULE", merge_rule);
     let user = if incremental {
         format!("BẢN TÓM TẮT HIỆN CÓ:\n{previous}\n\nTRANSCRIPT MỚI CÓ ID:\n{transcript}")
     } else {
         format!("TRANSCRIPT CÓ ID:\n{transcript}")
     };
-    let raw = ai_completion(&app, &system, user, 1800).await?;
+    let raw = ai_completion(&app, &system, user, 1800, true).await?;
     let value = parse_json_object(&raw)?;
     let mut summary: MeetingSummary = serde_json::from_value(value).map_err(|error| format!("Summary không đúng schema: {error}"))?;
     map_evidence(&mut summary, &real_of);
     Ok(validate_summary_with(summary, &allowed))
+}
+
+/// Names the meeting from a transcript excerpt alone: a few output tokens, so the
+/// save dialog does not wait for a full summary.
+#[tauri::command]
+async fn suggest_title(app: tauri::AppHandle, transcript: String) -> Result<String, String> {
+    let transcript: String = transcript.chars().rev().take(6000).collect::<Vec<_>>().into_iter().rev().collect();
+    if transcript.trim().is_empty() { return Ok(String::new()); }
+    let raw = ai_completion(&app,
+        "Đặt tên cuộc họp tiếng Việt 3–8 từ nêu chủ đề chính và mục đích (ví dụ: Chốt kiến trúc thanh toán quý 4), dựa trên transcript. Không ngày giờ, không dấu ngoặc kép, không chung chung kiểu \"Cuộc họp nhóm\". Chỉ trả về tên.",
+        format!("TRANSCRIPT:\n{transcript}"),
+        40,
+        false,
+    ).await?;
+    Ok(clean_title(raw.lines().next().unwrap_or_default()))
 }
 
 #[tauri::command]
@@ -887,6 +867,7 @@ async fn translate_text(app: tauri::AppHandle, text: String, source_language: St
         &format!("Bạn là biên tập viên bản ghi và phiên dịch viên từ {source} sang tiếng Việt. Đầu vào là một đoạn ghép từ nhiều kết quả ASR liên tiếp. Hãy dùng toàn bộ ngữ cảnh để sửa các lỗi nhận diện rõ ràng, nối lại câu bị ngắt, thêm dấu câu, rồi dịch cả đoạn sang tiếng Việt tự nhiên. Giữ nguyên tên riêng, số liệu và thuật ngữ chuyên môn. Không bịa nội dung. Chỉ trả về bản dịch tiếng Việt hoàn chỉnh của ĐOẠN CẦN DỊCH; không dịch lại ngữ cảnh và không giải thích."),
         format!("{context}\n\nĐOẠN CẦN DỊCH:\n{text}"),
         300,
+        false,
     ).await
 }
 
@@ -910,7 +891,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(NativeState::default())
-        .invoke_handler(tauri::generate_handler![load_notes, save_notes, get_summary_ai_config, set_summary_ai_config, check_ai_provider, get_tts_voice_config, set_tts_voice, ai_key_status, set_ai_api_key, access_key_status, set_access_key, start_worker, stop_worker, send_worker, start_capture, stop_capture, summarize_segments, translate_text, open_permission, diarization_model_status, download_diarization_model, cancel_diarization_download, remove_diarization_model, playback::play_audio, playback::stop_audio])
+        .invoke_handler(tauri::generate_handler![load_notes, save_notes, get_summary_ai_config, set_summary_ai_config, check_ai_provider, get_tts_voice_config, set_tts_voice, ai_key_status, set_ai_api_key, access_key_status, set_access_key, start_worker, stop_worker, send_worker, start_capture, stop_capture, summarize_segments, suggest_title, translate_text, open_permission, diarization_model_status, download_diarization_model, cancel_diarization_download, remove_diarization_model, playback::play_audio, playback::stop_audio])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 let state = window.app_handle().state::<NativeState>();
@@ -976,8 +957,16 @@ mod tests {
     }
 
     #[test]
-    fn default_local_ai_does_not_use_qwen() {
-        assert!(!LOCAL_CHAT_MODEL.to_ascii_lowercase().contains("qwen"));
-        assert!(!LOCAL_CHAT_API.contains("11434"));
+    fn meeting_title_is_trimmed_and_unquoted() {
+        assert_eq!(clean_title("  \"Chốt   kiến trúc thanh toán\".  "), "Chốt kiến trúc thanh toán");
+        assert_eq!(clean_title(&"a".repeat(200)).len(), 80);
+    }
+
+    #[test]
+    fn summary_ai_accepts_only_openrouter() {
+        assert_eq!(normalize_ai_provider("openrouter"), Ok("openrouter"));
+        assert!(normalize_ai_provider("groq").is_err());
+        assert!(normalize_ai_provider("nine_router").is_err());
+        assert_eq!(SummaryAiConfig::default().model, OPENROUTER_DEFAULT_MODEL);
     }
 }
