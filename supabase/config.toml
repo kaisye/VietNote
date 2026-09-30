@@ -9,3 +9,10 @@ verify_jwt = false
 
 [functions.ai-complete]
 verify_jwt = true
+
+[functions.payos]
+verify_jwt = true
+
+[functions.payos-webhook]
+# Authenticated by the payOS payload signature instead of a user JWT.
+verify_jwt = false

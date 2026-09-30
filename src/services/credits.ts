@@ -10,3 +10,16 @@ export function minutesText(seconds: number | null | undefined) {
 /** Opens the sign-in dialog of the sidebar account menu. */
 export const SIGN_IN_EVENT = 'vietnote:sign-in'
 export function requestSignIn() { window.dispatchEvent(new Event(SIGN_IN_EVENT)) }
+
+export function vnd(amount: number) { return `${new Intl.NumberFormat('vi-VN').format(amount)}đ` }
+
+export function hoursText(hours: number) { return `${Number(hours).toLocaleString('vi-VN')} giờ` }
+
+/** Vietnamese text for the short error codes of the purchase commands. */
+export function purchaseError(error: unknown) {
+  const code = String(error)
+  if (code === 'offline') return 'Không kết nối được máy chủ, kiểm tra mạng rồi thử lại.'
+  if (code === 'signed_out') return 'Phiên đăng nhập đã hết, hãy đăng nhập lại.'
+  if (code === 'unknown_package') return 'Gói này vừa thay đổi, hãy chọn lại.'
+  return 'Chưa tạo được thanh toán, thử lại sau ít phút.'
+}

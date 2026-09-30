@@ -238,6 +238,14 @@ jobs:
               "windows-x86_64": {signature: $win_sig, url: $win_url}}}' > installers/latest.json
           cat installers/latest.json
 
+      # Fixed names keep the website's releases/latest/download/... links valid across versions.
+      - name: Add version-less download copies
+        shell: bash
+        run: |
+          cp installers/*.dmg installers/VietNote_aarch64.dmg
+          cp installers/*-setup.exe installers/VietNote_x64-setup.exe
+          ls -la installers
+
       - name: Replace release installers
         uses: softprops/action-gh-release@v2
         with:

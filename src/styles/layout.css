@@ -323,3 +323,19 @@
 @media (max-width:850px) { .sidebar { width:190px; padding:12px; } .notes-list-panel { width:230px; } .live-panels { grid-template-columns:1fr; } .live-panel { max-height:350px; } }
 .update-banner { position:absolute; z-index:20; top:16px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:12px; max-width:calc(100% - 32px); padding:8px 8px 8px 16px; border-radius:100px; border:1px solid var(--border); background:var(--glass-strong); color:var(--ink); box-shadow:0 10px 24px var(--shadow); backdrop-filter:blur(18px); font-size:13px; font-weight:600; }
 .update-banner .pill-btn { height:32px; }
+
+.credit-shop { display:flex; flex-direction:column; gap:8px; margin:6px 0 4px; padding-top:12px; border-top:1px solid var(--border); }
+.credit-shop-title { font-size:13px; }
+.credit-offer { display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; padding:11px 13px; text-align:left; color:var(--ink); background:var(--input-bg); border:1px solid var(--border); border-radius:14px; font:inherit; cursor:pointer; transition:border-color .15s, transform .15s; }
+.credit-offer:hover:not(:disabled) { border-color:var(--blush); transform:translateY(-1px); }
+.credit-offer:disabled { opacity:.6; cursor:default; }
+.credit-offer.highlight { background:linear-gradient(135deg,rgba(255,255,255,.35) 2%,rgba(255,159,203,.26) 53%,rgba(173,168,255,.30) 100%); border-color:rgba(255,159,203,.6); }
+.credit-offer-main { display:flex; flex-direction:column; align-items:flex-start; gap:3px; min-width:0; }
+.credit-offer-main b { font-size:14px; }
+.credit-offer-main small { font-size:12px; color:var(--muted); }
+.credit-offer-main em { font-style:normal; color:#e0609a; font-weight:700; }
+.credit-badge { padding:2px 8px; border-radius:99px; font-size:11px; font-weight:700; color:#fff; background:linear-gradient(90deg,#ff7fb6,#a59dff); }
+.credit-offer-price { display:flex; flex-direction:column; align-items:flex-end; gap:1px; white-space:nowrap; }
+.credit-offer-price b { font-size:15px; }
+.credit-offer-price s { font-size:12px; color:var(--muted); }
+.credit-waiting { display:flex; align-items:center; gap:8px; font-weight:700; font-size:13px; }

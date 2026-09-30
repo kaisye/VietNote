@@ -109,10 +109,13 @@ async fn access_token() -> Result<String, String> {
 }
 
 /// Calls the `soniox-key` Edge Function; errors are short machine codes.
-async fn credit_call(body: Value) -> Result<Value, String> {
+async fn credit_call(body: Value) -> Result<Value, String> { function_call("soniox-key", body).await }
+
+/// Calls a signed-in Edge Function; errors are short machine codes.
+async fn function_call(name: &str, body: Value) -> Result<Value, String> {
     let (url, anon) = config().ok_or("not_configured")?;
     let token = access_token().await?;
-    let response = client()?.post(format!("{url}/functions/v1/soniox-key"))
+    let response = client()?.post(format!("{url}/functions/v1/{name}"))
         .header("apikey", anon).bearer_auth(token).json(&body).send().await
         .map_err(|_| "offline".to_string())?;
     let status = response.status().as_u16();
@@ -165,6 +168,36 @@ pub async fn soniox_release(grant_id: &str) {
 
 #[tauri::command]
 pub fn account_signed_in() -> bool { signed_in() }
+
+/// Credit packages on sale, with any promotion applied.
+#[tauri::command]
+pub async fn account_offers() -> Result<Value, String> {
+    Ok(function_call("payos", json!({"action": "offers"})).await?.get("offers").cloned().unwrap_or(Value::Array(vec![])))
+}
+
+/// Creates a payOS order and opens its checkout page in the browser.
+#[tauri::command]
+pub async fn account_buy(package_id: String) -> Result<i64, String> {
+    let order = function_call("payos", json!({"action": "create", "package_id": package_id})).await?;
+    let url = order.get("checkout_url").and_then(Value::as_str).ok_or("payment_unavailable")?;
+    if !url.starts_with("https://") { return Err("payment_unavailable".into()); }
+    open_browser(url)?;
+    order.get("order_code").and_then(Value::as_i64).ok_or_else(|| "payment_unavailable".into())
+}
+
+/// `{status: pending|paid|cancelled, balance_seconds}` of the user's order.
+#[tauri::command]
+pub async fn account_order_status(order_code: i64) -> Result<Value, String> {
+    function_call("payos", json!({"action": "status", "order_code": order_code})).await
+}
+
+fn open_browser(url: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("open").arg(url).spawn().map_err(|e| e.to_string())?;
+    #[cfg(target_os = "windows")]
+    std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", url]).spawn().map_err(|e| e.to_string())?;
+    Ok(())
+}
 
 #[tauri::command]
 pub async fn account_status() -> Result<AccountStatus, String> {

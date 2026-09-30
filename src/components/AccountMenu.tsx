@@ -4,6 +4,7 @@ import { UserRound, X } from 'lucide-react'
 import type { AppModel } from '../hooks/useAppModel'
 import { desktop } from '../services/desktop'
 import { minutesText, SIGN_IN_EVENT } from '../services/credits'
+import { CreditShop } from './CreditShop'
 
 /** Sidebar account badge; opens sign-in or the account menu as a centered dialog. */
 export function AccountMenu({ model }: { model: AppModel }) {
@@ -75,6 +76,7 @@ export function AccountMenu({ model }: { model: AppModel }) {
         <strong>{account.email}</strong>
         <span className="account-minutes">{minutesText(account.balanceSeconds)}</span>
         <small className="muted">Chép lời, dịch và tóm tắt dùng phút của tài khoản.</small>
+        {desktop.isDesktop && <CreditShop onPaid={refreshAccount}/>}
         <button className="pill-btn" disabled={disabled} onClick={() => void signOut()}>Đăng xuất</button>
       </> : account && !account.configured ? <small className="muted">Bản build này chưa kết nối máy chủ VietNote.</small> : <>
         <strong>Đăng nhập VietNote</strong>

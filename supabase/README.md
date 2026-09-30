@@ -50,3 +50,21 @@ calls the `soniox-key` Edge Function, which does the following:
 - **Top-up:** payment webhooks, or you by hand, call `select add_credit('<user uuid>', 36000, 'purchase', 'order 123');`.
 - **Audit:** every balance change is a row in `credit_ledger`.
 - **Bring-your-own key:** users who save their own Soniox key in Settings bypass credit entirely.
+
+## Thanh toán payOS
+
+- `credit_packages`: bảng giá và khuyến mãi, sửa trong Table Editor (xem chú thích từng cột).
+- `credit_offers()`: giá đang bán sau khuyến mãi, gọi công khai được (website, app).
+- `credit_orders`, `pay_credit_order()`: đơn hàng; mỗi đơn chỉ cộng giờ một lần.
+- Edge Function `payos` (app gọi): `offers`, `create` (tạo link thanh toán), `status` (hỏi thẳng payOS nếu webhook chưa về).
+- Edge Function `payos-webhook`: payOS báo đã nhận tiền, xác thực bằng chữ ký checksum key.
+
+Cài đặt một lần (lấy 3 khóa ở my.payos.vn → Kênh thanh toán):
+
+```sh
+npx supabase secrets set --project-ref pyknksfyqlsfqodcsawm \
+  PAYOS_CLIENT_ID=... PAYOS_API_KEY=... PAYOS_CHECKSUM_KEY=... SITE_URL=https://vietnote.pages.dev
+```
+
+Rồi đặt Webhook URL của kênh thanh toán trên my.payos.vn thành
+`https://pyknksfyqlsfqodcsawm.supabase.co/functions/v1/payos-webhook`.

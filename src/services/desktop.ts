@@ -4,6 +4,8 @@ import type { AudioChunk, AudioInput, SpokenLanguage, MeetingNote, NoteGroup, St
 
 export interface StoredNotes { notes: MeetingNote[]; groups: NoteGroup[] }
 export interface AccountStatus { configured: boolean; email: string | null; balanceSeconds: number | null }
+export interface CreditOffer { id: string; name: string; hours: number; bonus_hours: number; price_vnd: number; original_price_vnd: number | null; promo_label: string | null; promo_ends_at: string | null; highlight: boolean }
+export interface OrderStatus { status: 'pending' | 'paid' | 'cancelled'; balance_seconds: number | null }
 export type TtsVoiceId = 'thuc-day-di' | 'ngoc-huyen'
 export interface TtsVoiceOption { id: TtsVoiceId; displayName: string; description: string }
 export interface TtsVoiceConfig { selectedId: TtsVoiceId; voices: TtsVoiceOption[] }
@@ -27,6 +29,9 @@ export const desktop = {
   accountSendCode: (email: string) => invoke<void>('account_send_code', { email }),
   accountVerify: (email: string, code: string) => invoke<void>('account_verify', { email, code }),
   accountSignOut: () => invoke<void>('account_sign_out'),
+  accountOffers: () => invoke<CreditOffer[]>('account_offers'),
+  accountBuy: (packageId: string) => invoke<number>('account_buy', { packageId }),
+  accountOrderStatus: (orderCode: number) => invoke<OrderStatus>('account_order_status', { orderCode }),
   stopWorker: () => invoke<void>('stop_worker'),
   sendWorker: (payload: Record<string, unknown>) => invoke<void>('send_worker', { payload }),
   startCapture: (source: AudioInput) => invoke<void>('start_capture', { source }),

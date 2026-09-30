@@ -708,7 +708,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(NativeState::default())
-        .invoke_handler(tauri::generate_handler![load_notes, save_notes, get_tts_voice_config, set_tts_voice, account::account_status, account::account_signed_in, account::account_send_code, account_verify, account_sign_out, start_worker, stop_worker, send_worker, start_capture, stop_capture, summarize_segments, suggest_title, translate_text, open_permission, diarization_model_status, download_diarization_model, cancel_diarization_download, remove_diarization_model, playback::play_audio, playback::stop_audio])
+        .invoke_handler(tauri::generate_handler![load_notes, save_notes, get_tts_voice_config, set_tts_voice, account::account_status, account::account_signed_in, account::account_send_code, account::account_offers, account::account_buy, account::account_order_status, account_verify, account_sign_out, start_worker, stop_worker, send_worker, start_capture, stop_capture, summarize_segments, suggest_title, translate_text, open_permission, diarization_model_status, download_diarization_model, cancel_diarization_download, remove_diarization_model, playback::play_audio, playback::stop_audio])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 let state = window.app_handle().state::<NativeState>();
