@@ -3,11 +3,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { AudioChunk, AudioInput, SpokenLanguage, MeetingNote, NoteGroup, StructuredMeetingSummary, TranscriptSegment, WorkerMessage } from './types'
 
 export interface StoredNotes { notes: MeetingNote[]; groups: NoteGroup[] }
-export type SummaryAiProvider = 'openrouter'
-// Groq remains only as the speech-recognition fallback key.
-export type AiKeyProvider = SummaryAiProvider | 'soniox' | 'groq'
-export interface SummaryAiConfig { apiUrl: string; model: string; provider: SummaryAiProvider }
-export interface AiProviderHealth { ready: boolean; message: string }
+export interface AccountStatus { configured: boolean; email: string | null; balanceSeconds: number | null }
 export type TtsVoiceId = 'thuc-day-di' | 'ngoc-huyen'
 export interface TtsVoiceOption { id: TtsVoiceId; displayName: string; description: string }
 export interface TtsVoiceConfig { selectedId: TtsVoiceId; voices: TtsVoiceOption[] }
@@ -23,16 +19,14 @@ export const desktop = {
     saveQueue = saveQueue.catch(() => {}).then(() => invoke<void>('save_notes', { payload }))
     return saveQueue
   },
-  getSummaryAiConfig: () => invoke<SummaryAiConfig>('get_summary_ai_config'),
-  setSummaryAiConfig: (config: SummaryAiConfig) => invoke<SummaryAiConfig>('set_summary_ai_config', { config }),
-  checkAiProvider: (provider: AiKeyProvider) => invoke<AiProviderHealth>('check_ai_provider', { provider }),
   getTtsVoiceConfig: () => invoke<TtsVoiceConfig>('get_tts_voice_config'),
   setTtsVoice: (voiceId: TtsVoiceId) => invoke<TtsVoiceConfig>('set_tts_voice', { voiceId }),
   startWorker: () => invoke<void>('start_worker'),
-  aiKeyStatus: (provider: AiKeyProvider) => invoke<'saved' | 'environment' | 'none'>('ai_key_status', { provider }),
-  setAiApiKey: (provider: AiKeyProvider, apiKey: string | null) => invoke<'saved' | 'environment' | 'none'>('set_ai_api_key', { provider, apiKey }),
-  accessKeyStatus: () => invoke<boolean>('access_key_status'),
-  setAccessKey: (accessKey: string) => invoke<boolean>('set_access_key', { accessKey }),
+  accountSignedIn: () => invoke<boolean>('account_signed_in'),
+  accountStatus: () => invoke<AccountStatus>('account_status'),
+  accountSendCode: (email: string) => invoke<void>('account_send_code', { email }),
+  accountVerify: (email: string, code: string) => invoke<void>('account_verify', { email, code }),
+  accountSignOut: () => invoke<void>('account_sign_out'),
   stopWorker: () => invoke<void>('stop_worker'),
   sendWorker: (payload: Record<string, unknown>) => invoke<void>('send_worker', { payload }),
   startCapture: (source: AudioInput) => invoke<void>('start_capture', { source }),

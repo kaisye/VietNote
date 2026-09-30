@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { desktop } from '../services/desktop'
+import { desktop, type AccountStatus } from '../services/desktop'
 import { createNote, demoNote, emptyStructuredSummary, formatStructuredSummary, toTranscriptSegment } from '../services/notes'
 import type { AudioChunk, AudioInput, Cadence, InterimTranscript, Language, MeetingNote, NoteGroup, SpokenLanguage, StructuredMeetingSummary, Subtitle, TranslationBlock, WorkerMessage } from '../services/types'
+import { requestSignIn } from '../services/credits'
 
 const now = () => new Date().toISOString()
 const countWords = (text: string) => text.trim().split(/\s+/).filter(Boolean).length
@@ -10,9 +11,13 @@ const savedLanguage = (): Language => {
   return saved === 'vi' || saved === 'en' || saved === 'zh' ? saved : 'auto'
 }
 
+const SIGN_IN_STATUS = 'Bấm Đăng nhập ở góc trái dưới để bắt đầu'
+
 function audioIssueText(message?: string) {
-  if (message?.startsWith('Soniox reconnecting')) return 'Mất kết nối Soniox · đang kết nối lại…'
+  if (message?.startsWith('Soniox reconnecting')) return 'Mất kết nối máy chủ nhận diện · đang kết nối lại…'
   if (message?.startsWith('Soniox audio queue full')) return 'Mạng chậm · đã bỏ qua một đoạn âm thanh'
+  if (message?.startsWith('VietNote credit exhausted')) return 'Đã hết phút sử dụng · xem tài khoản ở góc trái dưới'
+  if (message?.startsWith('VietNote signed out')) return 'Phiên đăng nhập đã hết · đăng nhập lại ở góc trái dưới'
   return message ? `Lỗi xử lý âm thanh: ${message}` : 'Đã xảy ra lỗi xử lý âm thanh'
 }
 
@@ -57,6 +62,7 @@ export function useAppModel() {
   const translationBlocksRef = useRef<TranslationBlock[]>([])
   const overallSummaryRef = useRef('')
   const [suggestedTitle, setSuggestedTitle] = useState('')
+  const [account, setAccount] = useState<AccountStatus | null>(null)
   const overallStructuredRef = useRef<StructuredMeetingSummary>(emptyStructuredSummary())
   const notesRef = useRef<MeetingNote[]>([demoNote])
   const groupsRef = useRef<NoteGroup[]>([])
@@ -91,7 +97,6 @@ export function useAppModel() {
   const playbackStarted = useRef(false)
   const activeVoiceRef = useRef('giọng đã chọn')
   const liveTranslationRef = useRef(false)
-  const liveProviderRef = useRef('Soniox')
   const translateForeignRef = useRef(translateForeign)
   // The switch lives in the meeting UI; the standalone translator always translates.
   const translating = () => languageRef.current !== 'vi' && (!meetingRef.current || translateForeignRef.current)
@@ -118,12 +123,11 @@ export function useAppModel() {
     void desktop.loadNotes().then(data => { if (!disposed) persist([demoNote, ...data.notes.filter(n => !n.isDemo)], data.groups) }).catch(error => setStatus(`Không đọc được ghi chú: ${error}`))
     void desktop.onWorker(message => { if (!disposed) handleWorkerRef.current(message) }).then(fn => unlisten.push(fn))
     void desktop.onStatus(value => { if (!disposed) { setStatus(/loading/i.test(value) ? 'Đang khởi động…' : /closed|exited/i.test(value) ? 'Đã dừng' : /failed|missing/i.test(value) ? 'Không thể khởi động' : value); if (/loading|exited|closed|failed|missing/i.test(value)) { setReady(false); if (/exited|closed|failed|missing/i.test(value)) { setStartRequested(false); setBusy(false) } } } }).then(fn => unlisten.push(fn))
-    void Promise.all([desktop.aiKeyStatus('soniox'), desktop.aiKeyStatus('groq')]).then(keyStatuses => {
+    void desktop.accountSignedIn().then(available => {
       if (disposed) return
-      const available = keyStatuses.some(keyStatus => keyStatus === 'saved' || keyStatus === 'environment')
       asrKeyStatusRef.current = available ? 'available' : 'missing'
       setAsrKeyAvailable(available)
-      setStatus(available ? 'Sẵn sàng sử dụng' : 'Đang chuẩn bị nhận diện…')
+      setStatus(available ? 'Sẵn sàng sử dụng' : SIGN_IN_STATUS)
     }).catch(() => {
       if (disposed) return
       asrKeyStatusRef.current = 'missing'; setAsrKeyAvailable(false)
@@ -224,7 +228,7 @@ export function useAppModel() {
         const translatedText = await desktop.translateParagraph(block.sourceText, language, translationContextRef.current)
         translationContextRef.current = block.sourceText
         publishTranslationBlocks(translationBlocksRef.current.map(item => item.id === block.id ? { ...item, translatedText, pending: false } : item))
-        setTranslationStatus(live ? `${liveProviderRef.current} · realtime + LLM chuẩn hóa theo đoạn` : `${language === 'en' ? 'Anh' : 'Trung'} → Việt theo đoạn`)
+        setTranslationStatus(live ? 'Dịch trực tiếp · chuẩn hóa theo đoạn' : `${language === 'en' ? 'Anh' : 'Trung'} → Việt theo đoạn`)
         if (meetingRef.current) await summarize(overallSummaryCursor.current === 0)
         const lastEntry = paragraphEntries.at(-1)
         if (!live && speechRef.current && audioRef.current === 'system' && capturingRef.current && lastEntry?.generation === generationRef.current) {
@@ -321,13 +325,12 @@ export function useAppModel() {
       case 'translation_mode':
         if (message.generation !== generationRef.current) break
         liveTranslationRef.current = Boolean(message.live)
-        liveProviderRef.current = message.provider ?? 'Soniox'
-        setTranslationStatus(languageRef.current !== 'vi' && !translating() ? 'Đã tắt dịch tiếng nước ngoài' : message.live ? (languageRef.current === 'auto' ? `${liveProviderRef.current} · tự động nhận diện → Việt` : `${liveProviderRef.current} · Anh/Trung → Việt`) : languageRef.current === 'vi' ? 'Không cần dịch' : 'Dịch theo đoạn')
+        setTranslationStatus(languageRef.current !== 'vi' && !translating() ? 'Đã tắt dịch tiếng nước ngoài' : message.live ? (languageRef.current === 'auto' ? 'Dịch trực tiếp · tự động nhận diện → Việt' : 'Dịch trực tiếp · Anh/Trung → Việt') : languageRef.current === 'vi' ? 'Không cần dịch' : 'Dịch theo đoạn')
         break
       case 'live_translation': {
         if (!(capturingRef.current || meetingRef.current) || message.generation !== generationRef.current || !message.id || !message.text) break
         if (spokenLanguageRef.current.get(message.id) === 'vi' || !translating()) break
-        setTranslationStatus(`${liveProviderRef.current} · đang dịch sang tiếng Việt`)
+        setTranslationStatus('Dịch trực tiếp · đang dịch sang tiếng Việt')
         // Published before the transcript is final too: the interim row shows it in
         // place of the still-changing source text.
         const startedAt = message.started_at ?? Date.now() / 1000
@@ -362,6 +365,12 @@ export function useAppModel() {
     finally { generationPending.current = false; setBusy(false) }
   }
   const startMeeting = async () => {
+    // Recognition, translation and summaries all run on the account's credit.
+    if (desktop.isDesktop && !await desktop.accountSignedIn().catch(() => false)) {
+      setStatus(SIGN_IN_STATUS)
+      requestSignIn()
+      return
+    }
     if (!ready) {
       if (asrKeyAvailable) { setStartRequested(true); setBusy(true); setStatus('Đang kết nối…') }
       return
@@ -497,7 +506,18 @@ export function useAppModel() {
     void startMeeting()
   }, [ready, startRequested])
 
-  return { status, ready, diarizationReady, diarizationStatus, busy, capturing, meetingActive, sourceLanguage, setSourceLanguage, translateForeign, setTranslateForeign, audioInput, setAudioInput,
+  const refreshAccount = useCallback(async () => {
+    if (!desktop.isDesktop) return
+    try { setAccount(await desktop.accountStatus()) } catch { /* keep the last known balance */ }
+  }, [])
+  useEffect(() => {
+    void refreshAccount()
+    // Minutes count down while a meeting records.
+    const timer = window.setInterval(() => void refreshAccount(), 60_000)
+    return () => window.clearInterval(timer)
+  }, [refreshAccount])
+
+  return { account, refreshAccount, status, ready, diarizationReady, diarizationStatus, busy, capturing, meetingActive, sourceLanguage, setSourceLanguage, translateForeign, setTranslateForeign, audioInput, setAudioInput,
     speechEnabled, setSpeechEnabled: setSpeech, speechRate, setSpeechRate, entries, interimTranscripts, translationBlocks, overallSummary, suggestedTitle, titlePending, suggestTitleNow: () => void suggestTitleNow(), summaryStatus, summaryCadence, setSummaryCadence: setCadence,
     cadenceValue, setCadenceValue: setCadenceAmount, notes, noteGroups, savingNoteID, savingNoteGroupID, vietnameseASRStatus, ttsStatus, ttsVoiceName, translationStatus,
     canStartMeeting: ready || asrKeyAvailable, canSummarizeNow: meetingActive && !summaryBusy.current && (entries.length > overallSummaryCursor.current || (translating() && entries.length > translationCursorRef.current)),

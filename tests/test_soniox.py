@@ -91,5 +91,30 @@ class SonioxStreamTest(unittest.TestCase):
         self.assertEqual(detect_language("我们今天讨论一下第三季度的计划。"), "zh")
 
 
+class SonioxKeyBrokerTest(unittest.TestCase):
+    def answer(self, reply):
+        broker = server.SonioxKeyBroker()
+        broker.send = lambda message: broker.deliver(dict(reply, request_id=message["request_id"]))
+        return broker
+
+    def test_returns_issued_key_and_grant(self):
+        broker = self.answer({"type": "soniox_key", "api_key": "snx_temp_x", "grant_id": "g1"})
+        self.assertEqual(broker.acquire("system"), ("snx_temp_x", "g1"))
+        self.assertEqual(broker.waiting, {})
+
+    def test_exhausted_credit_stops_instead_of_retrying(self):
+        with self.assertRaises(server.AccountStop):
+            self.answer({"error": "insufficient_credit"}).acquire("system")
+        with self.assertRaises(server.AccountStop):
+            self.answer({"error": "signed_out"}).acquire("system")
+        with self.assertRaises(RuntimeError):
+            self.answer({"error": "offline"}).acquire("system")
+
+    def test_expired_key_session_rotates_quietly(self):
+        stream = SonioxStream.__new__(SonioxStream)
+        with self.assertRaises(server.SessionRotated):
+            stream.handle({"error_code": 403, "error_type": "temp_api_key_session_expired"})
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,11 @@
+project_id = "vietnote"
+
+[functions.soniox-key]
+verify_jwt = true
+
+[functions.soniox-reconcile]
+# Authenticated by the x-cron-secret header instead of a user JWT.
+verify_jwt = false
+
+[functions.ai-complete]
+verify_jwt = true

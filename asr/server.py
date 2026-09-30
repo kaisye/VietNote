@@ -9,6 +9,7 @@ import signal
 import socket
 import threading
 import time
+import uuid
 import wave
 from pathlib import Path
 import numpy as np
@@ -190,7 +191,7 @@ class ProviderDiarization:
         self.lock = threading.RLock()
         self.generation = 0
         send(dict(type='diarization_status', ready=True,
-                  message=f'{provider} nhận diện người nói · không cần tải model'))
+                  message='Nhận diện người nói trên máy chủ · không cần tải model'))
 
     def reset(self, generation):
         self.generation = generation
@@ -209,10 +210,66 @@ class ProviderDiarization:
         pass
 
 
+class AccountStop(RuntimeError):
+    """VietNote credit ran out or the account signed out: stop streaming, don't retry."""
+
+
+class SessionRotated(RuntimeError):
+    """Soniox ended a temporary key's session at its reserved duration."""
+
+
+class SonioxKeyBroker:
+    """Single-use Soniox keys from the app, which holds the VietNote account session."""
+    def __init__(self):
+        self.send = None
+        self.lock = threading.Lock()
+        self.waiting = {}
+
+    def acquire(self, source, timeout=20.0):
+        if self.send is None:
+            raise RuntimeError('app connection not ready')
+        request_id = uuid.uuid4().hex
+        event, reply = threading.Event(), {}
+        with self.lock:
+            self.waiting[request_id] = (event, reply)
+        try:
+            self.send(dict(type='soniox_key_request', request_id=request_id, source=source))
+            if not event.wait(timeout):
+                raise RuntimeError('VietNote key request timed out')
+        finally:
+            with self.lock:
+                self.waiting.pop(request_id, None)
+        error = reply.get('error')
+        if error == 'insufficient_credit':
+            raise AccountStop('VietNote credit exhausted')
+        if error in ('signed_out', 'not_configured'):
+            raise AccountStop('VietNote signed out')
+        if error or not reply.get('api_key'):
+            raise RuntimeError(f'VietNote key unavailable: {error}')
+        return reply['api_key'], reply.get('grant_id')
+
+    def deliver(self, message):
+        with self.lock:
+            waiter = self.waiting.get(str(message.get('request_id')))
+        if waiter:
+            waiter[1].update(message)
+            waiter[0].set()
+
+    def release(self, grant_id):
+        try:
+            if self.send and grant_id:
+                self.send(dict(type='soniox_key_release', grant_id=grant_id))
+        except OSError:
+            pass
+
+
 class SonioxStream:
     """One Soniox real-time WebSocket (transcription + one-way translation) per audio source."""
-    def __init__(self, api_key, model, source, generation, language, send, speakers=None):
+    def __init__(self, api_key, model, source, generation, language, send, speakers=None,
+                 broker=None, first_utterance=0):
         self.api_key = api_key
+        self.broker = broker
+        self.stopped = False
         self.model = model
         self.source = source
         self.generation = generation
@@ -225,7 +282,7 @@ class SonioxStream:
         self.flush_requested = threading.Event()
         self.flushed = threading.Event()
         self.lock = threading.RLock()
-        self.utterance = 0
+        self.utterance = first_utterance
         self.origin = None
         self.latest_captured_at = None
         self.finalize_at = None
@@ -244,14 +301,16 @@ class SonioxStream:
         self.interim_tokens = []
 
     def put(self, pcm, captured_at):
+        if self.stopped:
+            return
         try:
             self.audio.put_nowait((pcm, captured_at))
         except queue.Full:
             self.send(dict(type='warning', message='Soniox audio queue full; dropped a chunk.'))
 
-    def config(self):
+    def config(self, api_key=None):
         config = {
-            'api_key': self.api_key,
+            'api_key': api_key or self.api_key,
             'model': self.model,
             'audio_format': 'pcm_s16le',
             'sample_rate': RATE,
@@ -368,6 +427,8 @@ class SonioxStream:
             self.close_translation()
 
     def handle(self, payload):
+        if payload.get('error_type') == 'temp_api_key_session_expired':
+            raise SessionRotated('session duration limit reached')
         if payload.get('error_code'):
             raise RuntimeError(f"Soniox {payload.get('error_code')}: {payload.get('error_message')}")
         final, interim, final_tr, interim_tr, endpoint, finalized = soniox_tokens(payload)
@@ -406,12 +467,12 @@ class SonioxStream:
             self.maybe_close_translation(force=True)
         self.flush_requested.clear()
 
-    def connect(self):
+    def connect(self, api_key):
         import certifi
         import websocket
         ws = websocket.create_connection(SONIOX_URL, timeout=10, enable_multithread=True,
                                          sslopt={'ca_certs': certifi.where()})
-        ws.send(json.dumps(self.config()))
+        ws.send(json.dumps(self.config(api_key)))
         ws.settimeout(.01)
         return ws
 
@@ -420,8 +481,16 @@ class SonioxStream:
         retry = 1.0
         while not self.closed.is_set():
             ws = None
+            api_key, grant_id = self.api_key, None
             try:
-                ws = self.connect()
+                if self.broker:
+                    # A key reserves credit: take one only once there is audio to send.
+                    while self.audio.empty() and not self.closed.wait(.05):
+                        pass
+                    if self.closed.is_set():
+                        break
+                    api_key, grant_id = self.broker.acquire(self.source)
+                ws = self.connect(api_key)
                 self.origin = None
                 self.latest_captured_at = None
                 sent_finalize = False
@@ -462,9 +531,24 @@ class SonioxStream:
                         with self.lock:
                             self.maybe_close_translation()
                 retry = 1.0
+            except AccountStop as exc:
+                log(f'[SONIOX] {self.source} stopped: {exc}')
+                self.stopped = True
+                self.send(dict(type='warning', message=str(exc)))
+                with self.lock:
+                    self.tokens += self.interim_tokens
+                    self.finish_utterance()
+                    self.maybe_close_translation(force=True)
+                break
+            except SessionRotated:
+                log(f'[SONIOX] {self.source} key session ended; rotating key')
+                with self.lock:
+                    self.tokens += self.interim_tokens
+                    self.finish_utterance()
+                    self.maybe_close_translation(force=True)
             except Exception as exc:
                 if not self.closed.is_set():
-                    log(f'[SONIOX] {self.source} connection error: {str(exc).replace(self.api_key, "[redacted]")}')
+                    log(f'[SONIOX] {self.source} connection error: {str(exc).replace(api_key or "-", "[redacted]")}')
                     self.send(dict(type='warning', message='Soniox reconnecting…'))
                     with self.lock:
                         # Token clocks restart with the next connection.
@@ -477,6 +561,8 @@ class SonioxStream:
                 if ws is not None:
                     try: ws.close()
                     except Exception: pass
+                if grant_id:
+                    self.broker.release(grant_id)
 
     def close(self):
         self.closed.set()
@@ -491,10 +577,13 @@ class SonioxRecognizer:
     streaming = True
     diarizes = True
 
-    def __init__(self, api_key, model=SONIOX_MODEL):
-        if not api_key:
+    def __init__(self, api_key, model=SONIOX_MODEL, managed=False):
+        if not api_key and not managed:
             raise RuntimeError('SONIOX_API_KEY is required when ASR_BACKEND=soniox')
         self.api_key = api_key
+        # Managed: stream on VietNote credit with keys issued per connection.
+        self.broker = SonioxKeyBroker() if managed else None
+        self.next_utterance = {}
         self.model_name = model
         self.backend_name = 'Soniox'
         self.vi_model_ready = True
@@ -503,13 +592,14 @@ class SonioxRecognizer:
         self.generation = 0
         self.language = 'vi'
         self.speakers = SpeakerLabels()
-        log(f'[MODEL READY] Soniox {model}')
+        log(f'[MODEL READY] Soniox {model} · {"VietNote credit" if managed else "own API key"}')
 
     def reset(self, generation, language):
         self.close_streams()
         self.generation = generation
         self.language = language
         self.speakers = SpeakerLabels()
+        self.next_utterance = {}
         if self.send:
             self.send(dict(type='translation_mode', generation=generation,
                            live=language in ('en', 'zh', 'auto'), live_audio=False,
@@ -521,7 +611,8 @@ class SonioxRecognizer:
         stream = self.streams.get(source)
         if stream is None:
             stream = SonioxStream(self.api_key, self.model_name, source,
-                                  self.generation, self.language, self.send, self.speakers)
+                                  self.generation, self.language, self.send, self.speakers,
+                                  self.broker, self.next_utterance.get(source, 0))
             self.streams[source] = stream
         stream.put((np.clip(audio, -1, 1) * 32767).astype('<i2').tobytes(), captured_at)
 
@@ -533,10 +624,15 @@ class SonioxRecognizer:
         threads = [threading.Thread(target=stream.flush) for stream in streams]
         for thread in threads: thread.start()
         for thread in threads: thread.join()
+        if self.broker:
+            # An idle open stream would keep holding reserved credit.
+            self.close_streams()
 
     def close_streams(self):
         streams, self.streams = list(self.streams.values()), {}
         for stream in streams:
+            # Utterance ids stay unique if capture resumes in the same generation.
+            self.next_utterance[stream.source] = stream.utterance
             stream.close()
 
     def close(self):
@@ -615,6 +711,8 @@ def serve(recognizer, synthesizer, token):
             streaming = bool(getattr(recognizer, 'streaming', False))
             if streaming:
                 recognizer.bind(send_transcript)
+            if getattr(recognizer, 'broker', None):
+                recognizer.broker.send = send
             def infer():
                 context_generation = -1
                 contexts = {}
@@ -739,6 +837,9 @@ def serve(recognizer, synthesizer, token):
                         audio_clocks[source] = (origin, samples_seen)
                         captured_at = origin + samples_seen / RATE
                         echo_gate.push(audio, captured_at, source)
+                    elif message['type'] == 'soniox_key':
+                        if getattr(recognizer, 'broker', None):
+                            recognizer.broker.deliver(message)
                     elif message['type'] == 'finish_diarization':
                         # Capture has stopped: finalize any running streaming turn first
                         # so its transcript is saved and gets a final speaker label.
@@ -777,11 +878,12 @@ def main():
         signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM, signal.SIGINT})
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(SystemExit(0)))
     # Soniox is preferred when configured: cheapest real-time ASR with translation included.
-    use_soniox = args.backend == 'soniox' or (args.backend == 'auto' and bool(os.environ.get('SONIOX_API_KEY')))
+    managed = os.environ.get('SONIOX_MANAGED') == '1' and not os.environ.get('SONIOX_API_KEY')
+    use_soniox = args.backend == 'soniox' or (args.backend == 'auto' and (bool(os.environ.get('SONIOX_API_KEY')) or managed))
     use_groq = args.backend == 'groq' or (args.backend == 'auto' and not use_soniox and bool(os.environ.get('GROQ_API_KEY')))
     if use_soniox:
         recognizer = SonioxRecognizer(os.environ.get('SONIOX_API_KEY'),
-                                      model=os.environ.get('SONIOX_MODEL', SONIOX_MODEL))
+                                      model=os.environ.get('SONIOX_MODEL', SONIOX_MODEL), managed=managed)
     elif use_groq:
         recognizer = GroqRecognizer(
             os.environ.get('GROQ_API_KEY'),

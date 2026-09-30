@@ -1,3 +1,4 @@
+mod account;
 mod diarization_model;
 mod playback;
 use base64::Engine;
@@ -15,8 +16,6 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager};
 
-const OPENROUTER_CHAT_API: &str = "https://openrouter.ai/api/v1";
-const OPENROUTER_DEFAULT_MODEL: &str = "qwen/qwen3.7-flash";
 const DEFAULT_TTS_VOICE: &str = "thuc-day-di";
 
 #[derive(Default)]
@@ -29,153 +28,14 @@ struct NativeState {
     worker_epoch: Arc<AtomicUsize>,
 }
 
-const AI_KEY_SERVICE: &str = "local.vietnote.desktop";
-const GROQ_KEY_ACCOUNT: &str = "groq-asr-api-key";
-const SONIOX_KEY_ACCOUNT: &str = "soniox-asr-api-key";
-const SONIOX_MODELS_API: &str = "https://api.soniox.com/v1/models";
-const OPENROUTER_KEY_ACCOUNT: &str = "openrouter-api-key";
-const ACCESS_KEY_ACCOUNT: &str = "vietnote-access-key";
-
-fn normalize_ai_provider(provider: &str) -> Result<&'static str, String> {
-    match provider.trim().to_lowercase().as_str() {
-        "openrouter" => Ok("openrouter"),
-        _ => Err("Nhà cung cấp AI không hợp lệ".into()),
-    }
-}
-
-fn normalize_key_provider(provider: &str) -> Result<&'static str, String> {
-    match provider.trim().to_lowercase().as_str() {
-        "groq" => Ok("groq"),
-        "openrouter" => Ok("openrouter"),
-        "soniox" => Ok("soniox"),
-        _ => Err("Nhà cung cấp AI không hợp lệ".into()),
-    }
-}
-
-fn provider_key_entry(provider: &str) -> Result<keyring::Entry, String> {
-    let account = match normalize_key_provider(provider)? {
-        "groq" => GROQ_KEY_ACCOUNT,
-        "soniox" => SONIOX_KEY_ACCOUNT,
-        "openrouter" => OPENROUTER_KEY_ACCOUNT,
-        _ => unreachable!(),
-    };
-    keyring::Entry::new(AI_KEY_SERVICE, account)
-        .map_err(|_| "Không truy cập được kho mật khẩu hệ thống".to_string())
-}
-
-fn stored_provider_key(provider: &str) -> Result<Option<String>, String> {
-    match provider_key_entry(provider)?.get_password() {
-        Ok(value) => Ok(Some(value)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(_) => Err("Không đọc được API key từ kho mật khẩu hệ thống".into()),
-    }
-}
-
-fn provider_env_key(provider: &str) -> Option<String> {
-    let name = match normalize_key_provider(provider).ok()? {
-        "groq" => "GROQ_API_KEY",
-        "soniox" => "SONIOX_API_KEY",
-        _ => "OPENROUTER_API_KEY",
-    };
+/// Developer override: a provider key in the environment bypasses the VietNote server.
+fn env_key(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|key| !key.trim().is_empty())
-}
-
-fn built_in_groq_key() -> Option<String> {
-    option_env!("VIETNOTE_BUILTIN_GROQ_API_KEY")
-        .map(str::trim)
-        .filter(|key| !key.is_empty())
-        .map(str::to_string)
-}
-
-fn resolved_provider_key(provider: &str) -> Option<String> {
-    stored_provider_key(provider).ok().flatten()
-        .or_else(|| provider_env_key(provider))
-        .or_else(|| (provider == "groq").then(built_in_groq_key).flatten())
-}
-
-fn stored_groq_key() -> Option<String> { resolved_provider_key("groq") }
-
-#[tauri::command]
-fn ai_key_status(provider: String) -> Result<String, String> {
-    let provider = normalize_key_provider(&provider)?;
-    if stored_provider_key(provider)?.is_some() { return Ok("saved".into()); }
-    if provider_env_key(provider).is_some() { return Ok("environment".into()); }
-    if provider == "groq" && built_in_groq_key().is_some() { return Ok("environment".into()); }
-    Ok("none".into())
-}
-
-fn access_key_entry() -> Result<keyring::Entry, String> {
-    keyring::Entry::new(AI_KEY_SERVICE, ACCESS_KEY_ACCOUNT)
-        .map_err(|_| "Không truy cập được kho mật khẩu hệ thống".to_string())
-}
-
-#[tauri::command]
-fn access_key_status() -> Result<bool, String> {
-    match access_key_entry()?.get_password() {
-        Ok(value) => Ok(!value.trim().is_empty()),
-        Err(keyring::Error::NoEntry) => Ok(false),
-        Err(_) => Err("Không đọc được key VietNote từ kho mật khẩu hệ thống".into()),
-    }
-}
-
-#[tauri::command]
-fn set_access_key(access_key: String) -> Result<bool, String> {
-    let key = access_key.trim();
-    if key.is_empty() { return Err("Vui lòng nhập key".into()); }
-    if key.chars().any(char::is_whitespace) { return Err("Key không được chứa khoảng trắng".into()); }
-    access_key_entry()?.set_password(key)
-        .map_err(|_| "Không lưu được key vào kho mật khẩu hệ thống")?;
-    Ok(true)
-}
-
-#[tauri::command]
-fn set_ai_api_key(app: tauri::AppHandle, state: tauri::State<'_, NativeState>, provider: String, api_key: Option<String>) -> Result<String, String> {
-    if !state.captures.lock().map_err(|e| e.to_string())?.is_empty() {
-        return Err("Hãy dừng ghi âm trước khi đổi API key".into());
-    }
-    let provider = normalize_key_provider(&provider)?;
-    let key = api_key.unwrap_or_default().trim().to_string();
-    if !key.is_empty() && key.chars().any(char::is_whitespace) {
-        return Err("API key không được chứa khoảng trắng".into());
-    }
-    if provider == "groq" && !key.is_empty() && !key.starts_with("gsk_") {
-        return Err("Groq API key không đúng định dạng (bắt đầu bằng gsk_)".into());
-    }
-    let entry = provider_key_entry(provider)?;
-    if key.is_empty() {
-        match entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => (),
-            Err(_) => return Err("Không xóa được API key khỏi kho mật khẩu hệ thống".into()),
-        }
-    } else {
-        entry.set_password(&key).map_err(|_| "Không lưu được API key vào kho mật khẩu hệ thống")?;
-    }
-    if matches!(provider, "groq" | "soniox") {
-        stop_worker(state.clone())?;
-        start_worker(app, state)?;
-    }
-    ai_key_status(provider.into())
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct StoredNotes { notes: Vec<Value>, groups: Vec<Value> }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SummaryAiConfig {
-    api_url: String,
-    model: String,
-    #[serde(default = "default_summary_provider")]
-    provider: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AiProviderHealth {
-    ready: bool,
-    message: String,
-}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -246,12 +106,6 @@ fn set_tts_voice(app: tauri::AppHandle, state: tauri::State<'_, NativeState>, vo
     tts_voice_config(&app)
 }
 
-fn default_summary_provider() -> String { "openrouter".into() }
-
-impl Default for SummaryAiConfig {
-    fn default() -> Self { Self { api_url: OPENROUTER_CHAT_API.into(), model: OPENROUTER_DEFAULT_MODEL.into(), provider: default_summary_provider() } }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TranscriptSegment {
@@ -308,72 +162,6 @@ struct MeetingSummary {
 
 fn app_data(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path().app_data_dir().map_err(|e| e.to_string())
-}
-
-fn summary_ai_config(app: &tauri::AppHandle) -> Result<SummaryAiConfig, String> {
-    let path = app_data(app)?.join("summary-ai.json");
-    let mut config: SummaryAiConfig = fs::read(&path).ok().and_then(|data| serde_json::from_slice(&data).ok()).unwrap_or_default();
-    // Profiles saved for the removed local API or Groq fall back to OpenRouter.
-    if config.provider != "openrouter" {
-        config = SummaryAiConfig::default();
-        if let Some(parent) = path.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
-        fs::write(&path, serde_json::to_vec(&config).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-    }
-    Ok(config)
-}
-
-#[tauri::command]
-fn get_summary_ai_config(app: tauri::AppHandle) -> Result<SummaryAiConfig, String> { summary_ai_config(&app) }
-
-#[tauri::command]
-async fn check_ai_provider(provider: String) -> Result<AiProviderHealth, String> {
-    let provider = normalize_key_provider(&provider)?;
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(8))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let response = match provider {
-        "soniox" => {
-            let Some(key) = resolved_provider_key("soniox") else {
-                return Ok(AiProviderHealth { ready: false, message: "Chưa có Soniox API key".into() });
-            };
-            client.get(SONIOX_MODELS_API).bearer_auth(key).send().await
-        }
-        "openrouter" => {
-            let Some(key) = resolved_provider_key("openrouter") else {
-                return Ok(AiProviderHealth { ready: false, message: "Chưa có OpenRouter API key".into() });
-            };
-            client.get(format!("{OPENROUTER_CHAT_API}/key")).bearer_auth(key).send().await
-        }
-        _ => return Err("Không kiểm tra được nhà cung cấp này".into()),
-    };
-    match response {
-        Ok(response) if response.status().is_success() => Ok(AiProviderHealth {
-            ready: true,
-            message: "API sẵn sàng".into(),
-        }),
-        Ok(response) => Ok(AiProviderHealth {
-            ready: false,
-            message: format!("API chưa sẵn sàng (HTTP {})", response.status()),
-        }),
-        Err(_) => Ok(AiProviderHealth {
-            ready: false,
-            message: "Không kết nối được API".into(),
-        }),
-    }
-}
-
-#[tauri::command]
-fn set_summary_ai_config(app: tauri::AppHandle, config: SummaryAiConfig) -> Result<SummaryAiConfig, String> {
-    let provider = normalize_ai_provider(&config.provider)?.to_string();
-    let model = config.model.trim().to_string();
-    if model.is_empty() { return Err("Tên model không được trống".into()); }
-    if !model.contains('/') { return Err("Model OpenRouter có dạng nhà-cung-cấp/model, ví dụ qwen/qwen3.7-flash".into()); }
-    let next = SummaryAiConfig { api_url: OPENROUTER_CHAT_API.into(), model, provider };
-    let dir = app_data(&app)?;
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    fs::write(dir.join("summary-ai.json"), serde_json::to_vec(&next).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-    Ok(next)
 }
 
 fn legacy_data() -> Option<PathBuf> {
@@ -472,8 +260,8 @@ fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> 
     let voice_file = tts_voice_definitions().into_iter().find(|voice| voice.0 == selected_voice)
         .map(|voice| voice.3).unwrap_or("thuc-day-di.zip");
     // A locked/unavailable OS credential store must not prevent offline ASR.
-    let groq_key = stored_groq_key();
-    let soniox_key = resolved_provider_key("soniox");
+    let groq_key = env_key("GROQ_API_KEY");
+    let soniox_key = env_key("SONIOX_API_KEY");
     let token = format!("{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos());
     let logs = app_data(&app)?.join("logs");
     fs::create_dir_all(&logs).map_err(|e| e.to_string())?;
@@ -498,10 +286,13 @@ fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> 
     } else {
         command.env_remove("GROQ_API_KEY");
     }
+    command.env_remove("SONIOX_MANAGED");
     if let Some(key) = soniox_key.filter(|key| !key.trim().is_empty()) {
         command.env("SONIOX_API_KEY", key);
     } else {
         command.env_remove("SONIOX_API_KEY");
+        // Stream on VietNote credit with temporary keys from the server.
+        command.env("SONIOX_MANAGED", "1");
     }
     if let Some(model) = diarization_model::installed_model(&app, &root) { command.env("NEMOTRON_MODEL", model); }
     if let Some(library) = diarization_model::runtime_library(&root) { command.env("NEMOTRON_LIBRARY", library); }
@@ -537,7 +328,8 @@ fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> 
                                 if let Ok(mut slot) = writer.lock() { if epoch_counter.load(Ordering::SeqCst) == epoch { *slot = Some(stream); } }
                                 for line in BufReader::new(reader).lines().map_while(Result::ok) {
                                     if epoch_counter.load(Ordering::SeqCst) != epoch { break; }
-                                    if let Ok(message) = serde_json::from_str::<Value>(&line) { let _ = app.emit("worker-message", message); }
+                                    let Ok(message) = serde_json::from_str::<Value>(&line) else { continue };
+                                    if !handle_credit_message(&message, &writer) { let _ = app.emit("worker-message", message); }
                                 }
                                 if epoch_counter.load(Ordering::SeqCst) == epoch {
                                     if let Ok(mut slot) = writer.lock() { *slot = None; }
@@ -553,6 +345,55 @@ fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> 
         }
     });
     Ok(())
+}
+
+/// The worker asks Rust (which holds the account session) for Soniox keys.
+fn handle_credit_message(message: &Value, writer: &Arc<Mutex<Option<TcpStream>>>) -> bool {
+    let text = |key: &str| message.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
+    match message.get("type").and_then(Value::as_str) {
+        Some("soniox_key_request") => {
+            let (request_id, source, writer) = (text("request_id"), text("source"), writer.clone());
+            tauri::async_runtime::spawn(async move {
+                let mut reply = account::soniox_grant(&source).await;
+                reply["type"] = json!("soniox_key");
+                reply["request_id"] = json!(request_id);
+                if let Ok(mut slot) = writer.lock() {
+                    if let Some(stream) = slot.as_mut() { let _ = writeln!(stream, "{reply}"); }
+                }
+            });
+            true
+        }
+        Some("soniox_key_release") => {
+            let grant_id = text("grant_id");
+            tauri::async_runtime::spawn(async move { account::soniox_release(&grant_id).await });
+            true
+        }
+        _ => false,
+    }
+}
+
+fn restart_worker_for_account(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> Result<(), String> {
+    stop_worker(state.clone())?;
+    start_worker(app, state)
+}
+
+fn ensure_idle(state: &tauri::State<'_, NativeState>) -> Result<(), String> {
+    if state.captures.lock().map_err(|e| e.to_string())?.is_empty() { Ok(()) }
+    else { Err("Hãy dừng ghi âm trước khi đổi tài khoản".into()) }
+}
+
+#[tauri::command]
+async fn account_verify(app: tauri::AppHandle, state: tauri::State<'_, NativeState>, email: String, code: String) -> Result<(), String> {
+    ensure_idle(&state)?;
+    account::verify(&email, &code).await?;
+    restart_worker_for_account(app, state)
+}
+
+#[tauri::command]
+fn account_sign_out(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> Result<(), String> {
+    ensure_idle(&state)?;
+    account::sign_out();
+    restart_worker_for_account(app, state)
 }
 
 #[tauri::command]
@@ -661,32 +502,8 @@ fn stop_capture(state: tauri::State<'_, NativeState>) -> Result<(), String> {
     Ok(())
 }
 
-/// `json` asks providers that support it to constrain the reply to a JSON object.
-async fn ai_completion(app: &tauri::AppHandle, system: &str, user: String, max_tokens: u32, json: bool) -> Result<String, String> {
-    let config = summary_ai_config(app)?;
-    let endpoint = if config.api_url.ends_with("/chat/completions") { config.api_url } else { format!("{}/chat/completions", config.api_url) };
-    // Qwen Flash thinks by default and bills it as output; notes and paragraph
-    // translation do not need it, and it can eat the max_tokens budget.
-    let mut body = json!({"model":config.model, "messages":[{"role":"system","content":system},{"role":"user","content":user}], "max_tokens":max_tokens, "reasoning":{"effort":"none"}});
-    if json { body["response_format"] = json!({"type":"json_object"}); }
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(90)).build().map_err(|e| e.to_string())?;
-    let request = client.post(endpoint).json(&body);
-    let key = resolved_provider_key("openrouter").ok_or("Chưa có OpenRouter API key")?;
-    let response = request.bearer_auth(key).header("X-Title", "VietNote").send().await.map_err(|e| format!("Không gọi được OpenRouter: {e}"))?;
-    if !response.status().is_success() {
-        let status = response.status();
-        // OpenRouter explains rejections (no credits, unsupported parameter) in error.message.
-        let detail = response.json::<Value>().await.ok()
-            .and_then(|data| data.pointer("/error/message").and_then(Value::as_str).map(|message| format!(": {message}")))
-            .unwrap_or_default();
-        return Err(format!("Dịch vụ xử lý tạm thời không khả dụng (HTTP {status}){detail}"));
-    }
-    let data: Value = response.json().await.map_err(|e| e.to_string())?;
-    data.pointer("/choices/0/message/content").and_then(Value::as_str).map(str::trim).filter(|text| !text.is_empty()).map(str::to_string)
-        .ok_or_else(|| {
-            let finish = data.pointer("/choices/0/finish_reason").and_then(Value::as_str).unwrap_or("không rõ");
-            format!("Model không trả về nội dung (finish_reason: {finish})")
-        })
+async fn ai_completion(system: &str, user: String, max_tokens: u32, json: bool) -> Result<String, String> {
+    account::ai_complete(system, user, max_tokens, json).await
 }
 
 fn parse_json_object(text: &str) -> Result<Value, String> {
@@ -767,7 +584,7 @@ fn validate_summary_with(mut summary: MeetingSummary, allowed: &HashSet<String>)
 }
 
 #[tauri::command]
-async fn summarize_segments(app: tauri::AppHandle, segments: Vec<TranscriptSegment>, previous_summary: Option<MeetingSummary>) -> Result<MeetingSummary, String> {
+async fn summarize_segments(segments: Vec<TranscriptSegment>, previous_summary: Option<MeetingSummary>) -> Result<MeetingSummary, String> {
     if segments.is_empty() { return Ok(previous_summary.unwrap_or_default()); }
     // Segment IDs are UUIDs; the model sees short aliases (s1, s2, …) instead, which
     // are mapped back after parsing. Evidence already cited by the previous summary
@@ -829,7 +646,7 @@ Chỉ trả về một JSON object, không markdown, đúng camelCase schema:
     } else {
         format!("TRANSCRIPT CÓ ID:\n{transcript}")
     };
-    let raw = ai_completion(&app, &system, user, 1800, true).await?;
+    let raw = ai_completion( &system, user, 1800, true).await?;
     let value = parse_json_object(&raw)?;
     let mut summary: MeetingSummary = serde_json::from_value(value).map_err(|error| format!("Summary không đúng schema: {error}"))?;
     map_evidence(&mut summary, &real_of);
@@ -839,10 +656,10 @@ Chỉ trả về một JSON object, không markdown, đúng camelCase schema:
 /// Names the meeting from a transcript excerpt alone: a few output tokens, so the
 /// save dialog does not wait for a full summary.
 #[tauri::command]
-async fn suggest_title(app: tauri::AppHandle, transcript: String) -> Result<String, String> {
+async fn suggest_title(transcript: String) -> Result<String, String> {
     let transcript: String = transcript.chars().rev().take(6000).collect::<Vec<_>>().into_iter().rev().collect();
     if transcript.trim().is_empty() { return Ok(String::new()); }
-    let raw = ai_completion(&app,
+    let raw = ai_completion(
         "Đặt tên cuộc họp tiếng Việt 3–8 từ nêu chủ đề chính và mục đích (ví dụ: Chốt kiến trúc thanh toán quý 4), dựa trên transcript. Không ngày giờ, không dấu ngoặc kép, không chung chung kiểu \"Cuộc họp nhóm\". Chỉ trả về tên.",
         format!("TRANSCRIPT:\n{transcript}"),
         40,
@@ -852,7 +669,7 @@ async fn suggest_title(app: tauri::AppHandle, transcript: String) -> Result<Stri
 }
 
 #[tauri::command]
-async fn translate_text(app: tauri::AppHandle, text: String, source_language: String, previous_context: String) -> Result<String, String> {
+async fn translate_text(text: String, source_language: String, previous_context: String) -> Result<String, String> {
     let source = match source_language.as_str() {
         "en" => "tiếng Anh",
         "zh" => "tiếng Trung giản thể",
@@ -863,7 +680,7 @@ async fn translate_text(app: tauri::AppHandle, text: String, source_language: St
     } else {
         format!("Đoạn ngay trước đó (chỉ dùng làm ngữ cảnh, không dịch lại):\n{previous_context}")
     };
-    ai_completion(&app,
+    ai_completion(
         &format!("Bạn là biên tập viên bản ghi và phiên dịch viên từ {source} sang tiếng Việt. Đầu vào là một đoạn ghép từ nhiều kết quả ASR liên tiếp. Hãy dùng toàn bộ ngữ cảnh để sửa các lỗi nhận diện rõ ràng, nối lại câu bị ngắt, thêm dấu câu, rồi dịch cả đoạn sang tiếng Việt tự nhiên. Giữ nguyên tên riêng, số liệu và thuật ngữ chuyên môn. Không bịa nội dung. Chỉ trả về bản dịch tiếng Việt hoàn chỉnh của ĐOẠN CẦN DỊCH; không dịch lại ngữ cảnh và không giải thích."),
         format!("{context}\n\nĐOẠN CẦN DỊCH:\n{text}"),
         300,
@@ -891,7 +708,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(NativeState::default())
-        .invoke_handler(tauri::generate_handler![load_notes, save_notes, get_summary_ai_config, set_summary_ai_config, check_ai_provider, get_tts_voice_config, set_tts_voice, ai_key_status, set_ai_api_key, access_key_status, set_access_key, start_worker, stop_worker, send_worker, start_capture, stop_capture, summarize_segments, suggest_title, translate_text, open_permission, diarization_model_status, download_diarization_model, cancel_diarization_download, remove_diarization_model, playback::play_audio, playback::stop_audio])
+        .invoke_handler(tauri::generate_handler![load_notes, save_notes, get_tts_voice_config, set_tts_voice, account::account_status, account::account_signed_in, account::account_send_code, account_verify, account_sign_out, start_worker, stop_worker, send_worker, start_capture, stop_capture, summarize_segments, suggest_title, translate_text, open_permission, diarization_model_status, download_diarization_model, cancel_diarization_download, remove_diarization_model, playback::play_audio, playback::stop_audio])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 let state = window.app_handle().state::<NativeState>();
@@ -960,13 +777,5 @@ mod tests {
     fn meeting_title_is_trimmed_and_unquoted() {
         assert_eq!(clean_title("  \"Chốt   kiến trúc thanh toán\".  "), "Chốt kiến trúc thanh toán");
         assert_eq!(clean_title(&"a".repeat(200)).len(), 80);
-    }
-
-    #[test]
-    fn summary_ai_accepts_only_openrouter() {
-        assert_eq!(normalize_ai_provider("openrouter"), Ok("openrouter"));
-        assert!(normalize_ai_provider("groq").is_err());
-        assert!(normalize_ai_provider("nine_router").is_err());
-        assert_eq!(SummaryAiConfig::default().model, OPENROUTER_DEFAULT_MODEL);
     }
 }
