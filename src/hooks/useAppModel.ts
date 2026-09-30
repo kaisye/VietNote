@@ -322,6 +322,13 @@ export function useAppModel() {
         setInterimTranscripts(current => [...current.filter(item => item.source !== source), interim])
         break
       }
+      // The microphone line turned out to be the speakers' echo of system audio.
+      case 'transcript_retract': {
+        if (message.generation !== generationRef.current || !message.id) break
+        setInterimTranscripts(current => current.filter(item => item.id !== message.id))
+        publishTranslationBlocks(translationBlocksRef.current.filter(block => block.id !== message.id))
+        break
+      }
       case 'translation_mode':
         if (message.generation !== generationRef.current) break
         liveTranslationRef.current = Boolean(message.live)

@@ -18,6 +18,7 @@ from audio_buffer import (AudioBuffer, deduplicate, is_repetitive,
                           normalize_meeting_terms, RATE)
 from protocol import encode, decode, MAX_LINE
 from echo_gate import EchoGate
+from echo_text import TranscriptEcho
 
 ROOT = Path(__file__).resolve().parents[1]
 os.environ.setdefault('HF_HOME', str(ROOT / '.cache' / 'huggingface'))
@@ -266,7 +267,7 @@ class SonioxKeyBroker:
 class SonioxStream:
     """One Soniox real-time WebSocket (transcription + one-way translation) per audio source."""
     def __init__(self, api_key, model, source, generation, language, send, speakers=None,
-                 broker=None, first_utterance=0):
+                 broker=None, first_utterance=0, echo=None):
         self.api_key = api_key
         self.broker = broker
         self.stopped = False
@@ -276,6 +277,8 @@ class SonioxStream:
         self.language = language
         self.send = send
         self.speakers = speakers or SpeakerLabels()
+        self.echo = echo
+        self.echoed = {}           # microphone utterance id -> spoken language, dropped as echo
         self.translate = language in ('en', 'zh', 'auto')
         self.audio = queue.Queue(maxsize=500)
         self.closed = threading.Event()
@@ -355,6 +358,17 @@ class SonioxStream:
         cleaned = normalize_meeting_terms(text, spoken)
         if not cleaned:
             return None
+        if self.echo and self.source == 'system':
+            self.echo.heard(cleaned)
+        elif self.echo and self.echo.is_echo(cleaned):
+            # The microphone picked up the speakers: take back what was shown.
+            if self.utterance_id() not in self.echoed:
+                self.send(dict(type='transcript_retract', id=self.utterance_id(),
+                               generation=self.generation, source=self.source))
+            self.echoed[self.utterance_id()] = spoken
+            return None
+        else:
+            self.echoed.pop(self.utterance_id(), None)
         self.send(dict(
             type='transcript' if final else 'transcript_interim',
             language=spoken, id=self.utterance_id(), text=cleaned, raw_text=text,
@@ -370,7 +384,9 @@ class SonioxStream:
             self.interim_tokens = []
             return
         started_at = self.clock(self.tokens, 'start_ms', time.time())
-        spoken = self.emit_transcript(self.tokens, True)
+        # An echo still gets a translation slot, so its translation is dropped
+        # instead of landing on the next utterance.
+        spoken = self.emit_transcript(self.tokens, True) or self.echoed.get(self.utterance_id())
         if spoken and spoken != 'vi' and self.translate:
             self.pending.append([self.utterance_id(), started_at, time.monotonic()])
         self.utterance += 1
@@ -399,6 +415,8 @@ class SonioxStream:
 
     def emit_translation(self, final):
         target = self.pending[0] if self.pending else None
+        if (target[0] if target else self.utterance_id()) in self.echoed:
+            return
         text = (self.translation + ('' if final else self.translation_interim)).strip()
         if not text:
             return
@@ -592,6 +610,7 @@ class SonioxRecognizer:
         self.generation = 0
         self.language = 'vi'
         self.speakers = SpeakerLabels()
+        self.echo = TranscriptEcho()
         log(f'[MODEL READY] Soniox {model} · {"VietNote credit" if managed else "own API key"}')
 
     def reset(self, generation, language):
@@ -599,6 +618,7 @@ class SonioxRecognizer:
         self.generation = generation
         self.language = language
         self.speakers = SpeakerLabels()
+        self.echo = TranscriptEcho()
         self.next_utterance = {}
         if self.send:
             self.send(dict(type='translation_mode', generation=generation,
@@ -612,7 +632,7 @@ class SonioxRecognizer:
         if stream is None:
             stream = SonioxStream(self.api_key, self.model_name, source,
                                   self.generation, self.language, self.send, self.speakers,
-                                  self.broker, self.next_utterance.get(source, 0))
+                                  self.broker, self.next_utterance.get(source, 0), self.echo)
             self.streams[source] = stream
         stream.put((np.clip(audio, -1, 1) * 32767).astype('<i2').tobytes(), captured_at)
 
