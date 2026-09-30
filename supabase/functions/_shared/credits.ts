@@ -25,6 +25,19 @@ export function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 }
 
+// Balance plus the unused part of reservations held by open streams, which
+// are refunded when they close: what the user can still spend right now.
+export async function availableSeconds(db: SupabaseClient, userId: string): Promise<{ balance_seconds: number; email: string } | null> {
+  const { data, error } = await db.from('profiles').select('balance_seconds, email').eq('id', userId).single()
+  if (error || !data) return null
+  const { data: open } = await db.from('soniox_grants').select('reserved_seconds, created_at')
+    .eq('user_id', userId).is('released_at', null)
+  const now = Date.now()
+  const unused = (open ?? []).reduce((sum, grant) => sum + Math.max(0,
+    grant.reserved_seconds - Math.ceil((now - new Date(grant.created_at).getTime()) / 1000)), 0)
+  return { ...data, balance_seconds: data.balance_seconds + unused }
+}
+
 type Grant = { id: string; reserved_seconds: number; provisional_seconds: number | null; created_at: string; released_at: string | null }
 
 async function usageSeconds(since: Date, until: Date): Promise<Map<string, number>> {

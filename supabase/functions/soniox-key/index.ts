@@ -2,7 +2,7 @@
 //   POST {action:"grant", source}      -> {api_key, grant_id, seconds, balance_seconds}
 //   POST {action:"release", grant_id}  -> {used_seconds}
 //   POST {action:"balance"}            -> {balance_seconds, email}
-import { admin, json, MAX_GRANT_SECONDS, MIN_GRANT_SECONDS, SONIOX_API, sonioxKey } from '../_shared/credits.ts'
+import { admin, availableSeconds, json, MAX_GRANT_SECONDS, MIN_GRANT_SECONDS, SONIOX_API, sonioxKey } from '../_shared/credits.ts'
 
 const SOURCES = new Set(['system', 'microphone'])
 
@@ -16,16 +16,10 @@ Deno.serve(async request => {
   const body = await request.json().catch(() => ({})) as { action?: string; source?: string; grant_id?: string }
 
   if (body.action === 'balance') {
-    const { data, error } = await db.from('profiles').select('balance_seconds, email').eq('id', user.id).single()
-    if (error) return json({ error: 'profile_missing' }, 404)
-    // Streams in progress hold a 30-minute reservation; show only the time they
-    // have actually used so the balance counts down minute by minute.
-    const { data: open } = await db.from('soniox_grants').select('reserved_seconds, created_at')
-      .eq('user_id', user.id).is('released_at', null)
-    const now = Date.now()
-    const unused = (open ?? []).reduce((sum, grant) => sum + Math.max(0,
-      grant.reserved_seconds - Math.ceil((now - new Date(grant.created_at).getTime()) / 1000)), 0)
-    return json({ ...data, balance_seconds: data.balance_seconds + unused })
+    // Streams in progress hold a reservation; show only the time they have
+    // actually used so the balance counts down minute by minute.
+    const available = await availableSeconds(db, user.id)
+    return available ? json(available) : json({ error: 'profile_missing' }, 404)
   }
 
   if (body.action === 'release') {
@@ -37,8 +31,12 @@ Deno.serve(async request => {
 
   if (body.action === 'grant') {
     const source = SOURCES.has(body.source ?? '') ? body.source! : 'system'
+    // Reserve at most half of what is left, so the other source (system audio
+    // and microphone stream at once) can still get a key from the rest.
+    const { data: profile } = await db.from('profiles').select('balance_seconds').eq('id', user.id).single()
+    const half = Math.floor((profile?.balance_seconds ?? 0) / 2)
     const { data, error } = await db.rpc('reserve_soniox_grant', {
-      p_user: user.id, p_source: source, p_max: MAX_GRANT_SECONDS, p_min: MIN_GRANT_SECONDS,
+      p_user: user.id, p_source: source, p_max: Math.max(MIN_GRANT_SECONDS, Math.min(MAX_GRANT_SECONDS, half)), p_min: MIN_GRANT_SECONDS,
     })
     if (error) {
       if (error.message.includes('insufficient_credit')) return json({ error: 'insufficient_credit' }, 402)
