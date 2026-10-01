@@ -278,6 +278,7 @@ fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> 
     if !packaged_worker { command.args(["-u", "asr/server.py"]); }
     command.current_dir(&root)
         .env("ASR_TOKEN", &token)
+        .env("PYTHONUTF8", "1")
         .env("HF_HOME", cache)
         .env("TTS_VOICE_PATH", root.join("voices").join(voice_file))
         .stdout(Stdio::piped()).stderr(Stdio::from(stderr_log));
@@ -305,7 +306,13 @@ fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> 
     let epoch = epoch_counter.fetch_add(1, Ordering::SeqCst) + 1;
     std::thread::spawn(move || {
         if epoch_counter.load(Ordering::SeqCst) == epoch { let _ = app.emit("worker-status", "Loading services…"); }
-        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+        let mut ready = false;
+        let mut lines = BufReader::new(stdout);
+        let mut buffer = Vec::new();
+        // Decode lossily: one badly encoded line must not end the reader and hide the rest.
+        while lines.read_until(b'\n', &mut buffer).is_ok_and(|read| read > 0) {
+            let line = String::from_utf8_lossy(&buffer).trim_end_matches(['\r', '\n']).to_string();
+            buffer.clear();
             // Python writes ASR/TTS diagnostics to stdout; retain them alongside
             // stderr so a future repeated segment can be traced to its source.
             let _ = writeln!(logfile, "{line}");
@@ -313,6 +320,7 @@ fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> 
             let Ok(event) = serde_json::from_str::<Value>(&line) else { continue };
             if event.get("type").and_then(Value::as_str) != Some("ready") { continue; }
             let Some(port) = event.get("port").and_then(Value::as_u64) else { continue };
+            ready = true;
             // Serve the socket on its own thread and keep draining stdout: an unread
             // pipe blocks the worker's print() once it fills, and the log would lose
             // every diagnostic written after startup.
@@ -342,6 +350,11 @@ fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> 
                     Err(_) => { let _ = app.emit("worker-status", "Service connection failed"); }
                 }
             });
+        }
+        // The worker died while loading: say so instead of loading forever.
+        if !ready && epoch_counter.load(Ordering::SeqCst) == epoch {
+            let _ = writeln!(logfile, "[WORKER EXITED] before it was ready");
+            let _ = app.emit("worker-status", "Service failed to start");
         }
     });
     Ok(())

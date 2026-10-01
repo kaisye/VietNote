@@ -7,11 +7,19 @@ import os
 import queue
 import signal
 import socket
+import sys
 import threading
 import time
 import uuid
 import wave
 from pathlib import Path
+
+# Windows pipes default to the ANSI code page, which cannot encode Vietnamese
+# (the voice name in the startup log crashed the worker); the app reads UTF-8.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, 'reconfigure'):
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+
 import numpy as np
 from audio_buffer import (AudioBuffer, deduplicate, is_repetitive,
                           is_implausibly_fast, is_hallucination_signature,
