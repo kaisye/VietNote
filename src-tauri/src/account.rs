@@ -61,6 +61,13 @@ fn clear_session() {
 /// The worker uses VietNote credit when the user is signed in and has no own Soniox key.
 pub fn signed_in() -> bool { config().is_some() && load_session().is_some() }
 
+/// "Can't reach VietNote" plus the innermost cause (TLS, DNS, proxy), so a user's screenshot says why.
+fn unreachable(error: reqwest::Error) -> String {
+    let mut cause: &dyn std::error::Error = &error;
+    while let Some(inner) = cause.source() { cause = inner; }
+    format!("Không kết nối được máy chủ VietNote ({cause})")
+}
+
 fn client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder().timeout(Duration::from_secs(20)).build().map_err(|e| e.to_string())
 }
@@ -68,7 +75,7 @@ fn client() -> Result<reqwest::Client, String> {
 async fn auth_post(path: &str, body: Value) -> Result<Value, String> {
     let (url, anon) = config().ok_or("Bản build chưa cấu hình máy chủ VietNote")?;
     let response = client()?.post(format!("{url}/auth/v1/{path}")).header("apikey", anon)
-        .json(&body).send().await.map_err(|_| "Không kết nối được máy chủ VietNote")?;
+        .json(&body).send().await.map_err(unreachable)?;
     let status = response.status();
     let value: Value = response.json().await.unwrap_or(Value::Null);
     if status.is_success() { return Ok(value); }
@@ -149,7 +156,7 @@ pub async fn ai_complete(system: &str, user: String, max_tokens: u32, json: bool
         .timeout(Duration::from_secs(90))
         .header("apikey", anon).bearer_auth(token)
         .json(&json!({"system": system, "user": user, "max_tokens": max_tokens, "json": json}))
-        .send().await.map_err(|_| "Không kết nối được máy chủ VietNote")?;
+        .send().await.map_err(unreachable)?;
     let status = response.status().as_u16();
     let value: Value = response.json().await.unwrap_or(Value::Null);
     match status {
