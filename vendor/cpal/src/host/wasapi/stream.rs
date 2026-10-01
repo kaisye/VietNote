@@ -308,6 +308,8 @@ pub struct StreamInner {
     pub sample_format: SampleFormat,
     // Hardware pipeline latency.
     pub stream_latency: Duration,
+    // True for an input stream capturing a render endpoint (WASAPI loopback).
+    pub loopback: bool,
 }
 
 impl Stream {
@@ -819,7 +821,11 @@ fn process_input(
             let flags = flags.assume_init();
             // The discontinuity flag is undefined on the first GetBuffer after Start,
             // where device_position is still 0.
+            // VietNote patch: loopback flags a discontinuity whenever playback resumes after
+            // silence (it delivers no packets meanwhile). That is not an xrun, and clipclip
+            // treats any stream error as a dead device, which stopped system capture.
             if device_position != 0
+                && !stream.loopback
                 && flags & Audio::AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY.0 as u32 != 0
             {
                 let _ = try_emit_error(error_callback, ErrorKind::Xrun.into());

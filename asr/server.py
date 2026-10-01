@@ -377,6 +377,8 @@ class SonioxStream:
             return None
         else:
             self.echoed.pop(self.utterance_id(), None)
+        if final:
+            log(f'[SONIOX] {self.source} final ({spoken}): {cleaned}')
         self.send(dict(
             type='transcript' if final else 'transcript_interim',
             language=spoken, id=self.utterance_id(), text=cleaned, raw_text=text,
@@ -517,6 +519,7 @@ class SonioxStream:
                         break
                     api_key, grant_id = self.broker.acquire(self.source)
                 ws = self.connect(api_key)
+                log(f'[SONIOX] {self.source} connected')
                 self.origin = None
                 self.latest_captured_at = None
                 sent_finalize = False
@@ -724,6 +727,7 @@ def serve(recognizer, synthesizer, token):
             language = 'zh'
             sources = ('system', 'microphone')
             audio_clocks = {}
+            audio_levels = {}
             def send(data):
                 with send_lock:
                     conn.sendall(encode(data))
@@ -843,6 +847,7 @@ def serve(recognizer, synthesizer, token):
                             continue
                         language = requested_language
                         audio_clocks.clear()
+                        audio_levels.clear()
                         echo_gate = EchoGate(accept_audio)
                         diarizer.reset(generation)
                         vads = {source: AudioBuffer(max_segment_seconds=segment_seconds) for source in sources}
@@ -864,6 +869,13 @@ def serve(recognizer, synthesizer, token):
                         samples_seen += len(audio)
                         audio_clocks[source] = (origin, samples_seen)
                         captured_at = origin + samples_seen / RATE
+                        # Periodic input level: tells a silent capture device apart from an ASR failure.
+                        peak, logged = audio_levels.get(source, (0.0, 0))
+                        peak = max(peak, float(np.abs(audio).max(initial=0)))
+                        if samples_seen - logged >= 10 * RATE:
+                            log(f'[AUDIO] {source} peak {20*np.log10(max(peak, 1e-6)):.0f} dBFS over last 10 s')
+                            peak, logged = 0.0, samples_seen
+                        audio_levels[source] = (peak, logged)
                         echo_gate.push(audio, captured_at, source)
                     elif message['type'] == 'soniox_key':
                         if getattr(recognizer, 'broker', None):

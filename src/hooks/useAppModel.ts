@@ -34,6 +34,8 @@ export function useAppModel() {
   const [meetingActive, setMeetingActive] = useState(false)
   const [asrKeyAvailable, setAsrKeyAvailable] = useState(false)
   const [startRequested, setStartRequested] = useState(false)
+  // The idle screen hides `status` once the worker is ready, so a failed start needs its own slot.
+  const [startError, setStartError] = useState('')
   const [sourceLanguage, setSourceLanguageState] = useState<Language>(savedLanguage)
   const [audioInput, setAudioInputState] = useState<AudioInput>('both')
   const [speechEnabled, setSpeechEnabled] = useState(true)
@@ -362,13 +364,13 @@ export function useAppModel() {
 
   const start = async () => {
     if (capturingRef.current || generationPending.current || !ready) return
-    generationPending.current = true; setBusy(true)
+    generationPending.current = true; setBusy(true); setStartError('')
     generationRef.current += 1
     try {
       await desktop.sendWorker({ type: 'reset', generation: generationRef.current, language: languageRef.current })
       await desktop.startCapture(audioRef.current)
       capturingRef.current = true; setCapturing(true); setStatus(`● Listening — ${audioRef.current}`)
-    } catch (error) { setStatus(`Capture stopped: ${error}`); meetingRef.current = false; setMeetingActive(false) }
+    } catch (error) { setStatus(`Capture stopped: ${error}`); setStartError(`Không ghi âm được: ${error}`); meetingRef.current = false; setMeetingActive(false) }
     finally { generationPending.current = false; setBusy(false) }
   }
   const startMeeting = async () => {
@@ -524,7 +526,7 @@ export function useAppModel() {
     return () => window.clearInterval(timer)
   }, [refreshAccount])
 
-  return { account, refreshAccount, status, ready, diarizationReady, diarizationStatus, busy, capturing, meetingActive, sourceLanguage, setSourceLanguage, translateForeign, setTranslateForeign, audioInput, setAudioInput,
+  return { account, refreshAccount, status, startError, ready, diarizationReady, diarizationStatus, busy, capturing, meetingActive, sourceLanguage, setSourceLanguage, translateForeign, setTranslateForeign, audioInput, setAudioInput,
     speechEnabled, setSpeechEnabled: setSpeech, speechRate, setSpeechRate, entries, interimTranscripts, translationBlocks, overallSummary, suggestedTitle, titlePending, suggestTitleNow: () => void suggestTitleNow(), summaryStatus, summaryCadence, setSummaryCadence: setCadence,
     cadenceValue, setCadenceValue: setCadenceAmount, notes, noteGroups, savingNoteID, savingNoteGroupID, vietnameseASRStatus, ttsStatus, ttsVoiceName, translationStatus,
     canStartMeeting: ready || asrKeyAvailable, canSummarizeNow: meetingActive && !summaryBusy.current && (entries.length > overallSummaryCursor.current || (translating() && entries.length > translationCursorRef.current)),

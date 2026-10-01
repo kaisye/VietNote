@@ -18,6 +18,17 @@ use tauri::{Emitter, Manager};
 
 const DEFAULT_TTS_VOICE: &str = "thuc-day-di";
 
+/// Console children of a GUI app open their own console window on Windows; keep them hidden.
+fn hide_console(command: &mut Command) -> &mut Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
+
 #[derive(Default)]
 struct NativeState {
     child: Mutex<Option<Child>>,
@@ -275,6 +286,7 @@ fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> 
     let cache = if root.join(".venv").exists() { root.join(".cache/huggingface") } else { app_data(&app)?.join("cache/huggingface") };
     fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
     let mut command = Command::new(worker);
+    hide_console(&mut command);
     if !packaged_worker { command.args(["-u", "asr/server.py"]); }
     command.current_dir(&root)
         .env("ASR_TOKEN", &token)
@@ -711,7 +723,7 @@ fn open_permission(kind: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         let page = if kind == "screen" { "ms-settings:sound" } else { "ms-settings:privacy-microphone" };
-        Command::new("cmd").args(["/C", "start", "", page]).spawn().map_err(|e| e.to_string())?;
+        hide_console(Command::new("cmd").args(["/C", "start", "", page])).spawn().map_err(|e| e.to_string())?;
     }
     Ok(())
 }

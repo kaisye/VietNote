@@ -80,6 +80,7 @@ jobs:
             --collect-all zerotts \
             --collect-all tokenizers \
             --collect-data certifi \
+            --python-option "X utf8" \
             asr/server.py
           worker-dist/vietnote-worker/vietnote-worker --help >/dev/null
 
@@ -161,6 +162,8 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # Frozen apps ignore PYTHONUTF8; without UTF-8 mode, ZeroTTS reads the
+      # Vietnamese voice metadata as cp1252 and the worker dies at startup.
       - name: Build portable audio worker
         shell: pwsh
         run: |
@@ -174,6 +177,7 @@ jobs:
             --collect-all zerotts `
             --collect-all tokenizers `
             --collect-data certifi `
+            --python-option "X utf8" `
             asr/server.py
           .\worker-dist\vietnote-worker\vietnote-worker.exe --help | Out-Null
 

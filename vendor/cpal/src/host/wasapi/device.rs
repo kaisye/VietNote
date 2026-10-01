@@ -930,6 +930,7 @@ impl Device {
                 config,
                 sample_format,
                 stream_latency,
+                loopback: self.data_flow() == Audio::eRender,
             })
         }
     }
@@ -1033,6 +1034,7 @@ impl Device {
                 config,
                 sample_format,
                 stream_latency,
+                loopback: false,
             })
         }
     }
