@@ -23,7 +23,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "macOS": { "minimumSystemVersion": "15.0", "infoPlist": "Info.plist" },
+    "macOS": { "minimumSystemVersion": "15.0", "infoPlist": "Info.plist", "entitlements": "Entitlements.plist" },
     "resources": ["../asr", "../voices"]
   },
   "plugins": {

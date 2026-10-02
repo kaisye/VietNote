@@ -26,6 +26,11 @@ keyring = { version = "3.6.3", default-features = false, features = ["apple-nati
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString"] }
+
 [patch.crates-io]
 # clipclip uses cpal's Core Audio process tap. Keep VietNote's own TTS out of
 # that tap so spoken translations cannot be recognized and translated again.

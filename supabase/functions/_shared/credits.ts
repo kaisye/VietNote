@@ -27,15 +27,13 @@ export function json(body: unknown, status = 200): Response {
 
 // Balance plus the unused part of reservations held by open streams, which
 // are refunded when they close: what the user can still spend right now.
+// Microphone time alongside system audio is not counted (charged once).
 export async function availableSeconds(db: SupabaseClient, userId: string): Promise<{ balance_seconds: number; email: string } | null> {
-  const { data, error } = await db.from('profiles').select('balance_seconds, email').eq('id', userId).single()
+  const { data, error } = await db.from('profiles').select('email').eq('id', userId).single()
   if (error || !data) return null
-  const { data: open } = await db.from('soniox_grants').select('reserved_seconds, created_at')
-    .eq('user_id', userId).is('released_at', null)
-  const now = Date.now()
-  const unused = (open ?? []).reduce((sum, grant) => sum + Math.max(0,
-    grant.reserved_seconds - Math.ceil((now - new Date(grant.created_at).getTime()) / 1000)), 0)
-  return { ...data, balance_seconds: data.balance_seconds + unused }
+  const { data: seconds, error: rpcError } = await db.rpc('available_seconds', { p_user: userId })
+  if (rpcError || seconds === null) return null
+  return { email: data.email, balance_seconds: seconds as number }
 }
 
 type Grant = { id: string; reserved_seconds: number; provisional_seconds: number | null; created_at: string; released_at: string | null }

@@ -476,6 +476,33 @@ fn stop_worker(state: tauri::State<'_, NativeState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Core Audio input never shows the microphone prompt itself: when it asks on the app's
+/// behalf, macOS answers "policy disallows prompt" and delivers silence. Only an
+/// AVFoundation request from the app can show the prompt, so make it before capture.
+#[cfg(target_os = "macos")]
+fn ensure_microphone_access() -> Result<(), String> {
+    use block2::RcBlock;
+    use objc2::{class, msg_send, runtime::Bool};
+    use objc2_foundation::NSString;
+    #[link(name = "AVFoundation", kind = "framework")]
+    extern "C" {}
+    const DENIED: &str = "VietNote chưa được dùng micro. Mở Cài đặt hệ thống → Quyền riêng tư & Bảo mật → Micro, bật VietNote rồi thử lại.";
+    let audio = NSString::from_str("soun"); // AVMediaTypeAudio
+    let device = class!(AVCaptureDevice);
+    // AVAuthorizationStatus: 0 not determined, 1 restricted, 2 denied, 3 authorized.
+    let status: isize = unsafe { msg_send![device, authorizationStatusForMediaType: &*audio] };
+    match status {
+        3 => Ok(()),
+        0 => {
+            let (tx, rx) = mpsc::channel();
+            let reply = RcBlock::new(move |granted: Bool| { let _ = tx.send(granted.as_bool()); });
+            let _: () = unsafe { msg_send![device, requestAccessForMediaType: &*audio, completionHandler: &*reply] };
+            if rx.recv_timeout(Duration::from_secs(120)).unwrap_or(false) { Ok(()) } else { Err(DENIED.into()) }
+        }
+        _ => Err(DENIED.into()),
+    }
+}
+
 fn start_source(source: Source, label: &'static str, tx: mpsc::SyncSender<(String, Vec<f32>, f64)>) -> Result<Recording, String> {
     let config = Config { source, sample_rate: 16_000, segment: Duration::from_secs(30), ..Config::default() };
     start_with_tap(config, |_| {}, Box::new(move |frames| {
@@ -492,6 +519,8 @@ fn start_capture(state: tauri::State<'_, NativeState>, source: String) -> Result
     let writer = state.writer.clone();
     let pending = state.pending_audio.clone();
     let mut next = Vec::new();
+    #[cfg(target_os = "macos")]
+    if source == "microphone" || source == "both" { ensure_microphone_access()?; }
     if source == "microphone" || source == "both" { next.push(start_source(Source::Mic, "microphone", tx.clone())?); }
     if source == "system" || source == "both" {
         match start_source(Source::System, "system", tx.clone()) {
