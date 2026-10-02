@@ -728,8 +728,27 @@ fn open_permission(kind: String) -> Result<(), String> {
     Ok(())
 }
 
+/// The ad-hoc signature changes with every build, so after an update macOS keeps showing
+/// the old microphone grant but feeds the new binary silence. Dropping the stale grant
+/// makes the next capture ask again. Screen recording is left alone: it still works.
+#[cfg(target_os = "macos")]
+fn reset_microphone_after_update(app: &tauri::AppHandle) {
+    if cfg!(debug_assertions) { return; }
+    let Ok(dir) = app_data(app) else { return };
+    let marker = dir.join("last-run-version");
+    let version = app.package_info().version.to_string();
+    if fs::read_to_string(&marker).ok().as_deref() == Some(version.as_str()) { return; }
+    let _ = Command::new("tccutil").args(["reset", "Microphone", &app.config().identifier]).status();
+    let _ = fs::create_dir_all(&dir).and_then(|_| fs::write(&marker, &version));
+}
+
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            #[cfg(target_os = "macos")]
+            reset_microphone_after_update(app.handle());
+            Ok(())
+        })
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(NativeState::default())
