@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { desktop, type AccountStatus } from '../services/desktop'
 import { createNote, demoNote, emptyStructuredSummary, formatStructuredSummary, toTranscriptSegment } from '../services/notes'
-import type { AudioChunk, AudioInput, Cadence, InterimTranscript, Language, MeetingNote, NoteGroup, SpokenLanguage, StructuredMeetingSummary, Subtitle, TranslationBlock, WorkerMessage } from '../services/types'
+import type { AudioInput, Cadence, InterimTranscript, Language, MeetingNote, NoteGroup, SpokenLanguage, StructuredMeetingSummary, Subtitle, TranslationBlock, WorkerMessage } from '../services/types'
 import { requestSignIn } from '../services/credits'
 
 const now = () => new Date().toISOString()
@@ -38,11 +38,6 @@ export function useAppModel() {
   const [startError, setStartError] = useState('')
   const [sourceLanguage, setSourceLanguageState] = useState<Language>(savedLanguage)
   const [audioInput, setAudioInputState] = useState<AudioInput>('both')
-  const [speechEnabled, setSpeechEnabled] = useState(true)
-  const [speechRate, setSpeechRateState] = useState(() => {
-    const saved = Number(localStorage.getItem('ttsPlaybackRate'))
-    return [1, 1.15, 1.25, 1.4, 1.5].includes(saved) ? saved : 1.25
-  })
   const [translateForeign, setTranslateForeignState] = useState(() => localStorage.getItem('translateForeign') !== 'false')
   const [entries, setEntries] = useState<Subtitle[]>([])
   const [interimTranscripts, setInterimTranscripts] = useState<InterimTranscript[]>([])
@@ -57,8 +52,6 @@ export function useAppModel() {
   const [savingNoteGroupID, setSavingNoteGroupID] = useState<string | null>(null)
   const savingNoteIDRef = useRef<string | null>(null)
   const [vietnameseASRStatus, setVietnameseASRStatus] = useState('Đang chuẩn bị nhận diện…')
-  const [ttsStatus, setTtsStatus] = useState('Đang tải giọng đọc…')
-  const [ttsVoiceName, setTtsVoiceName] = useState('Giọng Nam')
   const [translationStatus, setTranslationStatus] = useState('Đang chuẩn bị dịch')
   const entriesRef = useRef<Subtitle[]>([])
   const translationBlocksRef = useRef<TranslationBlock[]>([])
@@ -76,8 +69,6 @@ export function useAppModel() {
   // Spoken language per utterance id; in auto mode Vietnamese turns get no live translation.
   const spokenLanguageRef = useRef(new Map<string, SpokenLanguage>())
   const audioRef = useRef<AudioInput>('both')
-  const speechRef = useRef(true)
-  const speechRateRef = useRef(speechRate)
   const cadenceRef = useRef<Cadence>('words')
   const cadenceValueRef = useRef(150)
   const overallSummaryCursor = useRef(0)
@@ -94,10 +85,6 @@ export function useAppModel() {
   const lastSummaryAt = useRef(Date.now())
   const meetingStartedAt = useRef(Date.now())
   const generationPending = useRef(false)
-  const stagedAudio = useRef<AudioChunk[]>([])
-  const stagedDuration = useRef(0)
-  const playbackStarted = useRef(false)
-  const activeVoiceRef = useRef('giọng đã chọn')
   const liveTranslationRef = useRef(false)
   const translateForeignRef = useRef(translateForeign)
   // The switch lives in the meeting UI; the standalone translator always translates.
@@ -158,18 +145,12 @@ export function useAppModel() {
     translateForeignRef.current = value; setTranslateForeignState(value); localStorage.setItem('translateForeign', String(value))
     // Toggling never back-fills: only speech after the switch is (not) translated.
     clearTranslationTimers(); translationCursorRef.current = entriesRef.current.length
-    if (!value) { publishTranslationBlocks(translationBlocksRef.current.filter(block => !block.pending)); clearPlayback() }
+    if (!value) publishTranslationBlocks(translationBlocksRef.current.filter(block => !block.pending))
     if (meetingRef.current) setTranslationStatus(value ? 'Đã bật dịch sang tiếng Việt' : 'Đã tắt dịch tiếng nước ngoài')
   }
   const setAudioInput = (value: AudioInput) => { audioRef.current = value; setAudioInputState(value); publishEntries([]); setInterimTranscripts([]); resetTranslations() }
   const setCadence = (value: Cadence) => { cadenceRef.current = value; setSummaryCadence(value); cadenceValueRef.current = value === 'words' ? 150 : 1; setCadenceValue(cadenceValueRef.current) }
   const setCadenceAmount = (value: number) => { cadenceValueRef.current = value; setCadenceValue(value) }
-  const clearPlayback = () => { void desktop.stopAudio().catch(() => {}); stagedAudio.current = []; stagedDuration.current = 0; playbackStarted.current = false }
-  const setSpeech = (value: boolean) => { speechRef.current = value; setSpeechEnabled(value); if (!value) clearPlayback() }
-  const setSpeechRate = (value: number) => {
-    const next = [1, 1.15, 1.25, 1.4, 1.5].includes(value) ? value : 1.25
-    speechRateRef.current = next; setSpeechRateState(next); localStorage.setItem('ttsPlaybackRate', String(next))
-  }
 
   const summarize = async (force = false) => {
     if (summaryBusy.current || !meetingRef.current || stoppingRef.current) return
@@ -222,7 +203,7 @@ export function useAppModel() {
     publishTranslationBlocks([...translationBlocksRef.current, block])
     const zhEntries = paragraphEntries.filter(entry => entry.language === 'zh').length
     const language: SpokenLanguage = zhEntries * 2 > paragraphEntries.length ? 'zh' : 'en'
-    // In live mode ZeroTTS already voiced each Soniox utterance; the paragraph
+    // In live mode Soniox already translated each utterance; the paragraph
     // pass only produces the more accurate text that is saved to the note.
     const live = liveTranslationRef.current
     translationQueueRef.current = translationQueueRef.current.then(async () => {
@@ -232,10 +213,6 @@ export function useAppModel() {
         publishTranslationBlocks(translationBlocksRef.current.map(item => item.id === block.id ? { ...item, translatedText, pending: false } : item))
         setTranslationStatus(live ? 'Dịch trực tiếp · chuẩn hóa theo đoạn' : `${language === 'en' ? 'Anh' : 'Trung'} → Việt theo đoạn`)
         if (meetingRef.current) await summarize(overallSummaryCursor.current === 0)
-        const lastEntry = paragraphEntries.at(-1)
-        if (!live && speechRef.current && audioRef.current === 'system' && capturingRef.current && lastEntry?.generation === generationRef.current) {
-          void desktop.sendWorker({ type: 'synthesize', id: block.id, generation: lastEntry.generation, text: translatedText })
-        }
       } catch (error) {
         publishTranslationBlocks(translationBlocksRef.current.map(item => item.id === block.id ? { ...item, translatedText: 'Chưa dịch được đoạn này.', pending: false, failed: true } : item))
         setTranslationStatus(`Không dịch được: ${error}`)
@@ -251,25 +228,6 @@ export function useAppModel() {
     if (translationIdleTimerRef.current) clearTimeout(translationIdleTimerRef.current)
     translationIdleTimerRef.current = setTimeout(flushTranslationParagraph, 4000)
     if (pendingEntries.reduce((sum, entry) => sum + countWords(entry.sourceText), 0) >= 80) flushTranslationParagraph()
-  }
-
-  // Played natively (not WebAudio): WKWebView audio comes from a separate WebKit
-  // process the system-audio tap cannot exclude, so ASR would re-hear our TTS.
-  const flushPlayback = () => {
-    if (!stagedAudio.current.length) return
-    const chunks = stagedAudio.current
-    stagedAudio.current = []; stagedDuration.current = 0; playbackStarted.current = true
-    void desktop.playAudio(chunks, speechRateRef.current).catch(error => setTtsStatus(`Không phát được âm thanh: ${error}`))
-  }
-
-  const stageAudio = (chunk: AudioChunk, prebufferSeconds: number) => {
-    stagedAudio.current.push(chunk); stagedDuration.current += chunk.pcm.length * 3 / 4 / (chunk.format === 'f32' ? 4 : 2) / chunk.sampleRate
-    if (playbackStarted.current || stagedDuration.current >= prebufferSeconds) flushPlayback()
-  }
-
-  const playPCM = (encoded: string, sampleRate: number) => {
-    if (!speechRef.current) return
-    stageAudio({ pcm: encoded, format: 'f32', sampleRate }, 0.8)
   }
 
   const handleWorker = (message: WorkerMessage) => {
@@ -290,9 +248,6 @@ export function useAppModel() {
         setReady(true)
         setStatus('Sẵn sàng sử dụng')
         setVietnameseASRStatus('Nhận diện sẵn sàng')
-        activeVoiceRef.current = message.tts_voice ?? 'giọng đã chọn'
-        setTtsVoiceName(activeVoiceRef.current)
-        setTtsStatus(`Giọng đọc sẵn sàng — ${activeVoiceRef.current}`)
         break
       case 'transcript': {
         // While a meeting is stopping the worker still flushes the running live turn.
@@ -345,17 +300,8 @@ export function useAppModel() {
         const startedAt = message.started_at ?? Date.now() / 1000
         const block: TranslationBlock = { id: message.id, entryIds: [message.id], sourceText: '', translatedText: message.text, createdAt: new Date(startedAt * 1000).toISOString(), pending: !message.final, kind: 'live' }
         publishTranslationBlocks([...translationBlocksRef.current.filter(value => value.id !== message.id), block])
-        if (message.final && speechRef.current && audioRef.current === 'system' && capturingRef.current) {
-          void desktop.sendWorker({ type: 'synthesize', id: message.id, generation: message.generation, text: message.text })
-        }
         break
       }
-      // Keep the existing AudioContext and schedule the next utterance after the
-      // previous one. Closing it here truncates audio that is still playing.
-      case 'tts_begin': if (message.generation === generationRef.current) { activeVoiceRef.current = message.voice ?? activeVoiceRef.current; setTtsVoiceName(activeVoiceRef.current); setTtsStatus(`Speaking — ${activeVoiceRef.current}`) } break
-      case 'tts_audio': if (message.pcm && message.generation === generationRef.current) playPCM(message.pcm, message.sample_rate ?? 48000); break
-      case 'tts_end': if (message.generation === generationRef.current) { flushPlayback(); setTtsStatus(`Đang dùng ${activeVoiceRef.current}`) } break
-      case 'tts_error': setTtsStatus('Giọng đọc tạm thời không khả dụng'); break
       case 'warning': case 'error': audioIssueRef.current = true; setStatus(audioIssueText(message.message)); break
     }
   }
@@ -390,7 +336,7 @@ export function useAppModel() {
     overallSummaryCursor.current = 0; lastSummaryAt.current = Date.now(); meetingStartedAt.current = Date.now()
     setSummaryStatus('Đang lắng nghe · bản tóm tắt bắt đầu sau câu đầu tiên')
     setTranslationStatus(languageRef.current === 'vi' ? 'Không cần dịch' : !translateForeignRef.current ? 'Đã tắt dịch tiếng nước ngoài' : languageRef.current === 'auto' ? 'Tự động nhận diện → Việt' : `${languageRef.current === 'en' ? 'Anh' : 'Trung'} → Việt theo đoạn`)
-    setSpeech(false); meetingRef.current = true; setMeetingActive(true)
+    meetingRef.current = true; setMeetingActive(true)
     await start()
   }
   const stop = async (saveOptions?: { title: string; groupID: string | null }) => {
@@ -407,7 +353,6 @@ export function useAppModel() {
     stoppingRef.current = true
     capturingRef.current = false; setCapturing(false)
     setInterimTranscripts([])
-    clearPlayback()
     try {
       await desktop.stopCapture()
       // Wait for the native stream tail and speaker updates before saving notes.
@@ -527,8 +472,8 @@ export function useAppModel() {
   }, [refreshAccount])
 
   return { account, refreshAccount, status, startError, ready, diarizationReady, diarizationStatus, busy, capturing, meetingActive, sourceLanguage, setSourceLanguage, translateForeign, setTranslateForeign, audioInput, setAudioInput,
-    speechEnabled, setSpeechEnabled: setSpeech, speechRate, setSpeechRate, entries, interimTranscripts, translationBlocks, overallSummary, suggestedTitle, titlePending, suggestTitleNow: () => void suggestTitleNow(), summaryStatus, summaryCadence, setSummaryCadence: setCadence,
-    cadenceValue, setCadenceValue: setCadenceAmount, notes, noteGroups, savingNoteID, savingNoteGroupID, vietnameseASRStatus, ttsStatus, ttsVoiceName, translationStatus,
+    entries, interimTranscripts, translationBlocks, overallSummary, suggestedTitle, titlePending, suggestTitleNow: () => void suggestTitleNow(), summaryStatus, summaryCadence, setSummaryCadence: setCadence,
+    cadenceValue, setCadenceValue: setCadenceAmount, notes, noteGroups, savingNoteID, savingNoteGroupID, vietnameseASRStatus, translationStatus,
     canStartMeeting: ready || asrKeyAvailable, canSummarizeNow: meetingActive && !summaryBusy.current && (entries.length > overallSummaryCursor.current || (translating() && entries.length > translationCursorRef.current)),
     start, startMeeting, stop, summarizeNow: () => void summarizeNow(), newNote, updateNote, deleteNote, createGroup, renameGroup, deleteGroup, meetingStartedAt: meetingStartedAt.current }
 }

@@ -53,5 +53,3 @@ export interface WorkerMessage {
 // showSource is false for foreign speech being translated: only its live translation is shown.
 export interface InterimTranscript { id: string; text: string; source: string; startedAt: number; speaker?: string | null; showSource: boolean }
 
-/** Base64 little-endian PCM handed to the native player (f32 = ZeroTTS, s16 = 16-bit PCM). */
-export type AudioChunk = { pcm: string; format: 'f32' | 's16'; sampleRate: number }

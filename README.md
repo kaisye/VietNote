@@ -8,7 +8,7 @@ Dự án sử dụng **Tauri + React + TypeScript** cho ứng dụng desktop, **
 
 - Thu âm từ **microphone**, **âm thanh hệ thống** hoặc **cả hai**. Nguồn mặc định là cả hai.
 - Nhận diện giọng nói tiếng Việt, tiếng Anh và tiếng Trung theo thời gian thực.
-- Dịch trực tiếp tiếng Anh và tiếng Trung sang tiếng Việt bằng **Soniox** (dịch kèm trong giá nhận diện); bản dịch được đọc bằng giọng ZeroTTS trên máy.
+- Dịch trực tiếp tiếng Anh và tiếng Trung sang tiếng Việt bằng **Soniox** (dịch kèm trong giá nhận diện). Đọc bản dịch thành tiếng: sắp ra mắt.
 - Tự động dùng dịch theo đoạn qua API local/Groq khi backend nhận diện không phải Soniox.
 - Tóm tắt trực tiếp theo số từ hoặc khoảng thời gian do người dùng lựa chọn.
 - Hiển thị riêng:
@@ -25,10 +25,9 @@ Dự án sử dụng **Tauri + React + TypeScript** cho ứng dụng desktop, **
 ```text
 src/            Giao diện React và luồng nghiệp vụ của ứng dụng
 src-tauri/      Backend Rust, thu âm native, lưu dữ liệu và gọi API AI
-asr/            Worker Python cho ASR, VAD và TTS
+asr/            Worker Python cho ASR và VAD
 scripts/        Script cài đặt, chạy, build và chấm acceptance test
 tests/          Unit test, smoke test và kịch bản acceptance test
-voices/         Tài nguyên giọng đọc tiếng Việt
 ```
 
 Luồng xử lý chính:
@@ -110,9 +109,9 @@ Script sẽ tạo `.venv`, cài dependency Python và npm, sau đó build ứng 
 
 Workflow [build-installers.yml](.github/workflows/build-installers.yml) tạo hai artifact: DMG cho macOS Apple Silicon và EXE NSIS cho Windows x64. Chạy thủ công từ tab Actions hoặc đẩy tag `v*`; tag sẽ tạo GitHub Release và thay toàn bộ asset cũ của tag đó bằng hai bộ cài mới.
 
-Repository cần có secret `VIETNOTE_GROQ_API_KEY` trước khi chạy. Workflow nhúng key này khi biên dịch, không lưu key trong mã nguồn. Hãy đưa `vendor/cpal/` và cả hai tệp ZIP trong `voices/` vào commit phát hành; workflow kiểm tra các tài nguyên này trước khi build.
+Repository cần có secret `VIETNOTE_GROQ_API_KEY` trước khi chạy. Workflow nhúng key này khi biên dịch, không lưu key trong mã nguồn. Hãy đưa `vendor/cpal/` vào commit phát hành; workflow kiểm tra thư mục này trước khi build.
 
-Bản phát hành đóng gói worker Python cho API nhận diện và ZeroTTS, không cần model nhận diện cục bộ. Model ZeroTTS được tải và lưu vào cache khi chạy lần đầu. DMG hiện ký ad hoc; muốn người dùng macOS mở trực tiếp mà không gặp cảnh báo Gatekeeper cần thêm chứng chỉ Developer ID và notarization.
+Bản phát hành đóng gói worker Python cho API nhận diện, không cần model nhận diện cục bộ. DMG hiện ký ad hoc; muốn người dùng macOS mở trực tiếp mà không gặp cảnh báo Gatekeeper cần thêm chứng chỉ Developer ID và notarization.
 
 ## Cấu hình nhận diện giọng nói
 

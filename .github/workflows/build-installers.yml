@@ -32,8 +32,6 @@ jobs:
         shell: bash
         run: |
           test -n "$TAURI_SIGNING_PRIVATE_KEY"
-          test -f voices/thuc-day-di.zip
-          test -f voices/Ngoc-Huyen-7owuK1LaOPOaQjeSzmQ4.zip
           test -f vendor/cpal/Cargo.toml
 
       - name: Set up Node.js
@@ -77,8 +75,6 @@ jobs:
             --workpath worker-build \
             --specpath worker-build \
             --paths "$GITHUB_WORKSPACE/asr" \
-            --collect-all zerotts \
-            --collect-all tokenizers \
             --collect-data certifi \
             --python-option "X utf8" \
             asr/server.py
@@ -127,7 +123,7 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) {
             throw "Missing repository secret TAURI_SIGNING_PRIVATE_KEY"
           }
-          foreach ($file in @('voices/thuc-day-di.zip', 'voices/Ngoc-Huyen-7owuK1LaOPOaQjeSzmQ4.zip', 'vendor/cpal/Cargo.toml')) {
+          foreach ($file in @('vendor/cpal/Cargo.toml')) {
             if (-not (Test-Path $file)) { throw "Missing release resource: $file" }
           }
 
@@ -162,8 +158,8 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      # Frozen apps ignore PYTHONUTF8; without UTF-8 mode, ZeroTTS reads the
-      # Vietnamese voice metadata as cp1252 and the worker dies at startup.
+      # Frozen apps ignore PYTHONUTF8; UTF-8 mode keeps Vietnamese text from
+      # being read or printed as cp1252.
       - name: Build portable audio worker
         shell: pwsh
         run: |
@@ -174,8 +170,6 @@ jobs:
             --workpath worker-build `
             --specpath worker-build `
             --paths "$env:GITHUB_WORKSPACE\asr" `
-            --collect-all zerotts `
-            --collect-all tokenizers `
             --collect-data certifi `
             --python-option "X utf8" `
             asr/server.py

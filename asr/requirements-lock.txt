@@ -28,4 +28,3 @@ tqdm==4.70.1
 typing_extensions==4.16.0
 urllib3==2.7.0
 websocket-client==1.9.2
-zerotts==0.1.5

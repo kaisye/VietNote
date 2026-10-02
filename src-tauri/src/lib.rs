@@ -1,6 +1,5 @@
 mod account;
 mod diarization_model;
-mod playback;
 use base64::Engine;
 use clipclip::{start_with_tap, Config, Recording, Source};
 use serde::{Deserialize, Serialize};
@@ -15,8 +14,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager};
-
-const DEFAULT_TTS_VOICE: &str = "thuc-day-di";
 
 /// Console children of a GUI app open their own console window on Windows; keep them hidden.
 fn hide_console(command: &mut Command) -> &mut Command {
@@ -47,75 +44,6 @@ fn env_key(name: &str) -> Option<String> {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct StoredNotes { notes: Vec<Value>, groups: Vec<Value> }
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TtsVoiceOption {
-    id: String,
-    display_name: String,
-    description: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TtsVoiceConfig {
-    selected_id: String,
-    voices: Vec<TtsVoiceOption>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct StoredTtsVoice { selected_id: String }
-
-fn tts_voice_definitions() -> [(&'static str, &'static str, &'static str, &'static str); 2] {
-    [
-        ("thuc-day-di", "Giọng Nam", "Trung niên", "thuc-day-di.zip"),
-        ("ngoc-huyen", "Giọng Nữ", "Kể truyện · review phim", "Ngoc-Huyen-7owuK1LaOPOaQjeSzmQ4.zip"),
-    ]
-}
-
-fn selected_tts_voice_id(app: &tauri::AppHandle) -> Result<String, String> {
-    let path = app_data(app)?.join("tts-voice.json");
-    let selected = fs::read(path).ok()
-        .and_then(|data| serde_json::from_slice::<StoredTtsVoice>(&data).ok())
-        .map(|settings| settings.selected_id)
-        .unwrap_or_else(|| DEFAULT_TTS_VOICE.into());
-    Ok(tts_voice_definitions().iter().find(|voice| voice.0 == selected).map(|voice| voice.0).unwrap_or(DEFAULT_TTS_VOICE).into())
-}
-
-fn tts_voice_config(app: &tauri::AppHandle) -> Result<TtsVoiceConfig, String> {
-    Ok(TtsVoiceConfig {
-        selected_id: selected_tts_voice_id(app)?,
-        voices: tts_voice_definitions().iter().map(|voice| TtsVoiceOption {
-            id: voice.0.into(), display_name: voice.1.into(), description: voice.2.into(),
-        }).collect(),
-    })
-}
-
-#[tauri::command]
-fn get_tts_voice_config(app: tauri::AppHandle) -> Result<TtsVoiceConfig, String> { tts_voice_config(&app) }
-
-#[tauri::command]
-fn set_tts_voice(app: tauri::AppHandle, state: tauri::State<'_, NativeState>, voice_id: String) -> Result<TtsVoiceConfig, String> {
-    if !state.captures.lock().map_err(|e| e.to_string())?.is_empty() {
-        return Err("Hãy dừng ghi âm trước khi đổi giọng đọc".into());
-    }
-    let definition = tts_voice_definitions().into_iter().find(|voice| voice.0 == voice_id)
-        .ok_or("Giọng đọc không hợp lệ")?;
-    let root = project_root(&app)?;
-    if !root.join("voices").join(definition.3).exists() {
-        return Err(format!("Không tìm thấy gói giọng {}", definition.1));
-    }
-    let dir = app_data(&app)?;
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    fs::write(
-        dir.join("tts-voice.json"),
-        serde_json::to_vec(&json!({ "selectedId": definition.0 })).map_err(|e| e.to_string())?,
-    ).map_err(|e| e.to_string())?;
-    stop_worker(state.clone())?;
-    start_worker(app.clone(), state)?;
-    tts_voice_config(&app)
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -267,9 +195,6 @@ fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> 
     if slot.as_mut().is_some_and(|child| child.try_wait().ok().flatten().is_none()) { return Ok(()); }
     let root = project_root(&app)?;
     let (worker, packaged_worker) = worker_executable(&root)?;
-    let selected_voice = selected_tts_voice_id(&app)?;
-    let voice_file = tts_voice_definitions().into_iter().find(|voice| voice.0 == selected_voice)
-        .map(|voice| voice.3).unwrap_or("thuc-day-di.zip");
     // A locked/unavailable OS credential store must not prevent offline ASR.
     let groq_key = env_key("GROQ_API_KEY");
     let soniox_key = env_key("SONIOX_API_KEY");
@@ -280,7 +205,7 @@ fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> 
     // evidence for intermittent ASR repetition disappears on every launch.
     let mut logfile = fs::OpenOptions::new().create(true).append(true)
         .open(logs.join("worker.log")).map_err(|e| e.to_string())?;
-    writeln!(logfile, "\n[WORKER START] {} · voice={selected_voice}", chrono::Local::now())
+    writeln!(logfile, "\n[WORKER START] {}", chrono::Local::now())
         .map_err(|e| e.to_string())?;
     let stderr_log = logfile.try_clone().map_err(|e| e.to_string())?;
     let cache = if root.join(".venv").exists() { root.join(".cache/huggingface") } else { app_data(&app)?.join("cache/huggingface") };
@@ -292,7 +217,6 @@ fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> 
         .env("ASR_TOKEN", &token)
         .env("PYTHONUTF8", "1")
         .env("HF_HOME", cache)
-        .env("TTS_VOICE_PATH", root.join("voices").join(voice_file))
         .stdout(Stdio::piped()).stderr(Stdio::from(stderr_log));
     if let Some(key) = groq_key.filter(|key| !key.trim().is_empty()) {
         command.env("GROQ_API_KEY", key);
@@ -325,7 +249,7 @@ fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> 
         while lines.read_until(b'\n', &mut buffer).is_ok_and(|read| read > 0) {
             let line = String::from_utf8_lossy(&buffer).trim_end_matches(['\r', '\n']).to_string();
             buffer.clear();
-            // Python writes ASR/TTS diagnostics to stdout; retain them alongside
+            // Python writes ASR diagnostics to stdout; retain them alongside
             // stderr so a future repeated segment can be traced to its source.
             let _ = writeln!(logfile, "{line}");
             if epoch_counter.load(Ordering::SeqCst) != epoch { break; }
@@ -771,9 +695,17 @@ fn reset_microphone_after_update(app: &tauri::AppHandle) {
     let _ = fs::create_dir_all(&dir).and_then(|_| fs::write(&marker, &version));
 }
 
+/// Spoken translations were dropped; free the ~870 MB ZeroTTS model earlier versions cached.
+fn remove_retired_tts_model(app: &tauri::AppHandle) {
+    let Ok(dir) = app_data(app) else { return };
+    let model = dir.join("cache/huggingface/hub/models--zeroweight-ai--ZeroTTS");
+    if model.exists() { std::thread::spawn(move || { let _ = fs::remove_dir_all(model); }); }
+}
+
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
+            remove_retired_tts_model(app.handle());
             #[cfg(target_os = "macos")]
             reset_microphone_after_update(app.handle());
             Ok(())
@@ -781,7 +713,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(NativeState::default())
-        .invoke_handler(tauri::generate_handler![load_notes, save_notes, get_tts_voice_config, set_tts_voice, account::account_status, account::account_signed_in, account::account_send_code, account::account_offers, account::account_buy, account::account_order_status, account_verify, account_sign_out, start_worker, stop_worker, send_worker, start_capture, stop_capture, summarize_segments, suggest_title, translate_text, open_permission, diarization_model_status, download_diarization_model, cancel_diarization_download, remove_diarization_model, playback::play_audio, playback::stop_audio])
+        .invoke_handler(tauri::generate_handler![load_notes, save_notes, account::account_status, account::account_signed_in, account::account_send_code, account::account_offers, account::account_buy, account::account_order_status, account_verify, account_sign_out, start_worker, stop_worker, send_worker, start_capture, stop_capture, summarize_segments, suggest_title, translate_text, open_permission, diarization_model_status, download_diarization_model, cancel_diarization_download, remove_diarization_model])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 let state = window.app_handle().state::<NativeState>();

@@ -1,14 +1,11 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import type { AudioChunk, AudioInput, SpokenLanguage, MeetingNote, NoteGroup, StructuredMeetingSummary, TranscriptSegment, WorkerMessage } from './types'
+import type { AudioInput, SpokenLanguage, MeetingNote, NoteGroup, StructuredMeetingSummary, TranscriptSegment, WorkerMessage } from './types'
 
 export interface StoredNotes { notes: MeetingNote[]; groups: NoteGroup[] }
 export interface AccountStatus { configured: boolean; email: string | null; balanceSeconds: number | null }
 export interface CreditOffer { id: string; name: string; hours: number; bonus_hours: number; price_vnd: number; original_price_vnd: number | null; promo_label: string | null; promo_ends_at: string | null; highlight: boolean }
 export interface OrderStatus { status: 'pending' | 'paid' | 'cancelled'; balance_seconds: number | null }
-export type TtsVoiceId = 'thuc-day-di' | 'ngoc-huyen'
-export interface TtsVoiceOption { id: TtsVoiceId; displayName: string; description: string }
-export interface TtsVoiceConfig { selectedId: TtsVoiceId; voices: TtsVoiceOption[] }
 export interface DiarizationModelStatus { installed: boolean; runtimeAvailable: boolean; downloading: boolean; partialBytes: number; sizeBytes: number; removable: boolean }
 export interface DownloadProgress { downloaded: number; total: number }
 const isDesktop = '__TAURI_INTERNALS__' in window
@@ -21,8 +18,6 @@ export const desktop = {
     saveQueue = saveQueue.catch(() => {}).then(() => invoke<void>('save_notes', { payload }))
     return saveQueue
   },
-  getTtsVoiceConfig: () => invoke<TtsVoiceConfig>('get_tts_voice_config'),
-  setTtsVoice: (voiceId: TtsVoiceId) => invoke<TtsVoiceConfig>('set_tts_voice', { voiceId }),
   startWorker: () => invoke<void>('start_worker'),
   accountSignedIn: () => invoke<boolean>('account_signed_in'),
   accountStatus: () => invoke<AccountStatus>('account_status'),
@@ -36,8 +31,6 @@ export const desktop = {
   sendWorker: (payload: Record<string, unknown>) => invoke<void>('send_worker', { payload }),
   startCapture: (source: AudioInput) => invoke<void>('start_capture', { source }),
   stopCapture: () => invoke<void>('stop_capture'),
-  playAudio: (chunks: AudioChunk[], rate: number) => invoke<void>('play_audio', { chunks, rate }),
-  stopAudio: () => invoke<void>('stop_audio'),
   summarizeSegments: (segments: TranscriptSegment[], previousSummary?: StructuredMeetingSummary) =>
     invoke<StructuredMeetingSummary>('summarize_segments', { segments, previousSummary: previousSummary ?? null }),
   suggestTitle: (transcript: string) => invoke<string>('suggest_title', { transcript }),

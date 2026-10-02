@@ -1,6 +1,6 @@
 [package]
 name = "vietnote"
-version = "0.7.7"
+version = "0.7.8"
 description = "VietNote desktop shell"
 authors = ["VietNote"]
 edition = "2021"
@@ -19,7 +19,6 @@ serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
 reqwest = { version = "0.12", features = ["json", "rustls-tls", "rustls-tls-native-roots"], default-features = false }
 clipclip = { version = "0.2.5", default-features = false }
-cpal = "0.18"
 base64 = "0.22"
 sha2 = "0.10"
 keyring = { version = "3.6.3", default-features = false, features = ["apple-native", "windows-native"] }
@@ -32,6 +31,6 @@ objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString"] }
 
 [patch.crates-io]
-# clipclip uses cpal's Core Audio process tap. Keep VietNote's own TTS out of
-# that tap so spoken translations cannot be recognized and translated again.
+# clipclip captures through cpal. The vendored copy keeps VietNote's own audio
+# out of the Core Audio tap and tolerates WASAPI loopback discontinuities.
 cpal = { path = "../vendor/cpal" }

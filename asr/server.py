@@ -15,7 +15,7 @@ import wave
 from pathlib import Path
 
 # Windows pipes default to the ANSI code page, which cannot encode Vietnamese
-# (the voice name in the startup log crashed the worker); the app reads UTF-8.
+# (Vietnamese text in the log crashed the worker); the app reads UTF-8.
 for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, 'reconfigure'):
         _stream.reconfigure(encoding='utf-8', errors='replace')
@@ -30,7 +30,6 @@ from echo_text import TranscriptEcho
 
 ROOT = Path(__file__).resolve().parents[1]
 os.environ.setdefault('HF_HOME', str(ROOT / '.cache' / 'huggingface'))
-os.environ.setdefault('ZEROTTS_VOICES_HOME', str(ROOT / '.cache' / 'zerotts' / 'voices'))
 VI_INITIAL_PROMPT = os.environ.get(
     'ASR_PROMPT_VI',
     ''
@@ -603,10 +602,7 @@ class SonioxStream:
 
 
 class SonioxRecognizer:
-    """Soniox real-time transcription with built-in one-way translation to Vietnamese.
-
-    Soniox returns text only; spoken Vietnamese audio comes from the local ZeroTTS voice.
-    """
+    """Soniox real-time transcription with built-in one-way translation to Vietnamese."""
     streaming = True
     diarizes = True
 
@@ -673,47 +669,7 @@ class SonioxRecognizer:
     def close(self):
         self.close_streams()
 
-class SpeechSynthesizer:
-    def __init__(self, model, voice_path):
-        from zerotts import ZeroTTS, normalize_vi_text
-        start = time.monotonic()
-        self.tts = ZeroTTS.from_pretrained(model)
-        self.normalize = normalize_vi_text
-        names = self.tts.add_voices(voice_path)
-        if not names:
-            raise RuntimeError(f'No ZeroTTS voice found in {voice_path}')
-        self.voice = names[0]
-        metadata = self.tts.load_voice(self.voice)
-        self.display_name = metadata.display_name or self.voice
-        # Exercise the real streaming decoder before announcing readiness.
-        warmup = self.tts.synthesize_stream('Xin chào.', voice=self.voice)
-        next(warmup, None)
-        warmup.close()
-        log(f'[TTS READY] ZeroTTS + {self.display_name}: {(time.monotonic()-start)*1000:.0f} ms')
-
-    @property
-    def sample_rate(self):
-        return self.tts.sample_rate
-
-    def stream(self, text):
-        return self.tts.synthesize_stream(self.normalize(text), voice=self.voice)
-
-def debug(recognizer, filename, language='zh'):
-    with wave.open(filename, 'rb') as wav:
-        if (wav.getnchannels(), wav.getframerate(), wav.getsampwidth()) != (1, RATE, 2):
-            raise ValueError('DEBUG WAV must be mono 16 kHz PCM16; see README conversion command')
-        audio = np.frombuffer(wav.readframes(wav.getnframes()), dtype='<i2').astype(np.float32)/32768
-    vad = AudioBuffer()
-    results = []
-    for chunk in np.array_split(np.concatenate((audio, np.zeros(RATE, np.float32))),
-                                max(1, (len(audio)+RATE)//1600)):
-        for segment, overlap in vad.feed(chunk):
-            results.append(recognizer.recognize(segment, overlap, time.time()-len(segment)/RATE, language))
-    log(json.dumps({'debug_results': results}, ensure_ascii=False))
-    if not any(r['text'] for r in results):
-        raise RuntimeError('DEBUG produced no transcript')
-
-def serve(recognizer, synthesizer, token):
+def serve(recognizer, token):
     with socket.socket() as listener:
         listener.bind(('127.0.0.1', 0))
         listener.listen(1)
@@ -725,7 +681,6 @@ def serve(recognizer, synthesizer, token):
                 return
             send_lock = threading.Lock()
             jobs = queue.Queue(maxsize=2)
-            speech_jobs = queue.Queue(maxsize=3)
             closed = threading.Event()
             generation = 0
             language = 'zh'
@@ -777,47 +732,6 @@ def serve(recognizer, synthesizer, token):
                         except OSError: break
             thread = threading.Thread(target=infer, daemon=True)
             thread.start()
-            def speak():
-                while not closed.is_set():
-                    try:
-                        request_id, text, gen = speech_jobs.get(timeout=.2)
-                    except queue.Empty:
-                        continue
-                    if gen != generation:
-                        continue
-                    started = time.monotonic()
-                    first_audio_ms = None
-                    samples = 0
-                    try:
-                        send(dict(type='tts_begin', id=request_id, generation=gen,
-                                  voice=synthesizer.display_name,
-                                  sample_rate=synthesizer.sample_rate))
-                        for chunk in synthesizer.stream(text):
-                            if gen != generation or closed.is_set():
-                                break
-                            pcm = np.asarray(chunk, dtype='<f4').reshape(-1)
-                            if first_audio_ms is None:
-                                first_audio_ms = (time.monotonic() - started) * 1000
-                            samples += len(pcm)
-                            send(dict(type='tts_audio', id=request_id, generation=gen,
-                                      sample_rate=synthesizer.sample_rate,
-                                      pcm=base64.b64encode(pcm.tobytes()).decode('ascii')))
-                        if gen == generation and not closed.is_set():
-                            elapsed = (time.monotonic() - started) * 1000
-                            send(dict(type='tts_end', id=request_id, generation=gen,
-                                      first_audio_ms=first_audio_ms or elapsed,
-                                      tts_ms=elapsed,
-                                      audio_ms=samples/synthesizer.sample_rate*1000))
-                            log(f'[TTS] {text}\n[TTS FIRST AUDIO] {(first_audio_ms or elapsed):.0f} ms\n'
-                                f'[TTS SYNTHESIS] {elapsed:.0f} ms\n[TTS AUDIO] {samples/synthesizer.sample_rate*1000:.0f} ms')
-                    except Exception as exc:
-                        try:
-                            send(dict(type='tts_error', id=request_id,
-                                      generation=gen, message=str(exc)))
-                        except OSError:
-                            break
-            speech_thread = threading.Thread(target=speak, daemon=True)
-            speech_thread.start()
             segment_seconds = getattr(recognizer, 'max_segment_seconds', 3.2)
             vads = {source: AudioBuffer(max_segment_seconds=segment_seconds) for source in sources}
 
@@ -833,7 +747,7 @@ def serve(recognizer, synthesizer, token):
                     except queue.Full:
                         send(dict(type='warning', message='ASR overloaded: dropped segment to bound latency.'))
             echo_gate = EchoGate(accept_audio)
-            send(dict(type='connected', tts_voice=synthesizer.display_name,
+            send(dict(type='connected',
                       vi_model_ready=getattr(recognizer, 'vi_model_ready', False),
                       asr_backend=getattr(recognizer, 'backend_name', 'Local'),
                       asr_model=getattr(recognizer, 'model_name', 'Whisper')))
@@ -891,30 +805,17 @@ def serve(recognizer, synthesizer, token):
                         if streaming and hasattr(recognizer, 'flush'):
                             recognizer.flush()
                         diarizer.finish(str(message.get('id', '')))
-                    elif message['type'] == 'synthesize':
-                        text = str(message.get('text', '')).strip()
-                        request_id = str(message.get('id', ''))
-                        gen = int(message.get('generation', generation))
-                        if text and request_id:
-                            log(f'[TTS QUEUED] {request_id} · generation {gen}')
-                            try: speech_jobs.put_nowait((request_id, text, gen))
-                            except queue.Full:
-                                send(dict(type='tts_error', id=request_id, generation=gen,
-                                          message='ZeroTTS queue full; skipped speech to bound latency.'))
             finally:
                 closed.set()
                 diarizer.close()
                 if streaming:
                     recognizer.close()
                 thread.join(timeout=10)
-                speech_thread.join(timeout=10)
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--backend', choices=('auto', 'groq', 'soniox'),
                         default=os.environ.get('ASR_BACKEND', 'auto'))
-    parser.add_argument('--tts-model', default=os.environ.get('TTS_MODEL', 'zeroweight-ai/ZeroTTS'))
-    parser.add_argument('--tts-voice', default=os.environ.get('TTS_VOICE_PATH', str(ROOT / 'voices' / 'thuc-day-di.zip')))
     parser.add_argument('--debug-wav')
     parser.add_argument('--language', choices=('zh', 'vi', 'en'), default='zh')
     args = parser.parse_args()
@@ -938,8 +839,7 @@ def main():
         raise SystemExit('Speech recognition needs SONIOX_API_KEY or GROQ_API_KEY')
     if args.debug_wav: debug(recognizer, args.debug_wav, args.language)
     else:
-        synthesizer = SpeechSynthesizer(args.tts_model, args.tts_voice)
-        serve(recognizer, synthesizer, os.environ['ASR_TOKEN'])
+        serve(recognizer, os.environ['ASR_TOKEN'])
 
 if __name__ == '__main__':
     main()
