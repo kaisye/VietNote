@@ -139,6 +139,7 @@ def segment_size(text):
 
 
 SONIOX_URL = 'wss://stt-rt.soniox.com/transcribe-websocket'
+SEND_TIMEOUT = 10.0  # seconds a websocket write may wait on a congested uplink
 SONIOX_MODEL = 'stt-rt-v5'
 SONIOX_HINTS = {'vi': ['vi', 'en'], 'en': ['en'], 'zh': ['zh'], 'auto': ['vi', 'en', 'zh']}
 # Soniox streams translation chunk by chunk with no end marker, so an utterance's
@@ -501,7 +502,6 @@ class SonioxStream:
         ws = websocket.create_connection(SONIOX_URL, timeout=10, enable_multithread=True,
                                          sslopt={'ca_certs': certifi.where()})
         ws.send(json.dumps(self.config(api_key)))
-        ws.settimeout(.01)
         return ws
 
     def run(self):
@@ -525,6 +525,9 @@ class SonioxStream:
                 sent_finalize = False
                 last_sent = time.monotonic()
                 while not self.closed.is_set():
+                    # Writes get the full timeout: a 10 ms one dropped the stream whenever the
+                    # uplink stalled briefly ("The write operation timed out"). Only polling is short.
+                    ws.settimeout(SEND_TIMEOUT)
                     for _ in range(10):
                         try:
                             pcm, captured_at = self.audio.get_nowait()
@@ -548,6 +551,7 @@ class SonioxStream:
                         ws.send(json.dumps({'type': 'keepalive'}))
                         last_sent = time.monotonic()
                     try:
+                        ws.settimeout(.01)
                         message = ws.recv()
                         if message:
                             payload = json.loads(message)
