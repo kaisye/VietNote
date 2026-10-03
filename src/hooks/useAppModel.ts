@@ -69,6 +69,10 @@ export function useAppModel() {
   // Spoken language per utterance id; in auto mode Vietnamese turns get no live translation.
   const spokenLanguageRef = useRef(new Map<string, SpokenLanguage>())
   const audioRef = useRef<AudioInput>('both')
+  // The microphone can be switched off and on while a recording runs.
+  const [microphoneOn, setMicrophoneOn] = useState(false)
+  const microphoneRef = useRef(false)
+  const microphoneBusy = useRef(false)
   const cadenceRef = useRef<Cadence>('words')
   const cadenceValueRef = useRef(150)
   const overallSummaryCursor = useRef(0)
@@ -315,9 +319,29 @@ export function useAppModel() {
     try {
       await desktop.sendWorker({ type: 'reset', generation: generationRef.current, language: languageRef.current })
       await desktop.startCapture(audioRef.current)
+      microphoneRef.current = audioRef.current !== 'system'; setMicrophoneOn(microphoneRef.current)
       capturingRef.current = true; setCapturing(true); setStatus(`● Listening — ${audioRef.current}`)
     } catch (error) { setStatus(`Capture stopped: ${error}`); setStartError(`Không ghi âm được: ${error}`); meetingRef.current = false; setMeetingActive(false) }
     finally { generationPending.current = false; setBusy(false) }
+  }
+  const toggleMicrophone = async () => {
+    if (!capturingRef.current || microphoneBusy.current) return
+    microphoneBusy.current = true
+    const enabled = !microphoneRef.current
+    try {
+      if (enabled) {
+        await desktop.sendWorker({ type: 'open_source', source: 'microphone' })
+        await desktop.setMicrophone(true)
+      } else {
+        // Stop capturing first so the worker's close is the microphone's last word.
+        await desktop.setMicrophone(false)
+        await desktop.sendWorker({ type: 'close_source', source: 'microphone' })
+        setInterimTranscripts(current => current.filter(item => item.source !== 'microphone'))
+      }
+      microphoneRef.current = enabled; setMicrophoneOn(enabled)
+      setStatus(enabled ? '● Đã bật micro' : audioRef.current === 'microphone' ? '● Đã tắt micro · tạm dừng thu' : '● Đã tắt micro · chỉ thu âm thanh máy')
+    } catch (error) { setStatus(`Không đổi được micro: ${error}`) }
+    finally { microphoneBusy.current = false }
   }
   const startMeeting = async () => {
     // Recognition, translation and summaries all run on the account's credit.
@@ -339,8 +363,9 @@ export function useAppModel() {
     meetingRef.current = true; setMeetingActive(true)
     await start()
   }
-  const stop = async (saveOptions?: { title: string; groupID: string | null }) => {
-    const wasMeeting = meetingRef.current
+  // `discard` ends the meeting without a final summary or a saved note.
+  const stop = async (saveOptions?: { title: string; groupID: string | null }, discard = false) => {
+    const wasMeeting = meetingRef.current && !discard
     const started = new Date(meetingStartedAt.current)
     const defaultTitle = `Cuộc họp · ${started.toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' })}`
     const pendingNoteID = wasMeeting ? crypto.randomUUID() : null
@@ -352,11 +377,12 @@ export function useAppModel() {
     setMeetingActive(false); setBusy(true)
     stoppingRef.current = true
     capturingRef.current = false; setCapturing(false)
+    microphoneRef.current = false; setMicrophoneOn(false)
     setInterimTranscripts([])
     try {
       await desktop.stopCapture()
       // Wait for the native stream tail and speaker updates before saving notes.
-      await new Promise<void>((resolve, reject) => {
+      if (!discard) await new Promise<void>((resolve, reject) => {
         const id = crypto.randomUUID()
         const timer = setTimeout(() => {
           diarizationFlush.current = null
@@ -368,8 +394,7 @@ export function useAppModel() {
           clearTimeout(timer); diarizationFlush.current = null; reject(error)
         })
       })
-      flushTranslationParagraph()
-      await translationQueueRef.current
+      if (!discard) { flushTranslationParagraph(); await translationQueueRef.current }
       meetingRef.current = false
       generationRef.current += 1
       await desktop.sendWorker({ type: 'reset', generation: generationRef.current, language: languageRef.current })
@@ -387,6 +412,11 @@ export function useAppModel() {
     stoppingRef.current = false
     setBusy(false)
     setStatus(ready ? 'Stopped — ready to restart' : 'Worker unavailable')
+    if (discard) {
+      meetingSessionRef.current += 1
+      publishEntries([]); publishOverallSummary(''); publishStructured(emptyStructuredSummary()); resetTranslations()
+      setSummaryStatus('Đã bỏ cuộc họp · không lưu ghi chú')
+    }
     if (!wasMeeting) return
     let structured = overallStructuredRef.current
     try {
@@ -471,7 +501,7 @@ export function useAppModel() {
     return () => window.clearInterval(timer)
   }, [refreshAccount])
 
-  return { account, refreshAccount, status, startError, ready, diarizationReady, diarizationStatus, busy, capturing, meetingActive, sourceLanguage, setSourceLanguage, translateForeign, setTranslateForeign, audioInput, setAudioInput,
+  return { account, refreshAccount, status, startError, ready, diarizationReady, diarizationStatus, busy, capturing, meetingActive, sourceLanguage, setSourceLanguage, translateForeign, setTranslateForeign, audioInput, setAudioInput, microphoneOn, toggleMicrophone: () => void toggleMicrophone(),
     entries, interimTranscripts, translationBlocks, overallSummary, suggestedTitle, titlePending, suggestTitleNow: () => void suggestTitleNow(), summaryStatus, summaryCadence, setSummaryCadence: setCadence,
     cadenceValue, setCadenceValue: setCadenceAmount, notes, noteGroups, savingNoteID, savingNoteGroupID, vietnameseASRStatus, translationStatus,
     canStartMeeting: ready || asrKeyAvailable, canSummarizeNow: meetingActive && !summaryBusy.current && (entries.length > overallSummaryCursor.current || (translating() && entries.length > translationCursorRef.current)),

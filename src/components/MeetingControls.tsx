@@ -1,9 +1,14 @@
-import { ChevronDown, Languages, SlidersHorizontal, Volume2 } from 'lucide-react'
+import { ChevronDown, Languages, Mic, MicOff, SlidersHorizontal, Volume2 } from 'lucide-react'
 import type { AppModel } from '../hooks/useAppModel'
 import type { AudioInput, Language } from '../services/types'
 
 export function TranslateSwitch({ model }: { model: AppModel }) {
   return <span className="translate-switch"><input type="checkbox" role="switch" aria-label="Dịch tiếng nước ngoài sang tiếng Việt" checked={model.translateForeign} onChange={e => model.setTranslateForeign(e.target.checked)}/><span aria-hidden="true"/></span>
+}
+
+export function MicrophoneToggle({ model }: { model: AppModel }) {
+  const label = model.microphoneOn ? 'Tắt micro' : 'Bật micro'
+  return <button type="button" className={`pill-btn mic-toggle ${model.microphoneOn ? 'on' : ''}`} onClick={model.toggleMicrophone} aria-pressed={model.microphoneOn} title={model.microphoneOn ? 'Tắt thu giọng nói từ micro' : 'Bật thu giọng nói từ micro'}>{model.microphoneOn ? <Mic size={16}/> : <MicOff size={16}/>}{label}</button>
 }
 
 export function MeetingControls({ model }: { model: AppModel }) {

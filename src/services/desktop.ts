@@ -31,6 +31,7 @@ export const desktop = {
   sendWorker: (payload: Record<string, unknown>) => invoke<void>('send_worker', { payload }),
   startCapture: (source: AudioInput) => invoke<void>('start_capture', { source }),
   stopCapture: () => invoke<void>('stop_capture'),
+  setMicrophone: (enabled: boolean) => invoke<void>('set_microphone', { enabled }),
   summarizeSegments: (segments: TranscriptSegment[], previousSummary?: StructuredMeetingSummary) =>
     invoke<StructuredMeetingSummary>('summarize_segments', { segments, previousSummary: previousSummary ?? null }),
   suggestTitle: (transcript: string) => invoke<string>('suggest_title', { transcript }),

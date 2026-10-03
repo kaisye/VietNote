@@ -31,6 +31,10 @@ struct NativeState {
     child: Mutex<Option<Child>>,
     writer: Arc<Mutex<Option<TcpStream>>>,
     captures: Mutex<Vec<Recording>>,
+    // Kept apart so the user can turn the microphone off and on mid-recording.
+    microphone: Mutex<Option<Recording>>,
+    // Set while a recording runs; new sources send their audio through it.
+    capture_tx: Mutex<Option<mpsc::SyncSender<(String, Vec<f32>, f64)>>>,
     capture_forwarder: Mutex<Option<std::thread::JoinHandle<()>>>,
     pending_audio: Arc<AtomicUsize>,
     worker_epoch: Arc<AtomicUsize>,
@@ -327,7 +331,7 @@ fn restart_worker_for_account(app: tauri::AppHandle, state: tauri::State<'_, Nat
 }
 
 fn ensure_idle(state: &tauri::State<'_, NativeState>) -> Result<(), String> {
-    if state.captures.lock().map_err(|e| e.to_string())?.is_empty() { Ok(()) }
+    if !capturing(state)? { Ok(()) }
     else { Err("Hãy dừng ghi âm trước khi đổi tài khoản".into()) }
 }
 
@@ -354,7 +358,7 @@ fn diarization_model_status(app: tauri::AppHandle) -> Result<diarization_model::
 /// Reloads the worker so Nemotron picks up (or drops) the model, unless a recording is running.
 fn reload_worker_when_idle(app: &tauri::AppHandle) -> Result<(), String> {
     let state = app.state::<NativeState>();
-    if !state.captures.lock().map_err(|e| e.to_string())?.is_empty() { return Ok(()); }
+    if capturing(&state)? { return Ok(()); }
     stop_worker(state.clone())?;
     start_worker(app.clone(), state)
 }
@@ -386,10 +390,7 @@ fn send_worker(state: tauri::State<'_, NativeState>, payload: Value) -> Result<(
 #[tauri::command]
 fn stop_worker(state: tauri::State<'_, NativeState>) -> Result<(), String> {
     state.worker_epoch.fetch_add(1, Ordering::SeqCst);
-    state.captures.lock().map_err(|e| e.to_string())?.clear();
-    if let Some(thread) = state.capture_forwarder.lock().map_err(|e| e.to_string())?.take() {
-        let _ = thread.join();
-    }
+    let _ = end_capture(&state);
     *state.writer.lock().map_err(|e| e.to_string())? = None;
     if let Some(mut child) = state.child.lock().map_err(|e| e.to_string())?.take() {
         if child.try_wait().map_err(|e| e.to_string())?.is_none() {
@@ -435,26 +436,30 @@ fn start_source(source: Source, label: &'static str, tx: mpsc::SyncSender<(Strin
     })).map_err(|e| e.to_string())
 }
 
+fn capturing(state: &tauri::State<'_, NativeState>) -> Result<bool, String> {
+    Ok(state.capture_tx.lock().map_err(|e| e.to_string())?.is_some())
+}
+
+fn start_microphone(tx: mpsc::SyncSender<(String, Vec<f32>, f64)>) -> Result<Recording, String> {
+    #[cfg(target_os = "macos")]
+    ensure_microphone_access()?;
+    start_source(Source::Mic, "microphone", tx)
+}
+
 #[tauri::command]
 fn start_capture(state: tauri::State<'_, NativeState>, source: String) -> Result<(), String> {
-    let mut captures = state.captures.lock().map_err(|e| e.to_string())?;
-    if !captures.is_empty() { return Err("Đang ghi âm".into()); }
+    let mut slot = state.capture_tx.lock().map_err(|e| e.to_string())?;
+    if slot.is_some() { return Err("Đang ghi âm".into()); }
+    if !matches!(source.as_str(), "microphone" | "system" | "both") { return Err("Nguồn âm thanh không hợp lệ".into()); }
     let (tx, rx) = mpsc::sync_channel::<(String, Vec<f32>, f64)>(25);
     let writer = state.writer.clone();
     let pending = state.pending_audio.clone();
-    let mut next = Vec::new();
-    #[cfg(target_os = "macos")]
-    if source == "microphone" || source == "both" { ensure_microphone_access()?; }
-    if source == "microphone" || source == "both" { next.push(start_source(Source::Mic, "microphone", tx.clone())?); }
-    if source == "system" || source == "both" {
-        match start_source(Source::System, "system", tx.clone()) {
-            Ok(recording) => next.push(recording),
-            Err(error) => { drop(next); return Err(error); }
-        }
-    }
-    if next.is_empty() { return Err("Nguồn âm thanh không hợp lệ".into()); }
-    *captures = next;
-    drop(captures);
+    let microphone = if source == "system" { None } else { Some(start_microphone(tx.clone())?) };
+    let system = if source == "microphone" { None } else { Some(start_source(Source::System, "system", tx.clone())?) };
+    *state.microphone.lock().map_err(|e| e.to_string())? = microphone;
+    *state.captures.lock().map_err(|e| e.to_string())? = system.into_iter().collect();
+    *slot = Some(tx);
+    drop(slot);
     let forwarder = std::thread::spawn(move || {
         while let Ok((source, samples, captured_at)) = rx.recv() {
             if pending.fetch_add(1, Ordering::Relaxed) >= 25 { pending.fetch_sub(1, Ordering::Relaxed); continue; }
@@ -471,13 +476,30 @@ fn start_capture(state: tauri::State<'_, NativeState>, source: String) -> Result
     Ok(())
 }
 
+/// Turns the microphone off or on while a recording runs; other sources keep going.
 #[tauri::command]
-fn stop_capture(state: tauri::State<'_, NativeState>) -> Result<(), String> {
+fn set_microphone(state: tauri::State<'_, NativeState>, enabled: bool) -> Result<(), String> {
+    let tx = state.capture_tx.lock().map_err(|e| e.to_string())?.clone().ok_or("Chưa ghi âm")?;
+    let mut microphone = state.microphone.lock().map_err(|e| e.to_string())?;
+    if !enabled { *microphone = None; }
+    else if microphone.is_none() { *microphone = Some(start_microphone(tx)?); }
+    Ok(())
+}
+
+/// Stops every source; the forwarder ends once the last sender is dropped.
+fn end_capture(state: &tauri::State<'_, NativeState>) -> Result<(), String> {
     state.captures.lock().map_err(|e| e.to_string())?.clear();
+    *state.microphone.lock().map_err(|e| e.to_string())? = None;
+    *state.capture_tx.lock().map_err(|e| e.to_string())? = None;
     if let Some(thread) = state.capture_forwarder.lock().map_err(|e| e.to_string())?.take() {
         thread.join().map_err(|_| "Audio forwarding failed".to_string())?;
     }
     Ok(())
+}
+
+#[tauri::command]
+fn stop_capture(state: tauri::State<'_, NativeState>) -> Result<(), String> {
+    end_capture(&state)
 }
 
 async fn ai_completion(system: &str, user: String, max_tokens: u32, json: bool) -> Result<String, String> {
@@ -713,11 +735,13 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(NativeState::default())
-        .invoke_handler(tauri::generate_handler![load_notes, save_notes, account::account_status, account::account_signed_in, account::account_send_code, account::account_offers, account::account_buy, account::account_order_status, account_verify, account_sign_out, start_worker, stop_worker, send_worker, start_capture, stop_capture, summarize_segments, suggest_title, translate_text, open_permission, diarization_model_status, download_diarization_model, cancel_diarization_download, remove_diarization_model])
+        .invoke_handler(tauri::generate_handler![load_notes, save_notes, account::account_status, account::account_signed_in, account::account_send_code, account::account_offers, account::account_buy, account::account_order_status, account_verify, account_sign_out, start_worker, stop_worker, send_worker, start_capture, stop_capture, set_microphone, summarize_segments, suggest_title, translate_text, open_permission, diarization_model_status, download_diarization_model, cancel_diarization_download, remove_diarization_model])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 let state = window.app_handle().state::<NativeState>();
                 if let Ok(mut captures) = state.captures.lock() { captures.clear(); }
+                if let Ok(mut microphone) = state.microphone.lock() { *microphone = None; }
+                if let Ok(mut tx) = state.capture_tx.lock() { *tx = None; }
                 if let Ok(mut writer) = state.writer.lock() { *writer = None; }
                 if let Ok(mut child) = state.child.lock() {
                     if let Some(mut process) = child.take() { let _ = process.kill(); let _ = process.wait(); }

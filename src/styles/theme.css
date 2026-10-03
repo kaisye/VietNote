@@ -33,6 +33,7 @@ select { min-height:35px; padding:5px 28px 5px 11px; }
 .pill-btn.primary { background:var(--button-primary); color:var(--button-primary-text); border-color:rgba(255,255,255,.3); }
 .pill-btn:not(:disabled):hover, .theme-toggle:hover, .add-group:hover { transform:translateY(-2px); box-shadow:0 8px 17px var(--shadow); }
 .pill-btn:active, .start-button:active { transform:scale(.97); }
+.pill-btn.mic-toggle:not(.on) { color:var(--muted); background:transparent; border-style:dashed; }
 .segmented { display:flex; align-items:center; gap:2px; border-radius:9px; padding:3px; background:rgba(126,129,181,.13); border:1px solid var(--border); }
 .segmented button { border:0; background:transparent; color:var(--muted); border-radius:7px; min-height:28px; padding:3px 12px; white-space:nowrap; font-size:12px; font-weight:600; transition:background .15s ease, color .15s ease; }
 .segmented button.selected { color:var(--ink); background:var(--glass-strong); box-shadow:0 1px 5px var(--shadow); }

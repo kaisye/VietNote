@@ -659,6 +659,20 @@ class SonioxRecognizer:
             # An idle open stream would keep holding reserved credit.
             self.close_streams()
 
+    def close_source(self, source):
+        """Finalize one source's turn and close its stream, releasing its reserved credit.
+        Runs in the background; join the returned thread before that source sends again."""
+        stream = self.streams.pop(source, None)
+        if stream is None:
+            return None
+        def finish():
+            stream.flush()
+            self.next_utterance[source] = stream.utterance
+            stream.close()
+        thread = threading.Thread(target=finish, daemon=True, name=f'close-{source}')
+        thread.start()
+        return thread
+
     def close_streams(self):
         streams, self.streams = list(self.streams.values()), {}
         for stream in streams:
@@ -687,6 +701,9 @@ def serve(recognizer, token):
             sources = ('system', 'microphone')
             audio_clocks = {}
             audio_levels = {}
+            # Sources the user switched off mid-recording; their late chunks are dropped.
+            muted = set()
+            closing = {}
             def send(data):
                 with send_lock:
                     conn.sendall(encode(data))
@@ -766,6 +783,7 @@ def serve(recognizer, token):
                         language = requested_language
                         audio_clocks.clear()
                         audio_levels.clear()
+                        muted.clear()
                         echo_gate = EchoGate(accept_audio)
                         diarizer.reset(generation)
                         vads = {source: AudioBuffer(max_segment_seconds=segment_seconds) for source in sources}
@@ -775,6 +793,8 @@ def serve(recognizer, token):
                         source = message.get('source', 'system')
                         if source not in vads:
                             send(dict(type='error', message='Unsupported audio source'))
+                            continue
+                        if source in muted:
                             continue
                         raw = base64.b64decode(message['pcm'], validate=True)
                         if len(raw) % 4: raise ValueError('Invalid Float32 payload')
@@ -795,6 +815,23 @@ def serve(recognizer, token):
                             peak, logged = 0.0, samples_seen
                         audio_levels[source] = (peak, logged)
                         echo_gate.push(audio, captured_at, source)
+                    elif message['type'] == 'close_source':
+                        source = message.get('source')
+                        if source in vads and source not in muted:
+                            muted.add(source)
+                            # Release the gated microphone tail, then end that source's turn.
+                            echo_gate.flush()
+                            if streaming and hasattr(recognizer, 'close_source'):
+                                closing[source] = recognizer.close_source(source)
+                            elif not streaming:
+                                vads[source] = AudioBuffer(max_segment_seconds=segment_seconds)
+                            # The next chunk restarts this source's clock.
+                            audio_clocks.pop(source, None)
+                    elif message['type'] == 'open_source':
+                        source = message.get('source')
+                        if (thread := closing.pop(source, None)) is not None:
+                            thread.join(timeout=5)
+                        muted.discard(source)
                     elif message['type'] == 'soniox_key':
                         if getattr(recognizer, 'broker', None):
                             recognizer.broker.deliver(message)
