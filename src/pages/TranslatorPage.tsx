@@ -1,16 +1,16 @@
-import { AudioLines, ChevronDown, Languages, Square, Volume2 } from 'lucide-react'
+import { AudioLines, Languages, Square, Volume2 } from 'lucide-react'
 import { useRef } from 'react'
 import type { AppModel } from '../hooks/useAppModel'
-import type { AudioInput, Language } from '../services/types'
 import { formatTime } from '../services/notes'
-import { MicrophoneToggle } from '../components/MeetingControls'
+import { MicrophoneToggle, audioOptions, languageOptions } from '../components/MeetingControls'
+import { Choice } from '../components/Choice'
 import { visibleTranslation } from '../services/translationView'
 import { LiveAssistant } from '../components/LiveAssistant'
 
 export function TranslatorPage({ model }: { model: AppModel }) {
   const transcript = useRef<HTMLElement>(null)
   return <main className="page-scroll"><div className="page-wrap narrow animate-in"><div className="eyebrow">REAL-TIME INTERPRETER</div><h1>Phiên dịch trực tiếp</h1><p className="page-subtitle">Dịch tiếng Anh hoặc tiếng Trung sang tiếng Việt ngay khi đang nói.</p>
-    <section className="glass-card translator-controls"><div className="select-row"><label className="field"><span>NGÔN NGỮ</span><div className="meeting-choice"><Languages size={17}/><select value={model.sourceLanguage} onChange={e => model.setSourceLanguage(e.target.value as Language)} disabled={model.capturing || model.busy}><option value="auto">Tự động nhận diện → Tiếng Việt</option><option value="vi">Tiếng Việt</option><option value="en">Tiếng Anh → Tiếng Việt</option><option value="zh">Tiếng Trung → Tiếng Việt</option></select><ChevronDown size={17}/></div></label><label className="field"><span>ÂM THANH</span><div className="meeting-choice"><Volume2 size={17}/><select value={model.audioInput} onChange={e => model.setAudioInput(e.target.value as AudioInput)} disabled={model.capturing || model.busy}><option value="system">Âm thanh máy</option><option value="microphone">Micro</option><option value="both">Micro + âm thanh máy</option></select><ChevronDown size={17}/></div></label></div>
+    <section className="glass-card translator-controls"><div className="select-row"><label className="field"><span>NGÔN NGỮ</span><Choice icon={<Languages size={17}/>} label="Ngôn ngữ" value={model.sourceLanguage} onChange={value => model.setSourceLanguage(value)} disabled={model.capturing || model.busy} options={languageOptions}/></label><label className="field"><span>ÂM THANH</span><Choice icon={<Volume2 size={17}/>} label="Nguồn âm thanh" value={model.audioInput} onChange={value => model.setAudioInput(value)} disabled={model.capturing || model.busy} options={audioOptions}/></label></div>
       {model.sourceLanguage !== 'vi' && <div className="translator-speech-panel">
         <div className="translator-speech-header">
           <label className="speech-master-toggle" aria-disabled="true">
