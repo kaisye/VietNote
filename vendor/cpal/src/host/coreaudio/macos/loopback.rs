@@ -33,6 +33,7 @@ use crate::{host::coreaudio::check_os_status, Error, ErrorKind};
 type CFStringRef = *mut std::os::raw::c_void;
 
 impl Device {
+    #[allow(dead_code)]
     fn uid(&self) -> Result<Retained<NSString>, Error> {
         let mut cfstring: CFStringRef = std::ptr::null_mut();
         let mut size = std::mem::size_of::<CFStringRef>() as u32;
@@ -124,13 +125,14 @@ impl LoopbackDevice {
             Some(number) => NSArray::from_slice(&[number.as_ref()]),
             None => NSArray::new(),
         };
-        let device_uid = device.uid()?;
+        // A global tap follows whatever the system plays to, so audio keeps coming when
+        // the output switches mid-recording (AirPods connecting, speakers taking over).
+        // A tap bound to the device's UID goes silent as soon as another device is used.
+        let _ = device;
         let tap_desc = unsafe {
-            CATapDescription::initExcludingProcesses_andDeviceUID_withStream(
+            CATapDescription::initStereoGlobalTapButExcludeProcesses(
                 CATapDescription::alloc(),
                 &processes,
-                device_uid.as_ref(),
-                0,
             )
         };
         unsafe {

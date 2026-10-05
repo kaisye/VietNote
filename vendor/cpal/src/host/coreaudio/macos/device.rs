@@ -710,40 +710,49 @@ impl Device {
 
         // Input is not automatically rerouted, so its buffer depth is constant and its timestamp monotonic.
 
+        // An input stream on the default output device means loopback, even when that
+        // device also has a microphone (AirPods, headsets): reading its input would
+        // record the headset mic, which is silent or the wrong side of the call.
+        let loopback_aggregate = if !self.is_default_output && self.supports_input() {
+            None
+        } else {
+            Some(LoopbackDevice::from_device(self)?)
+        };
+        // Loopback configures and watches its own aggregate device, never the output
+        // device: Bluetooth headsets drop to 16 kHz when any app opens their mic, and
+        // following that change (or the headset leaving) would end the recording.
+        let effective_device_id = loopback_aggregate
+            .as_ref()
+            .map(|l| l.aggregate_device.audio_device_id)
+            .unwrap_or(self.audio_device_id);
+
         // Set the physical stream format (bit depth + sample rate) on the hardware device.
         // This avoids unnecessary format conversions, which is especially important on aggregate
         // devices. Falls back to sample-rate-only if no matching physical format is available.
         if set_physical_format(
-            self.audio_device_id,
+            effective_device_id,
             config.sample_rate,
             config.channels,
             sample_format,
         )
         .is_err()
         {
-            set_sample_rate(self.audio_device_id, config.sample_rate, timeout)?;
+            let rate = set_sample_rate(effective_device_id, config.sample_rate, timeout);
+            if loopback_aggregate.is_none() {
+                rate?;
+            }
         }
 
-        let mut loopback_aggregate: Option<LoopbackDevice> = None;
-        let mut audio_unit = if self.supports_input() {
-            audio_unit_from_device(self, AudioUnitMode::Input)?
-        } else {
-            loopback_aggregate.replace(LoopbackDevice::from_device(self)?);
-            audio_unit_from_device(
-                &loopback_aggregate.as_ref().unwrap().aggregate_device,
-                AudioUnitMode::Input,
-            )?
-        };
+        let mut audio_unit = audio_unit_from_device(
+            loopback_aggregate.as_ref().map_or(self, |l| &l.aggregate_device),
+            AudioUnitMode::Input,
+        )?;
 
         // The scope and element for working with a device's input stream.
         let scope = Scope::Output;
         let element = Element::Input;
 
         // Configure stream format and buffer size for predictable callback behavior.
-        let effective_device_id = loopback_aggregate
-            .as_ref()
-            .map(|l| l.aggregate_device.audio_device_id)
-            .unwrap_or(self.audio_device_id);
         configure_stream_format_and_buffer(
             &mut audio_unit,
             config,
@@ -807,7 +816,7 @@ impl Device {
         }));
         let weak_inner = Arc::downgrade(&inner_arc);
         let monitor: Box<dyn Monitor> = Box::new(DisconnectManager::new(
-            self.audio_device_id,
+            effective_device_id,
             weak_inner,
             error_callback_disconnect,
         )?);
