@@ -148,7 +148,16 @@ pub async fn soniox_grant(source: &str) -> Value {
 
 /// Chat completion through the `ai-complete` Edge Function; the model and the
 /// provider key are fixed on the server.
+pub struct AiCompletion {
+    pub content: String,
+    pub finish_reason: Option<String>,
+}
+
 pub async fn ai_complete(system: &str, user: String, max_tokens: u32, json: bool) -> Result<String, String> {
+    ai_complete_with_metadata(system, user, max_tokens, json).await.map(|result| result.content)
+}
+
+pub async fn ai_complete_with_metadata(system: &str, user: String, max_tokens: u32, json: bool) -> Result<AiCompletion, String> {
     const SIGN_IN: &str = "Hãy đăng nhập tài khoản VietNote ở góc trái dưới";
     let (url, anon) = config().ok_or("Bản build chưa cấu hình máy chủ VietNote")?;
     let token = access_token().await.map_err(|error| if error == "signed_out" { SIGN_IN.to_string() } else { error })?;
@@ -160,13 +169,71 @@ pub async fn ai_complete(system: &str, user: String, max_tokens: u32, json: bool
     let status = response.status().as_u16();
     let value: Value = response.json().await.unwrap_or(Value::Null);
     match status {
-        200..=299 => value.get("content").and_then(Value::as_str).map(str::trim).filter(|text| !text.is_empty())
-            .map(str::to_string).ok_or_else(|| "Dịch vụ xử lý không trả về nội dung".into()),
+        200..=299 => completion_from(&value),
         401 => Err(SIGN_IN.into()),
         402 => Err("Đã hết phút sử dụng".into()),
         429 => Err("Đang xử lý quá nhiều yêu cầu, hãy thử lại sau ít phút".into()),
         _ => Err(format!("Dịch vụ xử lý tạm thời không khả dụng (HTTP {status})")),
     }
+}
+
+/// Stream real provider output from the authenticated proxy to a per-request Tauri channel.
+pub async fn ai_complete_stream<F>(system: &str, user: String, max_tokens: u32, progress: F) -> Result<AiCompletion, String>
+where F: FnMut(&str) {
+    let (url, anon) = config().ok_or("Bản build chưa cấu hình máy chủ VietNote")?;
+    let token = access_token().await.map_err(|error| if error == "signed_out" { "Hãy đăng nhập tài khoản VietNote ở góc trái dưới".into() } else { error })?;
+    let response = client()?.post(format!("{url}/functions/v1/ai-complete"))
+        .timeout(Duration::from_secs(90))
+        .header("apikey", anon).bearer_auth(token)
+        .json(&json!({"system": system, "user": user, "max_tokens": max_tokens, "json": false, "stream": true}))
+        .send().await.map_err(unreachable)?;
+    match response.status().as_u16() {
+        200..=299 => {},
+        401 => return Err("Hãy đăng nhập tài khoản VietNote ở góc trái dưới".into()),
+        402 => return Err("Đã hết phút sử dụng".into()),
+        429 => return Err("Đang xử lý quá nhiều yêu cầu, hãy thử lại sau ít phút".into()),
+        status => return Err(format!("Dịch vụ xử lý tạm thời không khả dụng (HTTP {status})")),
+    }
+    if !response.headers().get("content-type").and_then(|header| header.to_str().ok()).unwrap_or_default().starts_with("text/event-stream") {
+        return Err("Máy chủ chưa hỗ trợ streaming. Cần cập nhật dịch vụ AI.".into());
+    }
+    consume_ai_stream(response, progress).await
+}
+
+async fn consume_ai_stream<F>(mut response: reqwest::Response, mut progress: F) -> Result<AiCompletion, String>
+where F: FnMut(&str) {
+    let mut decoder = crate::ai_stream::SseDecoder::default();
+    let mut answer = crate::ai_stream::StreamAnswer::default();
+    let mut error = None;
+    'read: loop {
+        match response.chunk().await {
+            Ok(Some(bytes)) => match decoder.push(&bytes) {
+                Ok(events) => for event in events {
+                    match answer.accept(&event) {
+                        Ok(true) => progress(&answer.content),
+                        Ok(false) => {},
+                        Err(message) => { error = Some(message); break 'read; },
+                    }
+                    if answer.done { break 'read; }
+                },
+                Err(message) => { error = Some(message); break; },
+            },
+            Ok(None) => break,
+            Err(_) => { error = Some("Mất kết nối khi AI đang trả lời".into()); break; },
+        }
+    }
+    if answer.content.trim().is_empty() { return Err(error.unwrap_or_else(|| "Dịch vụ xử lý không trả về nội dung".into())); }
+    // A dropped stream remains usable; the chat can continue it using the source note.
+    Ok(AiCompletion { content: answer.content, finish_reason: if answer.done && error.is_none() { answer.finish_reason } else { Some("length".into()) } })
+}
+
+fn completion_from(value: &Value) -> Result<AiCompletion, String> {
+    let content = value.get("content").and_then(Value::as_str).map(str::trim).filter(|text| !text.is_empty())
+        .ok_or("Dịch vụ xử lý không trả về nội dung")?;
+    Ok(AiCompletion {
+        content: content.to_string(),
+        finish_reason: value.get("finish_reason").and_then(Value::as_str).map(str::to_string),
+    })
 }
 
 pub async fn soniox_release(grant_id: &str) {
@@ -260,6 +327,47 @@ pub fn sign_out() { clear_session(); }
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn real_http_stream_reports_progress_before_response_completion() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (ack, wait) = std::sync::mpsc::channel();
+        let first = "data: {\"content\":\"**Lan**\"}\n\n";
+        let tail = "data: {\"content\":\" gửi báo cáo.\"}\n\ndata: {\"finish_reason\":\"stop\"}\n\ndata: [DONE]\n\n";
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            let mut request = [0u8; 4096];
+            stream.read(&mut request).unwrap();
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{first}", first.len() + tail.len()).unwrap();
+            stream.flush().unwrap();
+            wait.recv_timeout(Duration::from_secs(3)).expect("client buffered the stream instead of reporting progress");
+            stream.write_all(tail.as_bytes()).unwrap();
+        });
+        let mut snapshots = Vec::new();
+        let answer = tauri::async_runtime::block_on(async {
+            let response = client().unwrap().get(format!("http://{address}")).send().await.unwrap();
+            consume_ai_stream(response, |partial| {
+                snapshots.push(partial.to_string());
+                if snapshots.len() == 1 { ack.send(()).unwrap(); }
+            }).await.unwrap()
+        });
+        server.join().unwrap();
+        assert_eq!(snapshots, vec!["**Lan**", "**Lan** gửi báo cáo."]);
+        assert_eq!(answer.content, "**Lan** gửi báo cáo.");
+        assert_eq!(answer.finish_reason.as_deref(), Some("stop"));
+    }
+
+    #[test]
+    fn completion_preserves_truncation_metadata_and_accepts_plain_text() {
+        let result = completion_from(&json!({"content": "  Tóm tắt chưa xong {", "finish_reason": "length"})).unwrap();
+        assert_eq!(result.content, "Tóm tắt chưa xong {");
+        assert_eq!(result.finish_reason.as_deref(), Some("length"));
+        assert!(completion_from(&json!({"content": "x"})).unwrap().finish_reason.is_none());
+        assert!(completion_from(&json!({"content": " "})).is_err());
+    }
 
     #[test]
     fn email_is_normalized_and_validated() {

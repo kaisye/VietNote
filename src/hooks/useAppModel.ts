@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { desktop, type AccountStatus } from '../services/desktop'
 import { createNote, demoNote, emptyStructuredSummary, formatStructuredSummary, toTranscriptSegment } from '../services/notes'
 import type { AudioInput, Cadence, InterimTranscript, Language, MeetingNote, NoteGroup, SpokenLanguage, StructuredMeetingSummary, Subtitle, TranslationBlock, WorkerMessage } from '../services/types'
+import { useNoteChat } from './useNoteChat'
 import { requestSignIn } from '../services/credits'
 
 const now = () => new Date().toISOString()
@@ -108,6 +109,8 @@ export function useAppModel() {
     setNotes(nextNotes); setNoteGroups(nextGroups)
     if (desktop.isDesktop) void desktop.saveNotes({ notes: notesForStorage(nextNotes), groups: nextGroups }).catch(error => setStatus(`Không lưu được ghi chú: ${error}`))
   }, [])
+
+  const noteChat = useNoteChat(notesRef, groupsRef, persist)
 
   useEffect(() => {
     if (!desktop.isDesktop) { setStatus('Hãy mở ứng dụng VietNote để sử dụng'); return }
@@ -505,7 +508,7 @@ export function useAppModel() {
     entries, interimTranscripts, translationBlocks, overallSummary, suggestedTitle, titlePending, suggestTitleNow: () => void suggestTitleNow(), summaryStatus, summaryCadence, setSummaryCadence: setCadence,
     cadenceValue, setCadenceValue: setCadenceAmount, notes, noteGroups, savingNoteID, savingNoteGroupID, vietnameseASRStatus, translationStatus,
     canStartMeeting: ready || asrKeyAvailable, canSummarizeNow: meetingActive && !summaryBusy.current && (entries.length > overallSummaryCursor.current || (translating() && entries.length > translationCursorRef.current)),
-    start, startMeeting, stop, summarizeNow: () => void summarizeNow(), newNote, updateNote, deleteNote, createGroup, renameGroup, deleteGroup, meetingStartedAt: meetingStartedAt.current }
+    noteChat, start, startMeeting, stop, summarizeNow: () => void summarizeNow(), newNote, updateNote, deleteNote, createGroup, renameGroup, deleteGroup, meetingStartedAt: meetingStartedAt.current }
 }
 
 export type AppModel = ReturnType<typeof useAppModel>

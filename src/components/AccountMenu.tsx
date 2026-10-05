@@ -7,7 +7,7 @@ import { minutesText, SIGN_IN_EVENT } from '../services/credits'
 import { CreditShop } from './CreditShop'
 
 /** Sidebar account badge; opens sign-in or the account menu as a centered dialog. */
-export function AccountMenu({ model }: { model: AppModel }) {
+export function AccountMenu({ model, compact = false }: { model: AppModel; compact?: boolean }) {
   const { account, refreshAccount } = model
   const [open, setOpen] = useState(false)
   const [email, setEmail] = useState('')
@@ -66,7 +66,7 @@ export function AccountMenu({ model }: { model: AppModel }) {
   const disabled = !desktop.isDesktop || working || busy
 
   return <>
-    <button className="worker-badge account-badge" aria-haspopup="dialog" onClick={show} title={model.ready ? 'Sẵn sàng' : 'Đang khởi động'}>
+    <button className={`worker-badge account-badge ${compact ? 'account-badge-compact' : ''}`} aria-label={`Tài khoản: ${account?.email ?? 'Đăng nhập'}`} aria-haspopup="dialog" onClick={show} title={compact ? `${account?.email ?? 'Đăng nhập'}${account?.email ? ` · ${minutesText(account.balanceSeconds)}` : ''}` : model.ready ? 'Sẵn sàng' : 'Đang khởi động'}>
       <div><UserRound size={14}/><strong>{account?.email ?? 'Đăng nhập'}</strong></div>
       <small><span className={`status-dot ${model.ready ? 'ready' : ''}`}/>{account?.email ? minutesText(account.balanceSeconds) : 'Để bắt đầu ghi và tóm tắt'}</small>
     </button>

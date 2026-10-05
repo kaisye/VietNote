@@ -3,6 +3,7 @@
 // The model and the OpenRouter key stay on the server; callers must be signed
 // in with a positive balance and are rate limited per minute.
 import { admin, availableSeconds, json } from '../_shared/credits.ts'
+import { relayAiStream } from '../_shared/ai-stream.ts'
 
 const OPENROUTER_API = 'https://openrouter.ai/api/v1/chat/completions'
 const MAX_OUTPUT_TOKENS = 2000
@@ -17,7 +18,7 @@ Deno.serve(async request => {
   if (authError || !auth.user) return json({ error: 'unauthorized' }, 401)
   const userId = auth.user.id
 
-  const body = await request.json().catch(() => ({})) as { system?: unknown; user?: unknown; max_tokens?: unknown; json?: unknown }
+  const body = await request.json().catch(() => ({})) as { system?: unknown; user?: unknown; max_tokens?: unknown; json?: unknown; stream?: unknown }
   if (typeof body.system !== 'string' || typeof body.user !== 'string' || !body.user.trim()) return json({ error: 'invalid_request' }, 400)
   if (body.system.length + body.user.length > MAX_INPUT_CHARS) return json({ error: 'input_too_long' }, 413)
   const maxTokens = Math.min(MAX_OUTPUT_TOKENS, Math.max(1, Math.floor(Number(body.max_tokens) || 500)))
@@ -39,6 +40,8 @@ Deno.serve(async request => {
     max_tokens: maxTokens,
     reasoning: { effort: 'none' },
   }
+  // Without include_usage the final chunk may omit token counts and cost.
+  if (body.stream === true) { payload.stream = true; payload.stream_options = { include_usage: true } }
   if (body.json === true) payload.response_format = { type: 'json_object' }
   // One retry covers the provider's brief 429/5xx blips.
   let response: Response | undefined
@@ -54,6 +57,26 @@ Deno.serve(async request => {
   if (!response?.ok) {
     console.error('openrouter', response?.status, await response?.text().catch(() => ''))
     return json({ error: 'upstream_unavailable' }, 502)
+  }
+  if (body.stream === true) {
+    if (!response.body) return json({ error: 'upstream_unavailable' }, 502)
+    // Count the request before streaming, then fill in the final provider usage.
+    const { data: row } = await db.from('ai_usage').insert({
+      user_id: userId, model, prompt_tokens: 0, completion_tokens: 0, cost_usd: null,
+    }).select('id').single()
+    const stream = relayAiStream(response.body, async usage => {
+      const values = {
+        prompt_tokens: usage.prompt_tokens ?? 0,
+        completion_tokens: usage.completion_tokens ?? 0,
+        cost_usd: usage.cost ?? null,
+      }
+      if (row) await db.from('ai_usage').update(values).eq('id', row.id)
+      else await db.from('ai_usage').insert({ user_id: userId, model, ...values })
+    })
+    return new Response(stream, { headers: {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no',
+    } })
   }
   const data = await response.json() as {
     choices?: { message?: { content?: string }; finish_reason?: string }[]

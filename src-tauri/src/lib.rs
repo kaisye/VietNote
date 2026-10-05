@@ -1,4 +1,6 @@
 mod account;
+mod ai_stream;
+mod note_chat;
 mod diarization_model;
 use base64::Engine;
 use clipclip::{start_with_tap, Config, Recording, Source};
@@ -703,6 +705,106 @@ fn open_permission(kind: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Chat answers may contain links; the webview cannot open `target="_blank"` itself.
+#[tauri::command]
+fn open_link(url: String) -> Result<(), String> {
+    let lower = url.to_ascii_lowercase();
+    if !(lower.starts_with("https://") || lower.starts_with("http://") || lower.starts_with("mailto:"))
+        || url.len() > 2048 || url.chars().any(|c| c.is_whitespace() || c.is_control() || c == '"') {
+        return Err("Link không hợp lệ".into());
+    }
+    #[cfg(target_os = "macos")]
+    Command::new("open").arg(&url).spawn().map_err(|e| e.to_string())?;
+    // rundll32 takes the URL as one argument, unlike `cmd /C start`, which would interpret `&`.
+    #[cfg(target_os = "windows")]
+    hide_console(Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url])).spawn().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Native Save dialog, starting in Downloads. The page only suggests the name, so it cannot
+/// choose an arbitrary path to write to.
+fn pick_save_path(app: &tauri::AppHandle, file_name: &str) -> Result<Option<PathBuf>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let name: String = file_name.chars().map(|c| if matches!(c, '/' | '\\' | ':') || c.is_control() { ' ' } else { c }).collect();
+    let extension = Path::new(&name).extension().and_then(|e| e.to_str()).unwrap_or("").to_string();
+    let mut dialog = app.dialog().file().set_file_name(name.trim());
+    if !extension.is_empty() { dialog = dialog.add_filter(extension.to_uppercase(), &[extension.as_str()]); }
+    if let Ok(dir) = app.path().download_dir() { dialog = dialog.set_directory(dir); }
+    let Some(path) = dialog.blocking_save_file() else { return Ok(None) };
+    path.into_path().map(Some).map_err(|e| e.to_string())
+}
+
+/// Saves an exported report (bytes from the page) where the user picks.
+#[tauri::command]
+async fn save_export(app: tauri::AppHandle, file_name: String, data: String) -> Result<Option<String>, String> {
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data).map_err(|e| e.to_string())?;
+    let Some(path) = pick_save_path(&app, &file_name)? else { return Ok(None) };
+    fs::write(&path, bytes).map_err(|e| format!("Không lưu được file: {e}"))?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// Prints the page (its print stylesheet shows only the report) straight to a PDF file,
+/// without the print panel, which needs a printer selected before "Save as PDF" is reachable.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+async fn save_pdf(app: tauri::AppHandle, webview: tauri::Webview, file_name: String) -> Result<Option<String>, String> {
+    let Some(path) = pick_save_path(&app, &file_name)? else { return Ok(None) };
+    // The user already confirmed replacing it; removing it lets us tell when the new file is complete.
+    let _ = fs::remove_file(&path);
+    let target = path.clone();
+    webview.with_webview(move |platform| unsafe { print_to_pdf(platform.inner(), platform.ns_window(), &target) }).map_err(|e| e.to_string())?;
+    // WebKit only renders printed pages from a modal run on the main loop, which reports back
+    // through an Objective-C delegate. Waiting for the finished file is simpler.
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(150));
+        if let Ok(bytes) = fs::read(&path) {
+            if bytes.len() > 16 && bytes[bytes.len().saturating_sub(64)..].windows(5).any(|w| w == b"%%EOF") {
+                return Ok(Some(path.to_string_lossy().into_owned()));
+            }
+        }
+    }
+    Err("Không tạo được file PDF".into())
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn print_to_pdf(webview: *mut std::ffi::c_void, window: *mut std::ffi::c_void, path: &Path) {
+    use objc2::runtime::AnyObject;
+    use objc2_app_kit::{NSPrintInfo, NSPrintJobSavingURL, NSPrintSaveJob, NSWindow};
+    use objc2_foundation::{NSCopying, NSString, NSURL};
+    use objc2_web_kit::WKWebView;
+    let webview = &*(webview as *const WKWebView);
+    let window = &*(window as *const NSWindow);
+    let info = NSPrintInfo::sharedPrintInfo().copy();
+    info.setJobDisposition(NSPrintSaveJob);
+    // Page margins come from the report's `@page` rule.
+    info.setTopMargin(0.0); info.setBottomMargin(0.0); info.setLeftMargin(0.0); info.setRightMargin(0.0);
+    let url = NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()));
+    let url: &AnyObject = &url;
+    info.dictionary().insert(NSPrintJobSavingURL, url);
+    let operation = webview.printOperationWithPrintInfo(&info);
+    operation.setShowsPrintPanel(false);
+    operation.setShowsProgressPanel(false);
+    operation.runOperationModalForWindow_delegate_didRunSelector_contextInfo(window, None, None, std::ptr::null_mut());
+}
+
+/// Shows the file just exported in Finder / Explorer.
+#[tauri::command]
+fn reveal_file(path: String) -> Result<(), String> {
+    if !Path::new(&path).is_file() { return Err("Không tìm thấy file".into()); }
+    #[cfg(target_os = "macos")]
+    Command::new("open").args(["-R", &path]).spawn().map_err(|e| e.to_string())?;
+    #[cfg(target_os = "windows")]
+    hide_console(Command::new("explorer").arg(format!("/select,{path}"))).spawn().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// WKWebView ignores `window.print()`, so printing (and "Save as PDF") goes through the native panel.
+#[tauri::command]
+fn print_page(webview: tauri::Webview) -> Result<(), String> {
+    webview.print().map_err(|e| e.to_string())
+}
+
 /// The ad-hoc signature changes with every build, so after an update macOS keeps showing
 /// the old microphone grant but feeds the new binary silence. Dropping the stale grant
 /// makes the next capture ask again. Screen recording is left alone: it still works.
@@ -734,8 +836,9 @@ pub fn run() {
         })
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(NativeState::default())
-        .invoke_handler(tauri::generate_handler![load_notes, save_notes, account::account_status, account::account_signed_in, account::account_send_code, account::account_offers, account::account_buy, account::account_order_status, account_verify, account_sign_out, start_worker, stop_worker, send_worker, start_capture, stop_capture, set_microphone, summarize_segments, suggest_title, translate_text, open_permission, diarization_model_status, download_diarization_model, cancel_diarization_download, remove_diarization_model])
+        .invoke_handler(tauri::generate_handler![load_notes, save_notes, account::account_status, account::account_signed_in, account::account_send_code, account::account_offers, account::account_buy, account::account_order_status, account_verify, account_sign_out, start_worker, stop_worker, send_worker, start_capture, stop_capture, set_microphone, note_chat::ask_note, summarize_segments, suggest_title, translate_text, open_permission, open_link, save_export, reveal_file, print_page, #[cfg(target_os = "macos")] save_pdf, diarization_model_status, download_diarization_model, cancel_diarization_download, remove_diarization_model])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 let state = window.app_handle().state::<NativeState>();

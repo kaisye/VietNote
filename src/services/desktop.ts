@@ -1,14 +1,19 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invoke, Channel } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { AudioInput, SpokenLanguage, MeetingNote, NoteGroup, StructuredMeetingSummary, TranscriptSegment, WorkerMessage } from './types'
 
+export interface NoteChatRequest {
+  title: string; summary: string; transcript: string; segments: TranscriptSegment[];
+  history: { role: 'user' | 'assistant'; content: string }[]; question: string
+}
+export interface NoteChatAnswer { answer: string; evidenceIds: string[]; incomplete?: boolean }
 export interface StoredNotes { notes: MeetingNote[]; groups: NoteGroup[] }
 export interface AccountStatus { configured: boolean; email: string | null; balanceSeconds: number | null }
 export interface CreditOffer { id: string; name: string; hours: number; bonus_hours: number; price_vnd: number; original_price_vnd: number | null; promo_label: string | null; promo_ends_at: string | null; highlight: boolean }
 export interface OrderStatus { status: 'pending' | 'paid' | 'cancelled'; balance_seconds: number | null }
 export interface DiarizationModelStatus { installed: boolean; runtimeAvailable: boolean; downloading: boolean; partialBytes: number; sizeBytes: number; removable: boolean }
 export interface DownloadProgress { downloaded: number; total: number }
-const isDesktop = '__TAURI_INTERNALS__' in window
+const isDesktop = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 let saveQueue: Promise<void> = Promise.resolve()
 
 export const desktop = {
@@ -34,6 +39,11 @@ export const desktop = {
   setMicrophone: (enabled: boolean) => invoke<void>('set_microphone', { enabled }),
   summarizeSegments: (segments: TranscriptSegment[], previousSummary?: StructuredMeetingSummary) =>
     invoke<StructuredMeetingSummary>('summarize_segments', { segments, previousSummary: previousSummary ?? null }),
+  askNote: (request: NoteChatRequest, onProgress?: (answer: NoteChatAnswer) => void) => {
+    const onProgressChannel = new Channel<NoteChatAnswer>()
+    onProgressChannel.onmessage = answer => onProgress?.(answer)
+    return invoke<NoteChatAnswer>('ask_note', { request, onProgress: onProgressChannel })
+  },
   suggestTitle: (transcript: string) => invoke<string>('suggest_title', { transcript }),
   translateParagraph: (text: string, sourceLanguage: SpokenLanguage, previousContext: string) => invoke<string>('translate_text', { text, sourceLanguage, previousContext }),
   diarizationModelStatus: () => invoke<DiarizationModelStatus>('diarization_model_status'),
@@ -42,6 +52,13 @@ export const desktop = {
   removeDiarizationModel: () => invoke<DiarizationModelStatus>('remove_diarization_model'),
   onDiarizationDownload: (callback: (progress: DownloadProgress) => void): Promise<UnlistenFn> => listen<DownloadProgress>('diarization-download', e => callback(e.payload)),
   openPermission: (kind: 'microphone' | 'screen') => invoke<void>('open_permission', { kind }),
+  /** Native Save dialog; resolves to the saved path, or null when cancelled. */
+  saveExport: (fileName: string, data: string) => invoke<string | null>('save_export', { fileName, data }),
+  revealFile: (path: string) => invoke<void>('reveal_file', { path }),
+  printPage: () => invoke<void>('print_page'),
+  /** macOS only: renders the page's print view straight to a PDF the user picks. */
+  savePdf: (fileName: string) => invoke<string | null>('save_pdf', { fileName }),
+  openLink: (url: string) => invoke<void>('open_link', { url }),
   onWorker: (callback: (event: WorkerMessage) => void): Promise<UnlistenFn> => listen<WorkerMessage>('worker-message', e => callback(e.payload)),
   onStatus: (callback: (status: string) => void): Promise<UnlistenFn> => listen<string>('worker-status', e => callback(e.payload)),
 }

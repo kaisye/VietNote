@@ -7,10 +7,13 @@ export type AudioInput = 'microphone' | 'system' | 'both'
 export type Cadence = 'words' | 'minutes'
 
 export interface NoteGroup { id: string; name: string }
+export interface NoteChatMessage {
+  id: string; role: 'user' | 'assistant'; content: string; createdAt: string; evidenceIds?: string[]; incomplete?: boolean
+}
 export interface MeetingNote {
   id: string; title: string; createdAt: string; updatedAt: string; duration: number;
   summary: string; transcript: string; groupID?: string | null; isDemo?: boolean;
-  structuredSummary?: StructuredMeetingSummary; transcriptSegments?: TranscriptSegment[]; saving?: boolean
+  structuredSummary?: StructuredMeetingSummary; transcriptSegments?: TranscriptSegment[]; saving?: boolean; chatMessages?: NoteChatMessage[]
 }
 export interface Subtitle {
   id: string; timestamp: string; sourceText: string; audioSource: string;

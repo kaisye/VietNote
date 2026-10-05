@@ -17,8 +17,23 @@ Dự án sử dụng **Tauri + React + TypeScript** cho ứng dụng desktop, **
 - Phân loại kết quả thành ý chính, quyết định cuối cùng, quyết định tạm thời, vấn đề chưa chốt, việc cần làm, câu hỏi mở và nội dung hoãn lại.
 - Liên kết các nội dung quan trọng với đoạn transcript làm bằng chứng.
 - Lưu và quản lý ghi chú cuộc họp trên máy.
+- Chat hỏi đáp trong từng ghi chú từ bản tóm tắt và transcript gốc, có gợi ý tóm tắt chi tiết, việc cần làm, quyết định và vấn đề còn bỏ ngỏ. Câu trả lời có thể dẫn về các đoạn transcript làm căn cứ; lịch sử chat được lưu cùng ghi chú trên máy.
 - Hỗ trợ giao diện sáng, tối hoặc tự động theo hệ thống.
 - Dịch theo đoạn và tóm tắt qua **OpenRouter** (mặc định Qwen3.7 Flash).
+
+## Hỏi đáp với ghi chú
+
+Mở **Ghi chú**, chọn cuộc họp rồi dùng khung **Hỏi đáp cuộc họp** bên dưới bản tóm tắt. Chọn một gợi ý để gửi ngay hoặc nhập câu hỏi riêng; Enter để gửi, Shift + Enter để xuống dòng. Câu trả lời hiện dần qua streaming và hiển thị dưới dạng Markdown preview (tiêu đề, in đậm, danh sách, bảng). Có thể hỏi tiếp dựa trên các câu trả lời trước đó. Nhấn một mốc thời gian ở phần **Căn cứ** để mở đoạn transcript tương ứng.
+
+Tính năng dùng dịch vụ `ai-complete` hiện có, yêu cầu đăng nhập VietNote và còn phút sử dụng. Mỗi câu hỏi gửi toàn bộ tóm tắt, transcript của ghi chú được chọn và phần lịch sử chat gần nhất tới dịch vụ AI. Lịch sử của ghi chú khác không được gửi. Ghi chú quá dài sẽ báo lỗi thay vì tự bỏ nội dung. Nút **Xóa chat** có xác nhận và chỉ xóa lịch sử hỏi đáp. Chat trên ghi chú mẫu chỉ được giữ trong phiên mở app. Với câu trả lời dài, app tự lấy phần tiếp theo tối đa hai lần; nếu vẫn chưa hoàn tất hoặc mất mạng giữa chừng, phần đã nhận được vẫn hiển thị kèm nút **Viết tiếp**.
+
+Để triển khai streaming, cập nhật Edge Function `ai-complete` rồi build/chạy lại app:
+
+```bash
+npx supabase functions deploy ai-complete --project-ref pyknksfyqlsfqodcsawm --use-api
+```
+
+Luồng streaming dùng SSE từ OpenRouter qua Edge Function và Rust, sau đó chuyển các phần trả lời qua Tauri Channel riêng cho từng câu hỏi. Dịch theo đoạn và tóm tắt cuộc họp vẫn dùng chế độ trả kết quả một lần. Câu trả lời được lưu ở định dạng Markdown và render thành preview khi mở lại ghi chú.
 
 ## Kiến trúc dự án
 

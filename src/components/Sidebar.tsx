@@ -1,4 +1,5 @@
-import { BookOpen, Grid2X2, MoonStar, Settings, Sun, AudioLines } from 'lucide-react'
+import { useState } from 'react'
+import { BookOpen, Grid2X2, MoonStar, Settings, Sun, AudioLines, ChevronLeft } from 'lucide-react'
 import { AccountMenu } from './AccountMenu'
 import type { AppModel } from '../hooks/useAppModel'
 import type { Page } from '../services/types'
@@ -9,12 +10,21 @@ const pages: { key: Page; title: string; Icon: typeof Grid2X2 }[] = [
   { key: 'translate', title: 'Phiên dịch', Icon: AudioLines }, { key: 'settings', title: 'Cài đặt', Icon: Settings },
 ]
 export function Sidebar({ page, setPage, dark, toggleTheme, model }: { page: Page; setPage: (page: Page) => void; dark: boolean; toggleTheme: () => void; model: AppModel }) {
-  return <aside className="sidebar glass-sidebar">
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem('sidebarCollapsed') === 'true' } catch { return false }
+  })
+  const toggleCollapsed = () => {
+    const next = !collapsed
+    setCollapsed(next)
+    try { localStorage.setItem('sidebarCollapsed', String(next)) } catch { /* Keep working when storage is unavailable. */ }
+  }
+  return <aside className={`sidebar glass-sidebar ${collapsed ? 'sidebar-collapsed' : ''}`} aria-label="Thanh điều hướng">
     <div className="brand-row"><div className="brand-icon"><AnimatedWaveform compact/></div><div className="brand-copy"><strong>VietNote</strong><small>MEETING INTELLIGENCE</small></div>
       <button className="theme-toggle" onClick={toggleTheme} aria-label={dark ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'} title={dark ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'}>{dark ? <Sun size={17}/> : <MoonStar size={17}/>}</button></div>
+    <button className="sidebar-collapse-toggle" onClick={toggleCollapsed} aria-label={collapsed ? 'Mở rộng thanh điều hướng' : 'Thu gọn thanh điều hướng'} title={collapsed ? 'Mở rộng thanh điều hướng' : 'Thu gọn thanh điều hướng'} aria-expanded={!collapsed} aria-controls="workspace-navigation"><ChevronLeft size={15} strokeWidth={2.4}/></button>
     <div className="sidebar-caption">KHÔNG GIAN LÀM VIỆC</div>
-    <nav className="sidebar-nav">{pages.map(({ key, title, Icon }) => <button key={key} className={`nav-item ${page === key ? 'active' : ''}`} onClick={() => setPage(key)}><Icon size={18}/><span>{title}</span>{key === 'notes' && <small>{model.notes.length}</small>}</button>)}</nav>
+    <nav className="sidebar-nav" id="workspace-navigation">{pages.map(({ key, title, Icon }) => <button key={key} className={`nav-item ${page === key ? 'active' : ''}`} aria-label={title} aria-current={page === key ? 'page' : undefined} title={collapsed && key === 'notes' ? `${title} (${model.notes.length})` : title} onClick={() => setPage(key)}><Icon size={18}/><span>{title}</span>{key === 'notes' && <small>{model.notes.length}</small>}</button>)}</nav>
     <div className="sidebar-spacer"/>
-    <AccountMenu model={model}/>
+    <AccountMenu model={model} compact={collapsed}/>
   </aside>
 }
