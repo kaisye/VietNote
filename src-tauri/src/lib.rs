@@ -40,6 +40,8 @@ struct NativeState {
     capture_forwarder: Mutex<Option<std::thread::JoinHandle<()>>>,
     pending_audio: Arc<AtomicUsize>,
     worker_epoch: Arc<AtomicUsize>,
+    // The worker announces itself once; a reloaded page asks for it again.
+    connected: Arc<Mutex<Option<Value>>>,
 }
 
 /// Developer override: a provider key in the environment bypasses the VietNote server.
@@ -198,7 +200,10 @@ fn worker_executable(root: &Path) -> Result<(PathBuf, bool), String> {
 #[tauri::command]
 fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> Result<(), String> {
     let mut slot = state.child.lock().map_err(|e| e.to_string())?;
-    if slot.as_mut().is_some_and(|child| child.try_wait().ok().flatten().is_none()) { return Ok(()); }
+    if slot.as_mut().is_some_and(|child| child.try_wait().ok().flatten().is_none()) {
+        if let Some(message) = state.connected.lock().map_err(|e| e.to_string())?.clone() { let _ = app.emit("worker-message", message); }
+        return Ok(());
+    }
     let root = project_root(&app)?;
     let (worker, packaged_worker) = worker_executable(&root)?;
     // A locked/unavailable OS credential store must not prevent offline ASR.
@@ -244,6 +249,8 @@ fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> 
     *slot = Some(child);
     drop(slot);
     let writer = state.writer.clone();
+    let connected = state.connected.clone();
+    if let Ok(mut cached) = connected.lock() { *cached = None; }
     let epoch_counter = state.worker_epoch.clone();
     let epoch = epoch_counter.fetch_add(1, Ordering::SeqCst) + 1;
     std::thread::spawn(move || {
@@ -266,7 +273,7 @@ fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> 
             // Serve the socket on its own thread and keep draining stdout: an unread
             // pipe blocks the worker's print() once it fills, and the log would lose
             // every diagnostic written after startup.
-            let (app, writer, epoch_counter, token) = (app.clone(), writer.clone(), epoch_counter.clone(), token.clone());
+            let (app, writer, connected, epoch_counter, token) = (app.clone(), writer.clone(), connected.clone(), epoch_counter.clone(), token.clone());
             std::thread::spawn(move || {
                 match TcpStream::connect(("127.0.0.1", port as u16)) {
                     Ok(mut stream) => {
@@ -279,10 +286,14 @@ fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> 
                                 for line in BufReader::new(reader).lines().map_while(Result::ok) {
                                     if epoch_counter.load(Ordering::SeqCst) != epoch { break; }
                                     let Ok(message) = serde_json::from_str::<Value>(&line) else { continue };
+                                    if message.get("type").and_then(Value::as_str) == Some("connected") {
+                                        if let Ok(mut cached) = connected.lock() { *cached = Some(message.clone()); }
+                                    }
                                     if !handle_credit_message(&message, &writer) { let _ = app.emit("worker-message", message); }
                                 }
                                 if epoch_counter.load(Ordering::SeqCst) == epoch {
                                     if let Ok(mut slot) = writer.lock() { *slot = None; }
+                                    if let Ok(mut cached) = connected.lock() { *cached = None; }
                                     let _ = app.emit("worker-status", "Service connection closed");
                                 }
                             }
@@ -394,6 +405,7 @@ fn stop_worker(state: tauri::State<'_, NativeState>) -> Result<(), String> {
     state.worker_epoch.fetch_add(1, Ordering::SeqCst);
     let _ = end_capture(&state);
     *state.writer.lock().map_err(|e| e.to_string())? = None;
+    *state.connected.lock().map_err(|e| e.to_string())? = None;
     if let Some(mut child) = state.child.lock().map_err(|e| e.to_string())?.take() {
         if child.try_wait().map_err(|e| e.to_string())?.is_none() {
             child.kill().map_err(|e| e.to_string())?;

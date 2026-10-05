@@ -14,9 +14,10 @@ export function noteChatHistory(messages: NoteChatMessage[]) {
   const history: { role: 'user' | 'assistant'; content: string }[] = []
   let size = 0
   for (const message of messages.slice(-10).reverse()) {
-    if (size + message.content.length > 20_000) break
-    history.unshift({ role: message.role, content: message.content })
-    size += message.content.length
+    const content = message.quote ? `Đoạn trích: "${message.quote}"\n${message.content}` : message.content
+    if (size + content.length > 20_000) break
+    history.unshift({ role: message.role, content })
+    size += content.length
   }
   // Start at a user turn rather than an orphaned reply.
   if (history[0]?.role === 'assistant') history.shift()

@@ -506,3 +506,21 @@
 .chat-stream-caret { display:inline-block; width:6px; height:14px; margin-top:5px; background:var(--accent); animation:chat-caret 1s steps(2,start) infinite; }
 @keyframes chat-caret { to { opacity:0; } }
 @media (prefers-reduced-motion:reduce) { .chat-stream-caret { animation:none; } }
+
+/* Live Q&A: the notes island, placed on the content stage, plus an action bar over selected transcript text. */
+.home-wrap .panel-scroll, .transcript-list { padding-bottom:58px; scroll-padding-bottom:58px; }
+.live-ask-hint { color:var(--muted); font-size:13px; line-height:1.6; padding:2px 6px; }
+.live-ask-hint strong { color:var(--ink); font-weight:600; }
+.chat-quote { margin:4px 0 6px; padding:2px 0 2px 10px; border-left:2px solid var(--accent); color:var(--muted); font-size:13px; line-height:1.55; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.live-ask-quote { display:flex; align-items:flex-start; gap:8px; flex:none; padding:7px 8px 7px 12px; border-left:2px solid var(--accent); border-radius:4px 10px 10px 4px; background:rgba(173,168,255,.1); font-size:12.5px; color:var(--muted); }
+.live-ask-quote span { flex:1; min-width:0; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.live-ask-quote button { flex:none; display:grid; place-items:center; width:20px; height:20px; padding:0; border:0; border-radius:6px; background:transparent; color:var(--muted); cursor:pointer; }
+.live-ask-quote button:hover { background:rgba(173,168,255,.18); color:var(--ink); }
+.live-ask-bar { position:fixed; z-index:60; display:flex; gap:2px; padding:4px; border-radius:12px; background:var(--button-primary); color:var(--button-primary-text); box-shadow:0 10px 28px var(--shadow); transform:translate(-50%, -100%); animation:live-bar-in .16s cubic-bezier(.22,1,.36,1); }
+.live-ask-bar.below { transform:translate(-50%, 0); }
+@keyframes live-bar-in { from { opacity:0; scale:.92; } }
+.live-ask-bar button { display:inline-flex; align-items:center; gap:5px; height:30px; padding:0 10px; border:0; border-radius:9px; background:transparent; color:inherit; font:inherit; font-size:12.5px; font-weight:600; white-space:nowrap; cursor:pointer; }
+.live-ask-bar button:hover { background:rgba(173,168,255,.24); }
+.live-ask-bar button.primary { background:rgba(173,168,255,.2); }
+.transcript-entry, .translation-entry { border-radius:8px; transition:background .4s ease; }
+.evidence-flash { background:rgba(173,168,255,.24); }

@@ -11,6 +11,10 @@ Có thể tóm tắt chi tiết, giải thích, tổng hợp việc cần làm h
 Trả lời trực tiếp bằng Markdown, không bọc toàn bộ câu trả lời trong JSON hay code fence. Không dùng HTML. Chia nội dung thành các đoạn hoặc gạch đầu dòng ngắn, cách nhau bằng dòng trống. Đặt dấu căn cứ như [[s1]] hoặc [[s2]] ngay sau ý có đoạn transcript hỗ trợ. Chỉ dùng ID thật được cung cấp. Không có đoạn hỗ trợ thì không đặt dấu căn cứ. Không tạo phần liệt kê ID riêng.
 Nếu dữ liệu có continuation, tiếp tục trả lời câu hỏi ban đầu. completedAnswerTail là phần cuối đã hiển thị: không lặp lại. unfinishedParagraph là đoạn bị cắt, chưa hiển thị: viết lại đầy đủ đoạn đó rồi tiếp tục các ý còn lại, giữ nguyên dấu căn cứ."#;
 
+/// Appended while the meeting is still running: the user reads the answer mid-conversation.
+const LIVE: &str = r#"Cuộc họp đang diễn ra. segments chỉ là phần gần đây của transcript, có thể còn lỗi nhận diện; summary là tóm tắt tạm thời của phần trước đó. Người dùng đang đọc trong lúc họp nên trả lời ngắn gọn, đi thẳng vào ý chính, thường dưới 120 từ, không mở đầu rườm rà.
+Nếu có quote, đó là đoạn người dùng bôi đen trên transcript và câu hỏi nói về đoạn đó. Khi được yêu cầu giải thích thuật ngữ, dịch hoặc gợi ý câu trả lời, được dùng kiến thức chung và ngôn ngữ tự nhiên, nhưng không bịa thêm sự kiện về cuộc họp. Câu gợi ý để nói phải ngắn, lịch sự, nói thành lời được ngay."#;
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ChatRequest {
@@ -20,6 +24,11 @@ pub(crate) struct ChatRequest {
     segments: Vec<TranscriptSegment>,
     history: Vec<ChatTurn>,
     question: String,
+    /// Text the user selected on the live transcript.
+    #[serde(default)]
+    quote: String,
+    #[serde(default)]
+    live: bool,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -40,6 +49,9 @@ pub(crate) struct ChatAnswer {
 fn chat_input(request: &ChatRequest) -> Result<String, String> {
     if request.question.trim().is_empty() || request.question.chars().count() > 4000 {
         return Err("Câu hỏi phải có nội dung và không dài quá 4.000 ký tự.".into());
+    }
+    if request.quote.chars().count() > 4000 {
+        return Err("Đoạn trích quá dài. Hãy chọn đoạn ngắn hơn.".into());
     }
     if request.history.len() > 10
         || request
@@ -68,11 +80,15 @@ fn chat_input(request: &ChatRequest) -> Result<String, String> {
         "id": format!("s{}", index + 1), "timestamp": segment.timestamp,
         "speaker": segment.speaker, "source": segment.audio_source, "text": segment.clean_text,
     })).collect();
-    let input = json!({
+    let mut input = json!({
         "note": {"title": request.title, "summary": request.summary,
             "transcript": if segments.is_empty() { request.transcript.as_str() } else { "" }, "segments": segments},
         "history": request.history, "question": request.question.trim(),
-    }).to_string();
+    });
+    if !request.quote.trim().is_empty() {
+        input["quote"] = json!(request.quote.trim());
+    }
+    let input = input.to_string();
     // Leave room under the proxy's 200k character cap. Do not silently drop source material.
     if input.encode_utf16().count() + SYSTEM.encode_utf16().count() > 185_000 {
         return Err("Cuộc họp quá dài để hỏi đáp trong một yêu cầu. Hãy chia nội dung thành các ghi chú nhỏ hơn.".into());
@@ -205,12 +221,18 @@ async fn ask_note_stream(
 ) -> Result<ChatAnswer, String> {
     let input = chat_input(&request)?;
     let segments = request.segments.clone();
+    let (system, max_tokens) = if request.live {
+        (format!("{SYSTEM}\n{LIVE}"), 900)
+    } else {
+        (SYSTEM.to_string(), 1800)
+    };
     let result = complete_chat(input, &request.segments, |input, prefix| {
         let channel = on_progress.clone();
         let segments = segments.clone();
+        let system = system.clone();
         async move {
             let mut last_update = std::time::Instant::now() - std::time::Duration::from_secs(1);
-            crate::account::ai_complete_stream(SYSTEM, input, 1800, |partial| {
+            crate::account::ai_complete_stream(&system, input, max_tokens, |partial| {
                 // Send snapshots so paragraph replacement during continuation is deterministic.
                 if last_update.elapsed() < std::time::Duration::from_millis(40) {
                     return;
@@ -252,6 +274,8 @@ mod tests {
             segments: vec![],
             history: vec![],
             question: "Ai gửi?".into(),
+            quote: String::new(),
+            live: false,
         }
     }
     // Opt-in smoke test: uses the existing VietNote session and makes one billed AI request.
@@ -310,6 +334,17 @@ mod tests {
             serde_json::from_str(&chat_input(&request).unwrap()).unwrap();
         assert_eq!(input["note"]["transcript"], request.transcript);
         assert_eq!(input["history"][0]["content"], "Ai gửi báo cáo?");
+        assert!(input.get("quote").is_none());
+    }
+    #[test]
+    fn input_carries_selected_quote_within_limit() {
+        let mut request = request();
+        request.quote = "  chuyển sang usage-based  ".into();
+        let input: serde_json::Value =
+            serde_json::from_str(&chat_input(&request).unwrap()).unwrap();
+        assert_eq!(input["quote"], "chuyển sang usage-based");
+        request.quote = "a".repeat(4001);
+        assert!(chat_input(&request).is_err());
     }
     #[test]
     fn rejects_empty_source_invalid_roles_and_oversized_input() {

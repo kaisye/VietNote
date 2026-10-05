@@ -3,6 +3,7 @@ import { desktop, type AccountStatus } from '../services/desktop'
 import { createNote, demoNote, emptyStructuredSummary, formatStructuredSummary, toTranscriptSegment } from '../services/notes'
 import type { AudioInput, Cadence, InterimTranscript, Language, MeetingNote, NoteGroup, SpokenLanguage, StructuredMeetingSummary, Subtitle, TranslationBlock, WorkerMessage } from '../services/types'
 import { useNoteChat } from './useNoteChat'
+import { useLiveChat } from './useLiveChat'
 import { requestSignIn } from '../services/credits'
 
 const now = () => new Date().toISOString()
@@ -111,6 +112,7 @@ export function useAppModel() {
   }, [])
 
   const noteChat = useNoteChat(notesRef, groupsRef, persist)
+  const liveChat = useLiveChat(() => ({ title: 'Cuộc họp đang diễn ra', summary: overallSummaryRef.current, entries: entriesRef.current }))
 
   useEffect(() => {
     if (!desktop.isDesktop) { setStatus('Hãy mở ứng dụng VietNote để sử dụng'); return }
@@ -359,7 +361,7 @@ export function useAppModel() {
     }
     meetingSessionRef.current += 1; summaryBusy.current = false; summaryTaskRef.current = null
     publishEntries([]); publishOverallSummary(''); publishStructured(emptyStructuredSummary()); resetTranslations()
-    setInterimTranscripts([])
+    setInterimTranscripts([]); liveChat.reset()
     overallSummaryCursor.current = 0; lastSummaryAt.current = Date.now(); meetingStartedAt.current = Date.now()
     setSummaryStatus('Đang lắng nghe · bản tóm tắt bắt đầu sau câu đầu tiên')
     setTranslationStatus(languageRef.current === 'vi' ? 'Không cần dịch' : !translateForeignRef.current ? 'Đã tắt dịch tiếng nước ngoài' : languageRef.current === 'auto' ? 'Tự động nhận diện → Việt' : `${languageRef.current === 'en' ? 'Anh' : 'Trung'} → Việt theo đoạn`)
@@ -412,12 +414,13 @@ export function useAppModel() {
     const startedAtMs = meetingStartedAt.current
     const endedAtMs = Date.now()
     const overallCursorSnapshot = overallSummaryCursor.current
+    const chatSnapshot = liveChat.messagesRef.current
     stoppingRef.current = false
     setBusy(false)
     setStatus(ready ? 'Stopped — ready to restart' : 'Worker unavailable')
     if (discard) {
       meetingSessionRef.current += 1
-      publishEntries([]); publishOverallSummary(''); publishStructured(emptyStructuredSummary()); resetTranslations()
+      publishEntries([]); publishOverallSummary(''); publishStructured(emptyStructuredSummary()); resetTranslations(); liveChat.reset()
       setSummaryStatus('Đã bỏ cuộc họp · không lưu ghi chú')
     }
     if (!wasMeeting) return
@@ -451,6 +454,9 @@ export function useAppModel() {
     // A title left at the date-based default is replaced by the final summary's suggestion.
     const chosenTitle = saveOptions?.title.trim() || defaultTitle
     const note: MeetingNote = { id: pendingNoteID!, title: chosenTitle === defaultTitle && structured.title ? structured.title : chosenTitle, groupID: saveOptions?.groupID ?? null, createdAt: started.toISOString(), updatedAt: now(), duration: (endedAtMs - startedAtMs) / 1000, summary: summary || 'Chưa có tóm tắt · vui lòng kiểm tra kết nối.', structuredSummary: structured, transcriptSegments: entriesSnapshot.map(toTranscriptSegment), transcript: sourceTranscript + translatedTranscript, saving: true }
+    // Answers that arrived while the final summary ran still belong to this meeting.
+    const chatMessages = session === meetingSessionRef.current ? liveChat.messagesRef.current : chatSnapshot
+    if (chatMessages.length) note.chatMessages = chatMessages
     const completedNotes = notesRef.current.map(item => item.id === note.id ? note : item)
     publishNotes(completedNotes, groupsRef.current)
     try {
@@ -508,7 +514,7 @@ export function useAppModel() {
     entries, interimTranscripts, translationBlocks, overallSummary, suggestedTitle, titlePending, suggestTitleNow: () => void suggestTitleNow(), summaryStatus, summaryCadence, setSummaryCadence: setCadence,
     cadenceValue, setCadenceValue: setCadenceAmount, notes, noteGroups, savingNoteID, savingNoteGroupID, vietnameseASRStatus, translationStatus,
     canStartMeeting: ready || asrKeyAvailable, canSummarizeNow: meetingActive && !summaryBusy.current && (entries.length > overallSummaryCursor.current || (translating() && entries.length > translationCursorRef.current)),
-    noteChat, start, startMeeting, stop, summarizeNow: () => void summarizeNow(), newNote, updateNote, deleteNote, createGroup, renameGroup, deleteGroup, meetingStartedAt: meetingStartedAt.current }
+    noteChat, liveChat, start, startMeeting, stop, summarizeNow: () => void summarizeNow(), newNote, updateNote, deleteNote, createGroup, renameGroup, deleteGroup, meetingStartedAt: meetingStartedAt.current }
 }
 
 export type AppModel = ReturnType<typeof useAppModel>

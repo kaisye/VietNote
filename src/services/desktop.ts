@@ -5,6 +5,7 @@ import type { AudioInput, SpokenLanguage, MeetingNote, NoteGroup, StructuredMeet
 export interface NoteChatRequest {
   title: string; summary: string; transcript: string; segments: TranscriptSegment[];
   history: { role: 'user' | 'assistant'; content: string }[]; question: string
+  quote?: string; live?: boolean
 }
 export interface NoteChatAnswer { answer: string; evidenceIds: string[]; incomplete?: boolean }
 export interface StoredNotes { notes: MeetingNote[]; groups: NoteGroup[] }
