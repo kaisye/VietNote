@@ -16,8 +16,8 @@ const savedLanguage = (): Language => {
 const SIGN_IN_STATUS = 'Bấm Đăng nhập ở góc trái dưới để bắt đầu'
 
 function audioIssueText(message?: string) {
-  if (message?.startsWith('Soniox reconnecting')) return 'Mất kết nối máy chủ nhận diện · đang kết nối lại…'
-  if (message?.startsWith('Soniox audio queue full')) return 'Mạng chậm · đã bỏ qua một đoạn âm thanh'
+  if (message?.startsWith('ASR reconnecting')) return 'Mất kết nối máy chủ nhận diện · đang kết nối lại…'
+  if (message?.startsWith('ASR audio queue full')) return 'Mạng chậm · đã bỏ qua một đoạn âm thanh'
   if (message?.startsWith('VietNote credit exhausted')) return 'Đã hết phút sử dụng · xem tài khoản ở góc trái dưới'
   if (message?.startsWith('VietNote signed out')) return 'Phiên đăng nhập đã hết · đăng nhập lại ở góc trái dưới'
   return message ? `Lỗi xử lý âm thanh: ${message}` : 'Đã xảy ra lỗi xử lý âm thanh'

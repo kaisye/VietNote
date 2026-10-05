@@ -317,7 +317,7 @@ class SonioxStream:
         try:
             self.audio.put_nowait((pcm, captured_at))
         except queue.Full:
-            self.send(dict(type='warning', message='Soniox audio queue full; dropped a chunk.'))
+            self.send(dict(type='warning', message='ASR audio queue full; dropped a chunk.'))
 
     def config(self, api_key=None):
         config = {
@@ -378,7 +378,7 @@ class SonioxStream:
         else:
             self.echoed.pop(self.utterance_id(), None)
         if final:
-            log(f'[SONIOX] {self.source} final ({spoken}): {cleaned}')
+            log(f'[ASR] {self.source} final ({spoken}): {cleaned}')
         self.send(dict(
             type='transcript' if final else 'transcript_interim',
             language=spoken, id=self.utterance_id(), text=cleaned, raw_text=text,
@@ -458,7 +458,7 @@ class SonioxStream:
         if payload.get('error_type') == 'temp_api_key_session_expired':
             raise SessionRotated('session duration limit reached')
         if payload.get('error_code'):
-            raise RuntimeError(f"Soniox {payload.get('error_code')}: {payload.get('error_message')}")
+            raise RuntimeError(f"ASR {payload.get('error_code')}: {payload.get('error_message')}")
         final, interim, final_tr, interim_tr, endpoint, finalized = soniox_tokens(payload)
         with self.lock:
             for token in final:
@@ -518,7 +518,7 @@ class SonioxStream:
                         break
                     api_key, grant_id = self.broker.acquire(self.source)
                 ws = self.connect(api_key)
-                log(f'[SONIOX] {self.source} connected')
+                log(f'[ASR] {self.source} connected')
                 self.origin = None
                 self.latest_captured_at = None
                 sent_finalize = False
@@ -564,7 +564,7 @@ class SonioxStream:
                             self.maybe_close_translation()
                 retry = 1.0
             except AccountStop as exc:
-                log(f'[SONIOX] {self.source} stopped: {exc}')
+                log(f'[ASR] {self.source} stopped: {exc}')
                 self.stopped = True
                 self.send(dict(type='warning', message=str(exc)))
                 with self.lock:
@@ -573,15 +573,15 @@ class SonioxStream:
                     self.maybe_close_translation(force=True)
                 break
             except SessionRotated:
-                log(f'[SONIOX] {self.source} key session ended; rotating key')
+                log(f'[ASR] {self.source} key session ended; rotating key')
                 with self.lock:
                     self.tokens += self.interim_tokens
                     self.finish_utterance()
                     self.maybe_close_translation(force=True)
             except Exception as exc:
                 if not self.closed.is_set():
-                    log(f'[SONIOX] {self.source} connection error: {str(exc).replace(api_key or "-", "[redacted]")}')
-                    self.send(dict(type='warning', message='Soniox reconnecting…'))
+                    log(f'[ASR] {self.source} connection error: {str(exc).replace(api_key or "-", "[redacted]")}')
+                    self.send(dict(type='warning', message='ASR reconnecting…'))
                     with self.lock:
                         # Token clocks restart with the next connection.
                         self.tokens += self.interim_tokens
@@ -608,13 +608,13 @@ class SonioxRecognizer:
 
     def __init__(self, api_key, model=SONIOX_MODEL, managed=False):
         if not api_key and not managed:
-            raise RuntimeError('SONIOX_API_KEY is required when ASR_BACKEND=soniox')
+            raise RuntimeError('Speech recognition key is missing')
         self.api_key = api_key
         # Managed: stream on VietNote credit with keys issued per connection.
         self.broker = SonioxKeyBroker() if managed else None
         self.next_utterance = {}
         self.model_name = model
-        self.backend_name = 'Soniox'
+        self.backend_name = 'VietNote'
         self.vi_model_ready = True
         self.streams = {}
         self.send = None
@@ -622,7 +622,7 @@ class SonioxRecognizer:
         self.language = 'vi'
         self.speakers = SpeakerLabels()
         self.echo = TranscriptEcho()
-        log(f'[MODEL READY] Soniox {model} · {"VietNote credit" if managed else "own API key"}')
+        log(f'[MODEL READY] {model} · {"VietNote credit" if managed else "own API key"}')
 
     def reset(self, generation, language):
         self.close_streams()
@@ -634,7 +634,7 @@ class SonioxRecognizer:
         if self.send:
             self.send(dict(type='translation_mode', generation=generation,
                            live=language in ('en', 'zh', 'auto'), live_audio=False,
-                           provider='Soniox', model=self.model_name))
+                           provider='VietNote', model=self.model_name))
 
     def push_audio(self, audio, captured_at, source):
         if self.send is None:
@@ -873,7 +873,7 @@ def main():
             base_url=os.environ.get('GROQ_BASE_URL', GROQ_BASE_URL),
         )
     else:
-        raise SystemExit('Speech recognition needs SONIOX_API_KEY or GROQ_API_KEY')
+        raise SystemExit('Speech recognition is not configured')
     if args.debug_wav: debug(recognizer, args.debug_wav, args.language)
     else:
         serve(recognizer, os.environ['ASR_TOKEN'])
