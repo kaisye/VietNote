@@ -3,7 +3,6 @@ import { BookOpen, Grid2X2, MoonStar, Settings, Sun, AudioLines, ChevronLeft } f
 import { AccountMenu } from './AccountMenu'
 import type { AppModel } from '../hooks/useAppModel'
 import type { Page } from '../services/types'
-import { AnimatedWaveform } from './AnimatedWaveform'
 
 const pages: { key: Page; title: string; Icon: typeof Grid2X2 }[] = [
   { key: 'home', title: 'Trang chủ', Icon: Grid2X2 }, { key: 'notes', title: 'Ghi chú', Icon: BookOpen },
@@ -19,7 +18,7 @@ export function Sidebar({ page, setPage, dark, toggleTheme, model }: { page: Pag
     try { localStorage.setItem('sidebarCollapsed', String(next)) } catch { /* Keep working when storage is unavailable. */ }
   }
   return <aside className={`sidebar glass-sidebar ${collapsed ? 'sidebar-collapsed' : ''}`} aria-label="Thanh điều hướng">
-    <div className="brand-row"><div className="brand-icon"><AnimatedWaveform compact/></div><div className="brand-copy"><strong>VietNote</strong><small>MEETING INTELLIGENCE</small></div>
+    <div className="brand-row"><div className="brand-icon"><svg viewBox="96 96 320 320" width="26" height="26" fill="currentColor" aria-hidden="true"><rect x="116" y="202" width="34" height="108" rx="17"/><rect x="178" y="157" width="34" height="198" rx="17"/><rect x="239" y="111" width="34" height="290" rx="17"/><rect x="300" y="157" width="34" height="198" rx="17"/><rect x="362" y="202" width="34" height="108" rx="17"/></svg></div><div className="brand-copy"><strong>VietNote</strong><small>MEETING INTELLIGENCE</small></div>
       <button className="theme-toggle" onClick={toggleTheme} aria-label={dark ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'} title={dark ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'}>{dark ? <Sun size={17}/> : <MoonStar size={17}/>}</button></div>
     <button className="sidebar-collapse-toggle" onClick={toggleCollapsed} aria-label={collapsed ? 'Mở rộng thanh điều hướng' : 'Thu gọn thanh điều hướng'} title={collapsed ? 'Mở rộng thanh điều hướng' : 'Thu gọn thanh điều hướng'} aria-expanded={!collapsed} aria-controls="workspace-navigation"><ChevronLeft size={15} strokeWidth={2.4}/></button>
     <div className="sidebar-caption">KHÔNG GIAN LÀM VIỆC</div>
