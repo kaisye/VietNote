@@ -1,4 +1,4 @@
-import { Languages, Mic, MicOff, SlidersHorizontal, Volume2 } from 'lucide-react'
+import { Languages, Mic, MicOff, SlidersHorizontal, Volume2, VolumeX } from 'lucide-react'
 import type { AppModel } from '../hooks/useAppModel'
 import type { AudioInput, Language } from '../services/types'
 import { Choice, type ChoiceOption } from './Choice'
@@ -13,6 +13,11 @@ export function TranslateSwitch({ model }: { model: AppModel }) {
 export function MicrophoneToggle({ model }: { model: AppModel }) {
   const label = model.microphoneOn ? 'Tắt micro' : 'Bật micro'
   return <button type="button" className={`pill-btn mic-toggle ${model.microphoneOn ? 'on' : ''}`} onClick={model.toggleMicrophone} aria-pressed={model.microphoneOn} title={model.microphoneOn ? 'Tắt thu giọng nói từ micro' : 'Bật thu giọng nói từ micro'}>{model.microphoneOn ? <Mic size={16}/> : <MicOff size={16}/>}{label}</button>
+}
+
+export function SystemAudioToggle({ model }: { model: AppModel }) {
+  const label = model.systemAudioOn ? 'Tắt âm thanh máy' : 'Bật âm thanh máy'
+  return <button type="button" className={`pill-btn mic-toggle ${model.systemAudioOn ? 'on' : ''}`} onClick={model.toggleSystemAudio} aria-pressed={model.systemAudioOn} title={model.systemAudioOn ? 'Tắt thu âm thanh phát từ loa' : 'Bật thu âm thanh phát từ loa'}>{model.systemAudioOn ? <Volume2 size={16}/> : <VolumeX size={16}/>}{label}</button>
 }
 
 export function MeetingControls({ model }: { model: AppModel }) {

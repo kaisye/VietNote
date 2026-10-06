@@ -71,10 +71,12 @@ export function useAppModel() {
   // Spoken language per utterance id; in auto mode Vietnamese turns get no live translation.
   const spokenLanguageRef = useRef(new Map<string, SpokenLanguage>())
   const audioRef = useRef<AudioInput>('both')
-  // The microphone can be switched off and on while a recording runs.
+  // The microphone and system audio can each be switched off and on while a recording runs.
   const [microphoneOn, setMicrophoneOn] = useState(false)
+  const [systemAudioOn, setSystemAudioOn] = useState(false)
   const microphoneRef = useRef(false)
-  const microphoneBusy = useRef(false)
+  const systemAudioRef = useRef(false)
+  const sourceBusy = useRef(false)
   const cadenceRef = useRef<Cadence>('words')
   const cadenceValueRef = useRef(150)
   const overallSummaryCursor = useRef(0)
@@ -325,28 +327,34 @@ export function useAppModel() {
       await desktop.sendWorker({ type: 'reset', generation: generationRef.current, language: languageRef.current })
       await desktop.startCapture(audioRef.current)
       microphoneRef.current = audioRef.current !== 'system'; setMicrophoneOn(microphoneRef.current)
+      systemAudioRef.current = audioRef.current !== 'microphone'; setSystemAudioOn(systemAudioRef.current)
       capturingRef.current = true; setCapturing(true); setStatus(`● Listening — ${audioRef.current}`)
     } catch (error) { setStatus(`Capture stopped: ${error}`); setStartError(`Không ghi âm được: ${error}`); meetingRef.current = false; setMeetingActive(false) }
     finally { generationPending.current = false; setBusy(false) }
   }
-  const toggleMicrophone = async () => {
-    if (!capturingRef.current || microphoneBusy.current) return
-    microphoneBusy.current = true
-    const enabled = !microphoneRef.current
+  const toggleSource = async (source: 'microphone' | 'system') => {
+    if (!capturingRef.current || sourceBusy.current) return
+    sourceBusy.current = true
+    const ref = source === 'microphone' ? microphoneRef : systemAudioRef
+    const setOn = source === 'microphone' ? setMicrophoneOn : setSystemAudioOn
+    const setNative = source === 'microphone' ? desktop.setMicrophone : desktop.setSystemAudio
+    const name = source === 'microphone' ? 'micro' : 'âm thanh máy'
+    const enabled = !ref.current
     try {
       if (enabled) {
-        await desktop.sendWorker({ type: 'open_source', source: 'microphone' })
-        await desktop.setMicrophone(true)
+        await desktop.sendWorker({ type: 'open_source', source })
+        await setNative(true)
       } else {
-        // Stop capturing first so the worker's close is the microphone's last word.
-        await desktop.setMicrophone(false)
-        await desktop.sendWorker({ type: 'close_source', source: 'microphone' })
-        setInterimTranscripts(current => current.filter(item => item.source !== 'microphone'))
+        // Stop capturing first so the worker's close is the source's last word.
+        await setNative(false)
+        await desktop.sendWorker({ type: 'close_source', source })
+        setInterimTranscripts(current => current.filter(item => item.source !== source))
       }
-      microphoneRef.current = enabled; setMicrophoneOn(enabled)
-      setStatus(enabled ? '● Đã bật micro' : audioRef.current === 'microphone' ? '● Đã tắt micro · tạm dừng thu' : '● Đã tắt micro · chỉ thu âm thanh máy')
-    } catch (error) { setStatus(`Không đổi được micro: ${error}`) }
-    finally { microphoneBusy.current = false }
+      ref.current = enabled; setOn(enabled)
+      const other = source === 'microphone' ? systemAudioRef.current : microphoneRef.current
+      setStatus(enabled ? `● Đã bật ${name}` : other ? `● Đã tắt ${name} · chỉ thu ${source === 'microphone' ? 'âm thanh máy' : 'micro'}` : `● Đã tắt ${name} · tạm dừng thu`)
+    } catch (error) { setStatus(`Không đổi được ${name}: ${error}`) }
+    finally { sourceBusy.current = false }
   }
   const startMeeting = async () => {
     // Recognition, translation and summaries all run on the account's credit.
@@ -383,6 +391,7 @@ export function useAppModel() {
     stoppingRef.current = true
     capturingRef.current = false; setCapturing(false)
     microphoneRef.current = false; setMicrophoneOn(false)
+    systemAudioRef.current = false; setSystemAudioOn(false)
     setInterimTranscripts([])
     try {
       await desktop.stopCapture()
@@ -510,7 +519,7 @@ export function useAppModel() {
     return () => window.clearInterval(timer)
   }, [refreshAccount])
 
-  return { account, refreshAccount, status, startError, ready, diarizationReady, diarizationStatus, busy, capturing, meetingActive, sourceLanguage, setSourceLanguage, translateForeign, setTranslateForeign, audioInput, setAudioInput, microphoneOn, toggleMicrophone: () => void toggleMicrophone(),
+  return { account, refreshAccount, status, startError, ready, diarizationReady, diarizationStatus, busy, capturing, meetingActive, sourceLanguage, setSourceLanguage, translateForeign, setTranslateForeign, audioInput, setAudioInput, microphoneOn, toggleMicrophone: () => void toggleSource('microphone'), systemAudioOn, toggleSystemAudio: () => void toggleSource('system'),
     entries, interimTranscripts, translationBlocks, overallSummary, suggestedTitle, titlePending, suggestTitleNow: () => void suggestTitleNow(), summaryStatus, summaryCadence, setSummaryCadence: setCadence,
     cadenceValue, setCadenceValue: setCadenceAmount, notes, noteGroups, savingNoteID, savingNoteGroupID, vietnameseASRStatus, translationStatus,
     canStartMeeting: ready || asrKeyAvailable, canSummarizeNow: meetingActive && !summaryBusy.current && (entries.length > overallSummaryCursor.current || (translating() && entries.length > translationCursorRef.current)),

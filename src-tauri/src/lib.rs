@@ -32,9 +32,9 @@ fn hide_console(command: &mut Command) -> &mut Command {
 struct NativeState {
     child: Mutex<Option<Child>>,
     writer: Arc<Mutex<Option<TcpStream>>>,
-    captures: Mutex<Vec<Recording>>,
-    // Kept apart so the user can turn the microphone off and on mid-recording.
+    // Kept apart so the user can turn each source off and on mid-recording.
     microphone: Mutex<Option<Recording>>,
+    system: Mutex<Option<Recording>>,
     // Set while a recording runs; new sources send their audio through it.
     capture_tx: Mutex<Option<mpsc::SyncSender<(String, Vec<f32>, f64)>>>,
     capture_forwarder: Mutex<Option<std::thread::JoinHandle<()>>>,
@@ -471,7 +471,7 @@ fn start_capture(state: tauri::State<'_, NativeState>, source: String) -> Result
     let microphone = if source == "system" { None } else { Some(start_microphone(tx.clone())?) };
     let system = if source == "microphone" { None } else { Some(start_source(Source::System, "system", tx.clone())?) };
     *state.microphone.lock().map_err(|e| e.to_string())? = microphone;
-    *state.captures.lock().map_err(|e| e.to_string())? = system.into_iter().collect();
+    *state.system.lock().map_err(|e| e.to_string())? = system;
     *slot = Some(tx);
     drop(slot);
     let forwarder = std::thread::spawn(move || {
@@ -500,9 +500,19 @@ fn set_microphone(state: tauri::State<'_, NativeState>, enabled: bool) -> Result
     Ok(())
 }
 
+/// Turns system audio off or on while a recording runs; the microphone keeps going.
+#[tauri::command]
+fn set_system_audio(state: tauri::State<'_, NativeState>, enabled: bool) -> Result<(), String> {
+    let tx = state.capture_tx.lock().map_err(|e| e.to_string())?.clone().ok_or("Chưa ghi âm")?;
+    let mut system = state.system.lock().map_err(|e| e.to_string())?;
+    if !enabled { *system = None; }
+    else if system.is_none() { *system = Some(start_source(Source::System, "system", tx)?); }
+    Ok(())
+}
+
 /// Stops every source; the forwarder ends once the last sender is dropped.
 fn end_capture(state: &tauri::State<'_, NativeState>) -> Result<(), String> {
-    state.captures.lock().map_err(|e| e.to_string())?.clear();
+    *state.system.lock().map_err(|e| e.to_string())? = None;
     *state.microphone.lock().map_err(|e| e.to_string())? = None;
     *state.capture_tx.lock().map_err(|e| e.to_string())? = None;
     if let Some(thread) = state.capture_forwarder.lock().map_err(|e| e.to_string())?.take() {
@@ -850,11 +860,11 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(NativeState::default())
-        .invoke_handler(tauri::generate_handler![load_notes, save_notes, account::account_status, account::account_signed_in, account::account_send_code, account::account_offers, account::account_buy, account::account_order_status, account_verify, account_sign_out, start_worker, stop_worker, send_worker, start_capture, stop_capture, set_microphone, note_chat::ask_note, summarize_segments, suggest_title, translate_text, open_permission, open_link, save_export, reveal_file, print_page, #[cfg(target_os = "macos")] save_pdf, diarization_model_status, download_diarization_model, cancel_diarization_download, remove_diarization_model])
+        .invoke_handler(tauri::generate_handler![load_notes, save_notes, account::account_status, account::account_signed_in, account::account_send_code, account::account_offers, account::account_buy, account::account_order_status, account_verify, account_sign_out, start_worker, stop_worker, send_worker, start_capture, stop_capture, set_microphone, set_system_audio, note_chat::ask_note, summarize_segments, suggest_title, translate_text, open_permission, open_link, save_export, reveal_file, print_page, #[cfg(target_os = "macos")] save_pdf, diarization_model_status, download_diarization_model, cancel_diarization_download, remove_diarization_model])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 let state = window.app_handle().state::<NativeState>();
-                if let Ok(mut captures) = state.captures.lock() { captures.clear(); }
+                if let Ok(mut system) = state.system.lock() { *system = None; }
                 if let Ok(mut microphone) = state.microphone.lock() { *microphone = None; }
                 if let Ok(mut tx) = state.capture_tx.lock() { *tx = None; }
                 if let Ok(mut writer) = state.writer.lock() { *writer = None; }

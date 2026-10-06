@@ -38,6 +38,7 @@ export const desktop = {
   startCapture: (source: AudioInput) => invoke<void>('start_capture', { source }),
   stopCapture: () => invoke<void>('stop_capture'),
   setMicrophone: (enabled: boolean) => invoke<void>('set_microphone', { enabled }),
+  setSystemAudio: (enabled: boolean) => invoke<void>('set_system_audio', { enabled }),
   summarizeSegments: (segments: TranscriptSegment[], previousSummary?: StructuredMeetingSummary) =>
     invoke<StructuredMeetingSummary>('summarize_segments', { segments, previousSummary: previousSummary ?? null }),
   askNote: (request: NoteChatRequest, onProgress?: (answer: NoteChatAnswer) => void) => {
