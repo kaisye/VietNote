@@ -29,7 +29,7 @@ export function useLiveChat(context: () => { title: string; summary: string; ent
       const createdAt = new Date().toISOString()
       publish([...messagesRef.current,
         { id: crypto.randomUUID(), role: 'user', content: request.label ?? question, quote: request.quote?.trim() || undefined, createdAt },
-        { id: crypto.randomUUID(), role: 'assistant', content: result.answer, evidenceIds: result.evidenceIds, incomplete: result.incomplete, createdAt },
+        { id: crypto.randomUUID(), role: 'assistant', content: result.answer, evidenceIds: result.evidenceIds, followUps: result.followUps, incomplete: result.incomplete, createdAt },
       ])
       setStatus(null)
     } catch (error) {

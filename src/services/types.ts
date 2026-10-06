@@ -9,6 +9,8 @@ export type Cadence = 'words' | 'minutes'
 export interface NoteGroup { id: string; name: string }
 export interface NoteChatMessage {
   id: string; role: 'user' | 'assistant'; content: string; createdAt: string; evidenceIds?: string[]; incomplete?: boolean
+  /** Questions the AI suggests asking next. */
+  followUps?: string[]
   /** Transcript text the user selected when asking during the meeting. */
   quote?: string
 }

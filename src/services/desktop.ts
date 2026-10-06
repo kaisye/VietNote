@@ -7,7 +7,7 @@ export interface NoteChatRequest {
   history: { role: 'user' | 'assistant'; content: string }[]; question: string
   quote?: string; live?: boolean
 }
-export interface NoteChatAnswer { answer: string; evidenceIds: string[]; incomplete?: boolean }
+export interface NoteChatAnswer { answer: string; evidenceIds: string[]; followUps?: string[]; incomplete?: boolean }
 export interface StoredNotes { notes: MeetingNote[]; groups: NoteGroup[] }
 export interface AccountStatus { configured: boolean; email: string | null; balanceSeconds: number | null }
 export interface CreditOffer { id: string; name: string; hours: number; bonus_hours: number; price_vnd: number; original_price_vnd: number | null; promo_label: string | null; promo_ends_at: string | null; highlight: boolean }

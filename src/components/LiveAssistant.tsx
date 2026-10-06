@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
-import { Bot, ChevronDown, CircleAlert, Languages, Lightbulb, MessageCircle, MessageSquareReply, RotateCcw, Send, Trash2, X } from 'lucide-react'
+import { Bot, ChevronDown, CircleAlert, Languages, Lightbulb, MessageCircle, MessageSquareReply, RotateCcw, Send, Sparkles, Trash2, X } from 'lucide-react'
 import type { AppModel } from '../hooks/useAppModel'
 import type { Subtitle } from '../services/types'
 import { liveActions, type LiveQuestion } from '../services/liveChat'
@@ -34,12 +34,13 @@ function wholeWords(range: Range): Range {
   return snapped
 }
 
-/** The selected transcript passage, if the selection sits inside `root`. */
-function readSelection(root: HTMLElement | null): Pick | null {
+/** The selected passage, if the selection sits inside one of `roots` (transcript or summary). */
+function readSelection(roots: (HTMLElement | null)[]): Pick | null {
   const selection = document.getSelection()
-  if (!root || !selection || selection.isCollapsed || !selection.rangeCount) return null
+  if (!selection || selection.isCollapsed || !selection.rangeCount) return null
   const range = selection.getRangeAt(0)
-  if (!root.contains(range.commonAncestorContainer)) return null
+  const root = roots.find(element => element?.contains(range.commonAncestorContainer))
+  if (!root) return null
   const text = wholeWords(range).toString().replace(/\s+/g, ' ').trim()
   if (text.length < 2) return null
   const ids = [...root.querySelectorAll<HTMLElement>('[data-entry-id]')].filter(element => range.intersectsNode(element)).map(element => element.dataset.entryId!)
@@ -55,12 +56,12 @@ const sameSize = <T extends object>(a: T | null, b: T) => a !== null && (Object.
 /**
  * Real-time Q&A on the transcript being recorded, in the same Dynamic Island as the
  * notes chatbot: a pill centered at the bottom of the content area that opens on hover,
- * click or ⌘J. Selecting transcript text shows a small action bar
+ * click or ⌘J. Selecting transcript or summary text shows a small action bar
  * (Hỏi · Giải thích · Dịch · Gợi ý trả lời). `onHold` pauses auto-scroll while the
  * user is picking or quoting a passage.
  */
-export function LiveAssistant({ chat, entries, transcript, onHold }: {
-  chat: AppModel['liveChat']; entries: Subtitle[]; transcript: RefObject<HTMLElement | null>; onHold?: (hold: boolean) => void
+export function LiveAssistant({ chat, entries, transcript, summary, onHold }: {
+  chat: AppModel['liveChat']; entries: Subtitle[]; transcript: RefObject<HTMLElement | null>; summary?: RefObject<HTMLElement | null>; onHold?: (hold: boolean) => void
 }) {
   const [pick, setPick] = useState<Pick | null>(null)
   const [open, setOpen] = useState(false)
@@ -86,6 +87,7 @@ export function LiveAssistant({ chat, entries, transcript, onHold }: {
   // Hovering opens the island as a peek; it closes on leave unless the user engaged with it.
   const peek = useRef(false)
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const selected = () => readSelection([transcript.current, summary?.current ?? null])
 
   useLayoutEffect(() => { setStage(anchor.current?.closest<HTMLElement>('.main-stage') ?? null) }, [])
 
@@ -131,9 +133,9 @@ export function LiveAssistant({ chat, entries, transcript, onHold }: {
   // Show the action bar once a selection settles (pointer or keyboard), and keep it on the text while scrolling.
   useEffect(() => {
     const root = transcript.current
-    const update = () => setPick(readSelection(transcript.current))
+    const update = () => setPick(selected())
     const onChange = () => { if (document.getSelection()?.isCollapsed) setPick(null) }
-    const onScroll = () => setPick(previous => previous && readSelection(transcript.current))
+    const onScroll = () => setPick(previous => previous && selected())
     document.addEventListener('pointerup', update)
     document.addEventListener('keyup', update)
     document.addEventListener('selectionchange', onChange)
@@ -146,7 +148,7 @@ export function LiveAssistant({ chat, entries, transcript, onHold }: {
       root?.removeEventListener('scroll', onScroll)
       window.removeEventListener('scroll', onScroll, { capture: true })
     }
-  }, [transcript])
+  }, [transcript, summary]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { onHold?.(Boolean(pick || quote)) }, [pick, quote]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => onHold?.(false), []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -178,10 +180,10 @@ export function LiveAssistant({ chat, entries, transcript, onHold }: {
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'j') {
         event.preventDefault()
-        const selected = readSelection(transcript.current)
-        if (open && !selected) { collapse(); return }
-        if (selected) clearSelection()
-        openFor('focus', selected)
+        const passage = selected()
+        if (open && !passage) { collapse(); return }
+        if (passage) clearSelection()
+        openFor('focus', passage)
         return
       }
       if (event.key !== 'Escape') return
@@ -221,6 +223,8 @@ export function LiveAssistant({ chat, entries, transcript, onHold }: {
     setTimeout(() => element.classList.remove('evidence-flash'), 1800)
   }
 
+  const last = messages[messages.length - 1]
+  const followUps = !status?.error && last?.role === 'assistant' ? last.followUps ?? [] : []
   const pillLabel = pending ? (streamed ? 'Đang viết câu trả lời…' : 'Đang đọc transcript…')
     : status?.error ? 'Chưa trả lời được · mở để thử lại'
     : unseen ? 'Có câu trả lời mới'
@@ -237,7 +241,7 @@ export function LiveAssistant({ chat, entries, transcript, onHold }: {
     className={`note-chat island live-chat ${open ? 'open' : ''} ${pending ? 'busy' : ''} ${size && bounds ? 'ready' : ''}`}
     style={size && bounds ? { width: size.width, height: size.height, left: bounds.width / 2 - size.width / 2 } : undefined}>
     <button ref={pill} type="button" className="island-pill" inert={open} aria-hidden={open} aria-expanded={open}
-      disabled={!open && !canAsk && !messages.length && !pending} onClick={() => openFor('focus')} title={`Hỏi AI (${isMac ? '⌘' : 'Ctrl+'}J) · hoặc bôi đen một đoạn transcript`}>
+      disabled={!open && !canAsk && !messages.length && !pending} onClick={() => openFor('focus')} title={`Hỏi AI (${isMac ? '⌘' : 'Ctrl+'}J) · hoặc bôi đen một đoạn transcript hay tóm tắt`}>
       {pending ? <Wave/> : status?.error && <CircleAlert size={16} className="island-error-icon"/>}
       <span className="island-label">{pillLabel}</span>
       {unseen && !pending && <span className="island-dot" aria-hidden="true"/>}
@@ -254,15 +258,15 @@ export function LiveAssistant({ chat, entries, transcript, onHold }: {
       {(messages.length > 0 || pending || status?.error) ? <div className="note-chat-messages" ref={scroll} role="log" aria-label="Lịch sử hỏi đáp" aria-live="polite" aria-busy={pending}
         onScroll={event => { const element = event.currentTarget; follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < 60 }}>
         {messages.map(message => <article key={message.id} className={`chat-message ${message.role}`}>
-          <small>{message.role === 'user' ? 'Bạn' : 'VietNote AI'}</small>
           {message.role === 'user' ? <>{message.quote && <blockquote className="chat-quote">{message.quote}</blockquote>}<p>{message.content}</p></>
-            : <><ChatMarkdown content={message.content}/>{Boolean(message.evidenceIds?.length) && <div className="chat-evidence"><span>Căn cứ:</span>{message.evidenceIds!.map(id => { const entry = entries.find(item => item.id === id); return entry && <button key={id} type="button" onClick={() => showEvidence(id)} title={entry.sourceText}>{formatTime(entry.timestamp, false)}{entry.speaker ? ` · ${entry.speaker}` : ''}</button> })}</div>}</>}
+            : <><ChatMarkdown content={message.content}/>{Boolean(message.evidenceIds?.length) && <details className="chat-evidence"><summary>Căn cứ · {message.evidenceIds!.length}</summary><div>{message.evidenceIds!.map(id => { const entry = entries.find(item => item.id === id); return entry && <button key={id} type="button" onClick={() => showEvidence(id)} title={entry.sourceText}>{formatTime(entry.timestamp, false)}{entry.speaker ? ` · ${entry.speaker}` : ''}</button> })}</div></details>}</>}
         </article>)}
-        {status && (pending || status.error) && <article className="chat-message user"><small>Bạn</small>{status.request.quote && <blockquote className="chat-quote">{status.request.quote}</blockquote>}<p>{status.request.label ?? status.request.question}</p></article>}
-        {pending && streamed && <article className="chat-message assistant streaming"><small>VietNote AI</small><ChatMarkdown content={status!.answer!.answer} streaming/><span className="chat-stream-caret" aria-hidden="true"/></article>}
+        {status && (pending || status.error) && <article className="chat-message user">{status.request.quote && <blockquote className="chat-quote">{status.request.quote}</blockquote>}<p>{status.request.label ?? status.request.question}</p></article>}
+        {pending && streamed && <article className="chat-message assistant streaming"><ChatMarkdown content={status!.answer!.answer} streaming/><span className="chat-stream-caret" aria-hidden="true"/></article>}
         {pending && <div className="chat-thinking" role="status"><Wave/>{streamed ? 'AI đang viết…' : 'Đang đọc transcript và trả lời…'}</div>}
         {status?.error && <div className="chat-error" role="alert"><p>{status.error}</p><button type="button" className="copy-btn" onClick={() => send(status.request)}><RotateCcw size={14}/>Thử lại</button><button type="button" className="copy-btn" onClick={chat.dismissError}>Bỏ qua</button></div>}
-      </div> : !quote && <p className="live-ask-hint">Bôi đen một đoạn transcript để <strong>Hỏi</strong>, <strong>Giải thích</strong>, <strong>Dịch</strong> hoặc <strong>Gợi ý trả lời</strong>, hoặc gõ câu hỏi bên dưới.</p>}
+      </div> : !quote && <p className="live-ask-hint">Bôi đen một đoạn transcript hoặc tóm tắt để <strong>Hỏi</strong>, <strong>Giải thích</strong>, <strong>Dịch</strong> hoặc <strong>Gợi ý trả lời</strong>, hoặc gõ câu hỏi bên dưới.</p>}
+      {!pending && !quote && followUps.length > 0 && <div className="note-chat-prompts follow-ups" aria-label="Câu hỏi gợi ý">{followUps.map((question, index) => <button key={question} type="button" style={{ '--i': index } as CSSProperties} onClick={() => send({ question })}><Sparkles size={13}/>{question}</button>)}</div>}
       {quote && <div className="live-ask-quote"><span>“{quote.text}”</span><button type="button" onClick={() => { setQuote(null); focusInput() }} aria-label="Bỏ đoạn trích"><X size={13}/></button></div>}
       <form className="note-chat-form" onSubmit={event => { event.preventDefault(); submit() }}>
         <MessageCircle size={18} className="chat-input-icon" aria-hidden="true"/>

@@ -28,7 +28,7 @@ export function useNoteChat(
       const createdAt = new Date().toISOString()
       const messages: NoteChatMessage[] = [
         { id: crypto.randomUUID(), role: 'user', content: question, createdAt },
-        { id: crypto.randomUUID(), role: 'assistant', content: result.answer, evidenceIds: result.evidenceIds, incomplete: result.incomplete, createdAt },
+        { id: crypto.randomUUID(), role: 'assistant', content: result.answer, evidenceIds: result.evidenceIds, followUps: result.followUps, incomplete: result.incomplete, createdAt },
       ]
       persist(appendNoteChat(notes.current, note, messages), groups.current)
       update({ pending: false, question: '' })

@@ -473,17 +473,25 @@
 .note-chat-prompts button:hover:not(:disabled), .chat-evidence button:hover { border-color:var(--accent); translate:0 -1px; }
 .note-chat-prompts button:disabled { opacity:.5; cursor:default; }
 .note-chat-prompts svg { color:var(--accent); }
+.note-chat-prompts.follow-ups { flex-wrap:wrap; overflow:visible; }
+.note-chat-prompts.follow-ups button { flex:0 1 auto; max-width:100%; white-space:normal; text-align:left; line-height:1.4; }
+.note-chat-prompts.follow-ups svg { flex:none; }
 .note-chat.island.open .note-chat-prompts button { animation:island-chip .45s var(--spring) both; animation-delay:calc(var(--i, 0) * 45ms + 140ms); }
 @keyframes island-chip { from { opacity:0; translate:0 8px; scale:.9; } }
 
 .note-chat-messages { flex:1 1 auto; min-height:0; overflow:auto; display:flex; flex-direction:column; gap:12px; overscroll-behavior:contain; padding:2px; }
-.chat-message { padding:13px 15px; border-radius:16px; background:var(--input-bg); border:1px solid var(--border); max-width:95%; overflow-wrap:anywhere; }
+.chat-message { padding:9px 14px; border-radius:16px; background:var(--input-bg); border:1px solid var(--border); max-width:95%; overflow-wrap:anywhere; }
 .note-chat.island.open .chat-message:last-of-type { animation:island-chip .4s var(--spring) both; }
 .chat-message.user { align-self:flex-end; background:rgba(173,168,255,.14); }
 .chat-message.assistant { align-self:stretch; }
-.chat-message>small { color:var(--muted); font-size:11px; font-weight:600; }
-.chat-message>p { white-space:pre-wrap; line-height:1.7; font-size:14px; margin-top:5px; }
-.chat-evidence { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:10px; font-size:11px; color:var(--muted); }
+.chat-message>p { white-space:pre-wrap; line-height:1.6; font-size:14px; }
+.chat-evidence { margin-top:8px; font-size:11px; color:var(--muted); }
+.chat-evidence summary { display:inline-flex; align-items:center; gap:4px; cursor:pointer; list-style:none; user-select:none; border-radius:6px; padding:2px 4px; margin-left:-4px; }
+.chat-evidence summary::-webkit-details-marker { display:none; }
+.chat-evidence summary::after { content:''; width:5px; height:5px; border:solid currentColor; border-width:0 1.5px 1.5px 0; rotate:-45deg; transition:rotate .15s ease; }
+.chat-evidence[open] summary::after { rotate:45deg; }
+.chat-evidence summary:hover { color:var(--ink); }
+.chat-evidence > div { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
 .chat-evidence button { font-size:11px; padding:4px 8px; }
 .chat-thinking { display:flex; align-items:center; gap:10px; color:var(--muted); font-size:13px; padding:6px; }
 .chat-error { border:1px solid rgba(229,72,77,.3); border-radius:12px; padding:12px; color:var(--ink); font-size:13px; overflow-wrap:anywhere; }
@@ -502,7 +510,7 @@
 }
 
 .chat-incomplete { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:10px; color:var(--muted); }
-.chat-markdown { margin-top:6px; font-size:14px; line-height:1.7; overflow-wrap:anywhere; }
+.chat-markdown { font-size:14px; line-height:1.7; overflow-wrap:anywhere; }
 .chat-markdown>:first-child { margin-top:0; }
 .chat-markdown>:last-child { margin-bottom:0; }
 .chat-markdown p { margin:0 0 10px; line-height:1.7; white-space:normal; }
@@ -528,7 +536,7 @@
 .home-wrap .panel-scroll, .transcript-list { padding-bottom:58px; scroll-padding-bottom:58px; }
 .live-ask-hint { color:var(--muted); font-size:13px; line-height:1.6; padding:2px 6px; }
 .live-ask-hint strong { color:var(--ink); font-weight:600; }
-.chat-quote { margin:4px 0 6px; padding:2px 0 2px 10px; border-left:2px solid var(--accent); color:var(--muted); font-size:13px; line-height:1.55; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.chat-quote { margin:2px 0 6px; padding:2px 0 2px 10px; border-left:2px solid var(--accent); color:var(--muted); font-size:13px; line-height:1.55; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
 .live-ask-quote { display:flex; align-items:flex-start; gap:8px; flex:none; padding:7px 8px 7px 12px; border-left:2px solid var(--accent); border-radius:4px 10px 10px 4px; background:rgba(173,168,255,.1); font-size:12.5px; color:var(--muted); }
 .live-ask-quote span { flex:1; min-width:0; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
 .live-ask-quote button { flex:none; display:grid; place-items:center; width:20px; height:20px; padding:0; border:0; border-radius:6px; background:transparent; color:var(--muted); cursor:pointer; }
