@@ -1,6 +1,7 @@
 import { invoke, Channel } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import type { AudioInput, SpokenLanguage, MeetingNote, NoteGroup, StructuredMeetingSummary, TranscriptSegment, WorkerMessage } from './types'
+import type { FileToken } from './fileTranscript'
+import type { AudioInput, DocumentKind, DocumentLength, Language, SpokenLanguage, MeetingNote, NoteGroup, StructuredMeetingSummary, TranscriptSegment, WorkerMessage } from './types'
 
 export interface NoteChatRequest {
   title: string; summary: string; transcript: string; segments: TranscriptSegment[];
@@ -8,6 +9,12 @@ export interface NoteChatRequest {
   quote?: string; live?: boolean
 }
 export interface NoteChatAnswer { answer: string; evidenceIds: string[]; followUps?: string[]; incomplete?: boolean }
+/** A recording picked for transcription; `durationSeconds` is null when its container does not say. */
+export interface AudioFile { path: string; name: string; size: number; durationSeconds: number | null; modifiedMs: number | null }
+export interface FileJobStatus { status: 'uploading' | 'processing' | 'completed' | 'failed'; tokens?: FileToken[]; audio_seconds?: number; charged_seconds?: number; error?: string }
+export interface WriteRequest { title: string; lines: string[]; digest: string[]; current: string; kind: DocumentKind; length: DocumentLength; instruction: string }
+export interface WriteProgress { stage: 'reading' | 'writing'; done: number; total: number; text: string }
+export interface WrittenDocument { markdown: string; digest: string[]; incomplete: boolean }
 export interface StoredNotes { notes: MeetingNote[]; groups: NoteGroup[] }
 export interface AccountStatus { configured: boolean; email: string | null; balanceSeconds: number | null }
 export interface CreditOffer { id: string; name: string; hours: number; bonus_hours: number; price_vnd: number; original_price_vnd: number | null; promo_label: string | null; promo_ends_at: string | null; highlight: boolean }
@@ -46,12 +53,27 @@ export const desktop = {
     onProgressChannel.onmessage = answer => onProgress?.(answer)
     return invoke<NoteChatAnswer>('ask_note', { request, onProgress: onProgressChannel })
   },
+  writeDocument: (request: WriteRequest, onProgress: (progress: WriteProgress) => void) => {
+    const channel = new Channel<WriteProgress>()
+    channel.onmessage = onProgress
+    return invoke<WrittenDocument>('write_document', { request, onProgress: channel })
+  },
   suggestTitle: (transcript: string) => invoke<string>('suggest_title', { transcript }),
   translateParagraph: (text: string, sourceLanguage: SpokenLanguage, previousContext: string) => invoke<string>('translate_text', { text, sourceLanguage, previousContext }),
   diarizationModelStatus: () => invoke<DiarizationModelStatus>('diarization_model_status'),
   downloadDiarizationModel: () => invoke<DiarizationModelStatus>('download_diarization_model'),
   cancelDiarizationDownload: () => invoke<void>('cancel_diarization_download'),
   removeDiarizationModel: () => invoke<DiarizationModelStatus>('remove_diarization_model'),
+  pickAudioFile: () => invoke<AudioFile | null>('pick_audio_file'),
+  fileJobStart: (filename: string, estimatedSeconds: number | null) => invoke<{ job_id: string; reserved_seconds: number; balance_seconds: number }>('file_job_start', { filename, estimatedSeconds }),
+  fileJobUpload: (jobId: string, path: string, language: Language, translate: boolean, onProgress: (percent: number) => void) => {
+    const channel = new Channel<number>()
+    channel.onmessage = onProgress
+    return invoke<void>('file_job_upload', { jobId, path, language, translate, onProgress: channel })
+  },
+  fileJobStatus: (jobId: string) => invoke<FileJobStatus>('file_job_status', { jobId }),
+  fileJobCleanup: (jobId: string) => invoke<void>('file_job_cleanup', { jobId }),
+  fileJobCancel: (jobId: string) => invoke<void>('file_job_cancel', { jobId }),
   onDiarizationDownload: (callback: (progress: DownloadProgress) => void): Promise<UnlistenFn> => listen<DownloadProgress>('diarization-download', e => callback(e.payload)),
   openPermission: (kind: 'microphone' | 'screen') => invoke<void>('open_permission', { kind }),
   /** Native Save dialog; resolves to the saved path, or null when cancelled. */

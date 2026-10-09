@@ -2,6 +2,8 @@ mod account;
 mod ai_stream;
 mod note_chat;
 mod diarization_model;
+mod file_job;
+mod writer;
 use base64::Engine;
 use clipclip::{start_with_tap, Config, Recording, Source};
 use serde::{Deserialize, Serialize};
@@ -631,7 +633,7 @@ async fn summarize_segments(segments: Vec<TranscriptSegment>, previous_summary: 
         }
     }
     let transcript = segments.iter().map(|segment| {
-        let source = if segment.audio_source == "microphone" { "mic" } else { "máy" };
+        let source = match segment.audio_source.as_str() { "microphone" => "mic", "file" => "file", _ => "máy" };
         let speaker = segment.speaker.as_deref().map(|speaker| format!(" {speaker}")).unwrap_or_default();
         format!("[{}]{speaker} ({source}): {}", alias(&segment.id), segment.clean_text)
     }).collect::<Vec<_>>().join("\n");
@@ -860,7 +862,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(NativeState::default())
-        .invoke_handler(tauri::generate_handler![load_notes, save_notes, account::account_status, account::account_signed_in, account::account_send_code, account::account_offers, account::account_buy, account::account_order_status, account_verify, account_sign_out, start_worker, stop_worker, send_worker, start_capture, stop_capture, set_microphone, set_system_audio, note_chat::ask_note, summarize_segments, suggest_title, translate_text, open_permission, open_link, save_export, reveal_file, print_page, #[cfg(target_os = "macos")] save_pdf, diarization_model_status, download_diarization_model, cancel_diarization_download, remove_diarization_model])
+        .invoke_handler(tauri::generate_handler![load_notes, save_notes, account::account_status, account::account_signed_in, account::account_send_code, account::account_offers, account::account_buy, account::account_order_status, account_verify, account_sign_out, start_worker, stop_worker, send_worker, start_capture, stop_capture, set_microphone, set_system_audio, note_chat::ask_note, summarize_segments, suggest_title, translate_text, open_permission, open_link, save_export, reveal_file, print_page, #[cfg(target_os = "macos")] save_pdf, file_job::pick_audio_file, file_job::file_job_start, file_job::file_job_upload, file_job::file_job_status, file_job::file_job_cleanup, file_job::file_job_cancel, writer::write_document, diarization_model_status, download_diarization_model, cancel_diarization_download, remove_diarization_model])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 let state = window.app_handle().state::<NativeState>();

@@ -31,6 +31,7 @@ calls the `soniox-key` Edge Function, which does the following:
       ```sh
       supabase functions deploy soniox-key --use-api
       supabase functions deploy soniox-reconcile --use-api
+      supabase functions deploy soniox-file --use-api
       ```
 3. **Enable email codes.** Go to Authentication → Email Templates → *Magic Link*. Include `{{ .Token }}` in the template so the email contains the 6-digit code. The app has no redirect URL to receive a link.
 4. **Schedule reconciliation.** In the SQL editor, enable `pg_cron` and `pg_net`, then run the SQL below. The job reads the secret from Vault, so the job definition holds no secret.

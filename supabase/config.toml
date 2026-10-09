@@ -7,6 +7,9 @@ verify_jwt = true
 # Authenticated by the x-cron-secret header instead of a user JWT.
 verify_jwt = false
 
+[functions.soniox-file]
+verify_jwt = true
+
 [functions.ai-complete]
 verify_jwt = true
 

@@ -1,4 +1,4 @@
-export type Page = 'home' | 'notes' | 'translate' | 'settings'
+export type Page = 'home' | 'notes' | 'translate' | 'file' | 'settings'
 export type Appearance = 'system' | 'light' | 'dark'
 /** Meeting setting; 'auto' lets the streaming ASR (Soniox) detect the spoken language. */
 export type Language = 'auto' | 'zh' | 'en' | 'vi'
@@ -18,6 +18,18 @@ export interface MeetingNote {
   id: string; title: string; createdAt: string; updatedAt: string; duration: number;
   summary: string; transcript: string; groupID?: string | null; isDemo?: boolean;
   structuredSummary?: StructuredMeetingSummary; transcriptSegments?: TranscriptSegment[]; saving?: boolean; chatMessages?: NoteChatMessage[]
+  /** Documents the AI wrote from this note: minutes, class notes, an article… */
+  documents?: NoteDocument[]
+  /** The AI's notes from reading a long transcript, reused when it writes again. */
+  digest?: { size: number; parts: string[] }
+}
+export type DocumentKind = 'meeting' | 'lecture' | 'workshop' | 'article' | 'post' | 'custom'
+export type DocumentLength = 'short' | 'medium' | 'long'
+export interface NoteDocument {
+  id: string; kind: DocumentKind; length: DocumentLength; instruction?: string
+  markdown: string; createdAt: string; updatedAt: string
+  /** The AI stopped before finishing. */
+  incomplete?: boolean
 }
 export interface Subtitle {
   id: string; timestamp: string; sourceText: string; audioSource: string;

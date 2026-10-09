@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildReport, reportDocx, reportFileName, reportHtml, textSections } from './noteExport'
+import { buildReport, documentReport, inlineRuns, markdownSections, reportDocx, reportFileName, reportHtml, reportMarkdown, textSections } from './noteExport'
 import { demoNote, emptyStructuredSummary } from './notes'
 
 describe('note export', () => {
@@ -33,6 +33,32 @@ describe('note export', () => {
 
   it('builds a Word file', async () => {
     const bytes = await reportDocx(buildReport(demoNote, { transcript: true }))
+    expect(String.fromCharCode(bytes[0], bytes[1])).toBe('PK')
+  })
+
+  it('turns an AI document into a report titled by its heading', () => {
+    const markdown = '# AI sẽ thay đổi lớp học\n\nMở đầu **rất** ngắn.\n\n## Ba ý chính\n1. **Một**: giải thích\n2. Hai\n\n> Câu trích\n> tiếp dòng\n\n> Câu khác\n\n---\n- Gạch *nghiêng*'
+    expect(markdownSections(markdown)).toEqual([
+      { title: '', blocks: [{ kind: 'paragraph', text: 'Mở đầu **rất** ngắn.' }] },
+      { title: 'Ba ý chính', blocks: [{ kind: 'numbered', items: ['**Một**: giải thích', 'Hai'] }, { kind: 'quote', text: 'Câu trích tiếp dòng' }, { kind: 'quote', text: 'Câu khác' }, { kind: 'bullets', items: ['Gạch *nghiêng*'] }] },
+    ])
+    const report = documentReport(demoNote, { id: 'd', kind: 'workshop', length: 'medium', markdown, createdAt: '', updatedAt: '' })
+    expect(report.title).toBe('AI sẽ thay đổi lớp học')
+    expect(report.meta[0]).toBe('Tóm tắt workshop')
+    const html = reportHtml(report)
+    expect(html).toContain('<p>Mở đầu <strong>rất</strong> ngắn.</p>')
+    expect(html).toContain('<ol><li><strong>Một</strong>: giải thích</li><li>Hai</li></ol>')
+    expect(html).toContain('<blockquote><p>Câu trích tiếp dòng</p></blockquote>')
+    expect(html).toContain('<li>Gạch nghiêng</li>')
+    expect(reportMarkdown(report)).toContain('## Ba ý chính\n\n1. **Một**: giải thích\n2. Hai\n\n> Câu trích tiếp dòng')
+  })
+
+  it('keeps bold runs and drops other inline marks', () => {
+    expect(inlineRuns('A **b** `c` _d_ 2*3*4')).toEqual([{ text: 'A ', bold: false }, { text: 'b', bold: true }, { text: ' c d 2*3*4', bold: false }])
+  })
+
+  it('builds a Word file from a document', async () => {
+    const bytes = await reportDocx(documentReport(demoNote, { id: 'd', kind: 'post', length: 'short', markdown: 'Hook\n\n> Trích\n\n1. Một', createdAt: '', updatedAt: '' }))
     expect(String.fromCharCode(bytes[0], bytes[1])).toBe('PK')
   })
 })

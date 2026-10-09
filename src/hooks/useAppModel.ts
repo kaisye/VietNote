@@ -5,6 +5,8 @@ import type { AudioInput, Cadence, InterimTranscript, Language, MeetingNote, Not
 import { useNoteChat } from './useNoteChat'
 import { useLiveChat } from './useLiveChat'
 import { requestSignIn } from '../services/credits'
+import { useFileJob } from './useFileJob'
+import { useNoteDocuments } from './useNoteDocuments'
 
 const now = () => new Date().toISOString()
 const countWords = (text: string) => text.trim().split(/\s+/).filter(Boolean).length
@@ -114,6 +116,7 @@ export function useAppModel() {
   }, [])
 
   const noteChat = useNoteChat(notesRef, groupsRef, persist)
+  const noteDocuments = useNoteDocuments(notesRef, groupsRef, persist)
   const liveChat = useLiveChat(() => ({ title: 'Cuộc họp đang diễn ra', summary: overallSummaryRef.current, entries: entriesRef.current }))
 
   useEffect(() => {
@@ -479,6 +482,7 @@ export function useAppModel() {
   }
   const newNote = (groupID?: string | null) => { const note = createNote(groupID); persist([note, ...notesRef.current], groupsRef.current); return note.id }
   const updateNote = (id: string, patch: Partial<Pick<MeetingNote, 'title' | 'summary' | 'groupID'>>) => persist(notesRef.current.map(note => note.id === id && !note.isDemo ? { ...note, ...patch, ...(patch.summary === undefined ? {} : { structuredSummary: undefined }), updatedAt: now() } : note), groupsRef.current)
+  const addNote = (note: MeetingNote) => persist([note, ...notesRef.current], groupsRef.current)
   const deleteNote = (id: string) => persist(notesRef.current.filter(note => note.id !== id || note.isDemo), groupsRef.current)
   const createGroup = (raw: string) => { const name = raw.trim(); if (!name || groupsRef.current.some(g => g.name.toLocaleLowerCase() === name.toLocaleLowerCase())) return null; const group = { id: crypto.randomUUID(), name }; persist(notesRef.current, [...groupsRef.current, group]); return group.id }
   const renameGroup = (id: string, raw: string) => { const name = raw.trim(); if (!name || groupsRef.current.some(g => g.id !== id && g.name.toLocaleLowerCase() === name.toLocaleLowerCase())) return false; persist(notesRef.current, groupsRef.current.map(g => g.id === id ? { ...g, name } : g)); return true }
@@ -518,12 +522,13 @@ export function useAppModel() {
     const timer = window.setInterval(() => void refreshAccount(), 60_000)
     return () => window.clearInterval(timer)
   }, [refreshAccount])
+  const fileJob = useFileJob(addNote, () => void refreshAccount())
 
   return { account, refreshAccount, status, startError, ready, diarizationReady, diarizationStatus, busy, capturing, meetingActive, sourceLanguage, setSourceLanguage, translateForeign, setTranslateForeign, audioInput, setAudioInput, microphoneOn, toggleMicrophone: () => void toggleSource('microphone'), systemAudioOn, toggleSystemAudio: () => void toggleSource('system'),
     entries, interimTranscripts, translationBlocks, overallSummary, suggestedTitle, titlePending, suggestTitleNow: () => void suggestTitleNow(), summaryStatus, summaryCadence, setSummaryCadence: setCadence,
     cadenceValue, setCadenceValue: setCadenceAmount, notes, noteGroups, savingNoteID, savingNoteGroupID, vietnameseASRStatus, translationStatus,
     canStartMeeting: ready || asrKeyAvailable, canSummarizeNow: meetingActive && !summaryBusy.current && (entries.length > overallSummaryCursor.current || (translating() && entries.length > translationCursorRef.current)),
-    noteChat, liveChat, start, startMeeting, stop, summarizeNow: () => void summarizeNow(), newNote, updateNote, deleteNote, createGroup, renameGroup, deleteGroup, meetingStartedAt: meetingStartedAt.current }
+    noteChat, noteDocuments, liveChat, start, startMeeting, stop, summarizeNow: () => void summarizeNow(), newNote, addNote, updateNote, deleteNote, fileJob, createGroup, renameGroup, deleteGroup, meetingStartedAt: meetingStartedAt.current }
 }
 
 export type AppModel = ReturnType<typeof useAppModel>

@@ -35,7 +35,7 @@ fn setting(name: &str, default: &str) -> Option<String> {
     Some(value.trim().trim_end_matches('/').to_string()).filter(|value| !value.is_empty())
 }
 
-fn config() -> Option<(String, String)> {
+pub(crate) fn config() -> Option<(String, String)> {
     Some((setting("VIETNOTE_SUPABASE_URL", SUPABASE_URL)?, setting("VIETNOTE_SUPABASE_ANON_KEY", SUPABASE_ANON_KEY)?))
 }
 
@@ -98,7 +98,7 @@ fn session_from(value: &Value, fallback_email: &str) -> Result<Session, String> 
 }
 
 /// A fresh access token, refreshing (once, even when both streams ask) when near expiry.
-async fn access_token() -> Result<String, String> {
+pub(crate) async fn access_token() -> Result<String, String> {
     static REFRESH: OnceLock<tauri::async_runtime::Mutex<()>> = OnceLock::new();
     let _guard = REFRESH.get_or_init(Default::default).lock().await;
     let session = load_session().ok_or("signed_out")?;
@@ -119,7 +119,7 @@ async fn access_token() -> Result<String, String> {
 async fn credit_call(body: Value) -> Result<Value, String> { function_call("soniox-key", body).await }
 
 /// Calls a signed-in Edge Function; errors are short machine codes.
-async fn function_call(name: &str, body: Value) -> Result<Value, String> {
+pub(crate) async fn function_call(name: &str, body: Value) -> Result<Value, String> {
     let (url, anon) = config().ok_or("not_configured")?;
     let token = access_token().await?;
     let response = client()?.post(format!("{url}/functions/v1/{name}"))
