@@ -881,7 +881,7 @@ def serve(recognizer, token):
                             thread.join(timeout=5)
                         muted.discard(source)
                     elif message['type'] == 'tts_enable':
-                        speaker.enable(message.get('voice'))
+                        speaker.enable(message.get('voice'), message.get('model_dir'))
                     elif message['type'] == 'tts_disable':
                         speaker.disable()
                     elif message['type'] == 'synthesize':

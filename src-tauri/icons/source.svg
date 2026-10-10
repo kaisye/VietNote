@@ -1,11 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <!-- marketing/branding/app-icon-depth.svg, inset 16px like the previous icon so it sits the same size in the Dock. -->
+  <!-- VietNote Relay: three folded planes on a white tile, pink-to-magenta gradient (start #EF3184, end #EF46DB).
+       Inset 16px like the previous icon so it sits the same size in the Dock. -->
+  <defs>
+    <linearGradient id="left" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#EF3184"/><stop offset="1" stop-color="#EF46DB"/></linearGradient>
+    <linearGradient id="fold" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#F07799"/><stop offset="1" stop-color="#F283D4"/></linearGradient>
+    <linearGradient id="right" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#CC2630"/><stop offset="1" stop-color="#DF3CD6"/></linearGradient>
+  </defs>
   <g transform="translate(16 16) scale(.9375)">
-    <rect width="512" height="512" rx="96" fill="#526ADE"/>
+    <rect width="512" height="512" rx="96" fill="#FFFFFF"/>
     <g transform="translate(10 66) scale(1.1)">
-      <path fill="#FFFFFF" d="M 80 80 L 168 32 L 168 168 L 168 280 L 80 232 Z"/>
-      <path fill="#D4CEFA" d="M 168 168 L 280 104 L 368 152 L 280 216 L 168 280 Z"/>
-      <path fill="#F4F2FF" d="M 280 216 L 368 152 L 368 272 L 280 320 Z"/>
+      <path fill="url(#left)" d="M 80 80 L 168 32 L 168 168 L 168 280 L 80 232 Z"/>
+      <path fill="url(#fold)" d="M 168 168 L 280 104 L 368 152 L 280 216 L 168 280 Z"/>
+      <path fill="url(#right)" d="M 280 216 L 368 152 L 368 272 L 280 320 Z"/>
     </g>
   </g>
 </svg>

@@ -21,10 +21,10 @@ export function useIslandBridge(model: AppModel, onStart: () => void) {
     canStart: model.canStartMeeting && !model.busy && !model.meetingActive && !model.capturing,
     source: model.capturing ? activeSource(model.microphoneOn, model.systemAudioOn) : model.audioInput,
     translation: model.sourceLanguage === 'vi' ? 'unavailable' : model.translateForeign ? 'on' : 'off',
-    speech: model.sourceLanguage === 'vi' || !model.speech.available ? null : { enabled: model.speech.enabled, loading: model.speech.enabled && model.speech.state === 'loading', voice: model.speech.voice },
+    speech: model.sourceLanguage === 'vi' || !model.speech.installed ? null : { enabled: model.speech.enabled, loading: model.speech.enabled && model.speech.state === 'loading', voice: model.speech.voice },
     lines: islandLines(model.entries, model.interimTranscripts, model.translationBlocks),
     chat: islandChat(model.liveChat.messages, model.liveChat.status),
-  }), [model.meetingActive, model.capturing, model.status, model.canStartMeeting, model.busy, model.sourceLanguage, model.translateForeign, model.audioInput, model.speech.available, model.speech.enabled, model.speech.state, model.speech.voice, model.microphoneOn, model.systemAudioOn, model.entries, model.interimTranscripts, model.translationBlocks, model.liveChat.messages, model.liveChat.status])
+  }), [model.meetingActive, model.capturing, model.status, model.canStartMeeting, model.busy, model.sourceLanguage, model.translateForeign, model.audioInput, model.speech.installed, model.speech.enabled, model.speech.state, model.speech.voice, model.microphoneOn, model.systemAudioOn, model.entries, model.interimTranscripts, model.translationBlocks, model.liveChat.messages, model.liveChat.status])
   const latest = useRef(state)
   latest.current = state
   const modelRef = useRef(model)

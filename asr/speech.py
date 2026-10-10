@@ -51,16 +51,18 @@ class Speaker:
 
     @property
     def available(self):
-        """The voice model and its runtime are installed (dev setups; not yet in release builds)."""
+        """This build can read aloud; the voice pack itself is downloaded by the app."""
         import importlib.util
-        return (self.model_dir / 'config.json').is_file() and importlib.util.find_spec('zerotts') is not None
+        return importlib.util.find_spec('zerotts') is not None
 
     def _status(self, state, message=''):
         self.state = state
         self.send(dict(type='tts_status', state=state, voice=self.voice, message=message))
 
-    def enable(self, voice=None):
+    def enable(self, voice=None, model_dir=None):
         with self.lock:
+            if model_dir and self.tts is None:
+                self.model_dir = Path(model_dir)
             if voice and str(voice) != self.voice:
                 if self.tts is not None and str(voice) != AUTO:
                     # Switching voices only loads a small embedding; the model stays.
@@ -79,7 +81,7 @@ class Speaker:
         started = time.monotonic()
         try:
             if not (self.model_dir / 'config.json').is_file():
-                raise RuntimeError(f'Chưa có model giọng đọc ở {self.model_dir}')
+                raise RuntimeError(f'No voice pack at {self.model_dir}')
             from zerotts import ZeroTTS, normalize_vi_text
             tts = ZeroTTS(self.model_dir, intra_op_num_threads=THREADS)
             base = DEFAULT_VOICE if self.voice == AUTO else self.voice

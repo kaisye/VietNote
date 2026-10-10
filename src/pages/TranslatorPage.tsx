@@ -8,8 +8,14 @@ import { Choice } from '../components/Choice'
 import { visibleTranslation } from '../services/translationView'
 import { LiveAssistant } from '../components/LiveAssistant'
 
+const megabytes = (bytes: number) => `${Math.round(bytes / 1e6)} MB`
+
 const speechNote = (model: AppModel) => {
   const { speech } = model
+  if (speech.progress) return speech.progress.unpacking ? 'Đang cài giọng đọc…'
+    : `Đang tải giọng đọc · ${megabytes(speech.progress.downloaded)} / ${megabytes(speech.progress.total)}`
+  if (speech.packError) return speech.packError
+  if (!speech.installed) return `Bật để tải giọng đọc tiếng Việt (${megabytes(speech.sizeBytes)}, chỉ tải một lần) · chạy ngay trên máy`
   if (speech.message) return speech.message
   if (!speech.enabled) return 'Đọc bản dịch tiếng Việt bằng giọng đọc chạy ngay trên máy'
   if (speech.state === 'loading') return 'Đang tải giọng đọc…'
@@ -23,9 +29,10 @@ function SpeechPanel({ model }: { model: AppModel }) {
     <div className="translator-speech-header">
       <label className="speech-master-toggle">
         <input type="checkbox" checked={speech.enabled} onChange={event => speech.setEnabled(event.target.checked)}/>
-        <span className="speech-toggle-icon">{speech.state === 'loading' ? <Loader2 size={19} className="speech-loading"/> : <Volume2 size={19}/>}</span>
+        <span className="speech-toggle-icon">{speech.state === 'loading' || speech.progress ? <Loader2 size={19} className="speech-loading"/> : <Volume2 size={19}/>}</span>
         <span className="speech-toggle-copy"><strong>Nghe bản dịch</strong><small>{speechNote(model)}</small></span>
       </label>
+      {speech.progress && !speech.progress.unpacking && <button className="pill-btn" onClick={speech.cancelDownload}>Hủy tải</button>}
       {speech.enabled && <label className="speed-select wide"><span>CHẾ ĐỘ ĐỌC</span><Choice icon={<Zap size={16}/>} label="Chế độ đọc" value={speech.mode} onChange={speech.setMode} options={modeOptions}/></label>}
       {speech.enabled && <label className="speed-select wide"><span>GIỌNG ĐỌC</span><Choice icon={<UserRound size={16}/>} label="Giọng đọc" value={speech.voice} onChange={speech.setVoice} options={voiceOptions}/></label>}
       {speech.enabled && <label className="speed-select"><span>TỐC ĐỘ ĐỌC</span><Choice icon={<Gauge size={16}/>} label="Tốc độ đọc" value={speech.rate} onChange={speech.setRate} options={speechRates.map(rate => ({ value: rate as number, label: `${rate}×` }))}/></label>}

@@ -76,6 +76,8 @@ jobs:
             --specpath worker-build \
             --paths "$GITHUB_WORKSPACE/asr" \
             --collect-data certifi \
+            --collect-submodules zerotts --collect-data zerotts \
+            --exclude-module scipy --exclude-module soundfile --exclude-module sounddevice --exclude-module huggingface_hub \
             --python-option "X utf8" \
             asr/server.py
           worker-dist/vietnote-worker/vietnote-worker --help >/dev/null
@@ -171,6 +173,8 @@ jobs:
             --specpath worker-build `
             --paths "$env:GITHUB_WORKSPACE\asr" `
             --collect-data certifi `
+            --collect-submodules zerotts --collect-data zerotts `
+            --exclude-module scipy --exclude-module soundfile --exclude-module sounddevice --exclude-module huggingface_hub `
             --python-option "X utf8" `
             asr/server.py
           .\worker-dist\vietnote-worker\vietnote-worker.exe --help | Out-Null

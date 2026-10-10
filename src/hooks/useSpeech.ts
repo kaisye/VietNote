@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react'
-import { desktop } from '../services/desktop'
+import { useEffect, useRef, useState } from 'react'
+import { desktop, type VoicePackProgress, type VoicePackStatus } from '../services/desktop'
 import { createPhraseReader } from '../services/speechChunks'
 import type { AudioChunk, WorkerMessage } from '../services/types'
 
@@ -39,8 +39,15 @@ const savedEnabled = () => { try { return localStorage.getItem('speakTranslation
 export function useSpeech(currentGeneration: () => number) {
   const [enabled, setEnabledState] = useState(savedEnabled)
   // Until the worker says otherwise there is no voice to offer.
-  const [available, setAvailable] = useState(false)
-  const availableRef = useRef(false)
+  const [runtime, setRuntime] = useState(false)
+  const runtimeRef = useRef(false)
+  // The voice itself is a separate download.
+  const [pack, setPack] = useState<VoicePackStatus | null>(null)
+  const packRef = useRef<VoicePackStatus | null>(null)
+  const [progress, setProgress] = useState<VoicePackProgress | null>(null)
+  const [packError, setPackError] = useState('')
+  const publishPack = (value: VoicePackStatus) => { packRef.current = value; setPack(value) }
+  const installed = () => Boolean(runtimeRef.current && packRef.current?.path)
   const [state, setState] = useState<SpeechState>('off')
   const [message, setMessage] = useState('')
   const [rate, setRateState] = useState(savedRate)
@@ -67,8 +74,51 @@ export function useSpeech(currentGeneration: () => number) {
     await desktop.playAudio(chunks, rateRef.current).catch(error => { setMessage(`Không phát được âm thanh: ${error}`); return 0 })
   }
 
-  const load = () => void desktop.sendWorker({ type: 'tts_enable', voice: voiceIds[voiceRef.current] }).catch(() => {})
+  const load = () => {
+    if (!installed()) return
+    void desktop.sendWorker({ type: 'tts_enable', voice: voiceIds[voiceRef.current], model_dir: packRef.current?.path }).catch(() => {})
+  }
+  useEffect(() => {
+    if (!desktop.isDesktop) return
+    void desktop.voicePackStatus().then(status => {
+      publishPack(status)
+      if (status.downloading) setProgress({ downloaded: status.partialBytes, total: status.sizeBytes, unpacking: false })
+      fetchInBackground()
+    }).catch(() => {})
+    const unlisten = desktop.onVoicePackDownload(setProgress)
+    return () => { void unlisten.then(stop => stop()) }
+  }, [])
+  const fetching = useRef(false)
+  // Set when someone turned reading on before the voice arrived: switch it on once it does.
+  const wanted = useRef(false)
+  const triedInBackground = useRef(false)
+  /** Fetches the voice. A background fetch stays silent; one asked for turns reading on after. */
+  const download = async (background = false) => {
+    if (!background) { wanted.current = true; setPackError('') }
+    if (fetching.current) return
+    fetching.current = true
+    setProgress({ downloaded: packRef.current?.partialBytes ?? 0, total: packRef.current?.sizeBytes ?? 0, unpacking: false })
+    try {
+      publishPack(await desktop.downloadVoicePack())
+      setProgress(null)
+      if (wanted.current) { wanted.current = false; setEnabled(true) }
+    } catch (error) {
+      setProgress(null)
+      // An interrupted download resumes next time; only someone waiting for it hears why.
+      if (wanted.current) setPackError(String(error))
+      void desktop.voicePackStatus().then(publishPack).catch(() => {})
+    } finally { fetching.current = false }
+  }
+  /** Fetched quietly once per launch, so the voice is ready by the time anyone turns reading on. */
+  const fetchInBackground = () => {
+    const status = packRef.current
+    if (triedInBackground.current || !runtimeRef.current || !status?.available || status.path || status.downloading) return
+    triedInBackground.current = true
+    void download(true)
+  }
+  const cancelDownload = () => { wanted.current = false; void desktop.cancelVoicePackDownload().catch(() => {}) }
   const setEnabled = (value: boolean) => {
+    if (value && !installed()) { if (runtimeRef.current && packRef.current?.available) void download(); return }
     enabledRef.current = value; setEnabledState(value)
     try { localStorage.setItem('speakTranslation', String(value)) } catch { /* private window */ }
     if (value) load()
@@ -81,8 +131,9 @@ export function useSpeech(currentGeneration: () => number) {
 
   /** A restarted worker forgets the voice; load it again if speech is on. */
   const onConnected = (canSpeak: boolean) => {
-    availableRef.current = canSpeak; setAvailable(canSpeak)
-    if (canSpeak && enabledRef.current) load()
+    runtimeRef.current = canSpeak; setRuntime(canSpeak)
+    if (enabledRef.current) load()
+    fetchInBackground()
   }
   /** Picking a voice also turns speech on: that is what the choice is for. */
   const setVoice = (value: SpeechVoice) => {
@@ -93,7 +144,7 @@ export function useSpeech(currentGeneration: () => number) {
   }
 
   const speak = (id: string, generation: number, text: string, speaker?: string) => {
-    if (!availableRef.current || !enabledRef.current || stateRef.current !== 'ready' || !text.trim()) return
+    if (!installed() || !enabledRef.current || stateRef.current !== 'ready' || !text.trim()) return
     void desktop.sendWorker({ type: 'synthesize', id, generation, text, speaker: speaker ?? null }).catch(() => {})
   }
   const setMode = (value: SpeechMode) => {
@@ -145,6 +196,8 @@ export function useSpeech(currentGeneration: () => number) {
     return false
   }
 
-  return { available, enabled: enabled && available, setEnabled, state, message, rate, setRate, voice, setVoice, mode, setMode, translation, speak, handle, clear, onConnected }
+  const ready = runtime && Boolean(pack?.path)
+  return { available: runtime && Boolean(pack?.available), installed: ready, sizeBytes: pack?.sizeBytes ?? 0, progress, packError, download, cancelDownload,
+    enabled: enabled && ready, setEnabled, state, message, rate, setRate, voice, setVoice, mode, setMode, translation, speak, handle, clear, onConnected }
 }
 export type Speech = ReturnType<typeof useSpeech>

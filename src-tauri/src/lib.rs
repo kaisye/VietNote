@@ -5,6 +5,7 @@ mod diarization_model;
 mod file_job;
 mod island;
 mod playback;
+mod voice_pack;
 mod writer;
 use base64::Engine;
 use clipclip::{start_with_tap, Config, Recording, Source};
@@ -247,6 +248,7 @@ fn start_worker(app: tauri::AppHandle, state: tauri::State<'_, NativeState>) -> 
         command.env("SONIOX_MANAGED", "1");
     }
     if let Some(model) = diarization_model::installed_model(&app, &root) { command.env("NEMOTRON_MODEL", model); }
+    if let Some(voice) = voice_pack::installed(&app, &root) { command.env("TTS_MODEL_DIR", voice); }
     if let Some(library) = diarization_model::runtime_library(&root) { command.env("NEMOTRON_LIBRARY", library); }
     let mut child = command.spawn().map_err(|e| e.to_string())?;
     let stdout = child.stdout.take().ok_or("Không đọc được ASR stdout")?;
@@ -395,6 +397,28 @@ fn remove_diarization_model(app: tauri::AppHandle) -> Result<diarization_model::
     diarization_model::remove(&app)?;
     reload_worker_when_idle(&app)?;
     diarization_model_status(app)
+}
+
+#[tauri::command]
+fn voice_pack_status(app: tauri::AppHandle) -> Result<voice_pack::VoicePackStatus, String> {
+    let root = project_root(&app)?;
+    voice_pack::status(&app, &root)
+}
+
+/// The worker is told where the voice is when speech is turned on, so no reload is needed.
+#[tauri::command]
+async fn download_voice_pack(app: tauri::AppHandle) -> Result<voice_pack::VoicePackStatus, String> {
+    voice_pack::download(&app).await?;
+    voice_pack_status(app)
+}
+
+#[tauri::command]
+fn cancel_voice_pack_download() { voice_pack::cancel(); }
+
+#[tauri::command]
+fn remove_voice_pack(app: tauri::AppHandle) -> Result<voice_pack::VoicePackStatus, String> {
+    voice_pack::remove(&app)?;
+    voice_pack_status(app)
 }
 
 #[tauri::command]
@@ -867,7 +891,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(island::shortcut_plugin())
         .manage(NativeState::default())
-        .invoke_handler(tauri::generate_handler![load_notes, save_notes, account::account_status, account::account_signed_in, account::account_send_code, account::account_offers, account::account_buy, account::account_order_status, account_verify, account_sign_out, start_worker, stop_worker, send_worker, start_capture, stop_capture, set_microphone, set_system_audio, note_chat::ask_note, summarize_segments, suggest_title, translate_text, open_permission, open_link, save_export, reveal_file, print_page, #[cfg(target_os = "macos")] save_pdf, file_job::pick_audio_file, file_job::file_job_start, file_job::file_job_upload, file_job::file_job_status, file_job::file_job_cleanup, file_job::file_job_cancel, writer::write_document, diarization_model_status, download_diarization_model, cancel_diarization_download, remove_diarization_model, island::island_screens, island::island_set_frame, island::island_set_visible, island::island_focus, island::island_open_main, island::island_cursor, island::island_ignore_cursor, playback::play_audio, playback::stop_audio])
+        .invoke_handler(tauri::generate_handler![load_notes, save_notes, account::account_status, account::account_signed_in, account::account_send_code, account::account_offers, account::account_buy, account::account_order_status, account_verify, account_sign_out, start_worker, stop_worker, send_worker, start_capture, stop_capture, set_microphone, set_system_audio, note_chat::ask_note, summarize_segments, suggest_title, translate_text, open_permission, open_link, save_export, reveal_file, print_page, #[cfg(target_os = "macos")] save_pdf, file_job::pick_audio_file, file_job::file_job_start, file_job::file_job_upload, file_job::file_job_status, file_job::file_job_cleanup, file_job::file_job_cancel, writer::write_document, diarization_model_status, download_diarization_model, cancel_diarization_download, remove_diarization_model, island::island_screens, island::island_set_frame, island::island_set_visible, island::island_focus, island::island_open_main, island::island_cursor, island::island_ignore_cursor, playback::play_audio, playback::stop_audio, voice_pack_status, download_voice_pack, cancel_voice_pack_download, remove_voice_pack])
         .on_window_event(|window, event| {
             // Closing the main window quits VietNote; the island goes with it.
             if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {

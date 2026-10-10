@@ -21,6 +21,9 @@ export interface CreditOffer { id: string; name: string; hours: number; bonus_ho
 export interface OrderStatus { status: 'pending' | 'paid' | 'cancelled'; balance_seconds: number | null }
 export interface DiarizationModelStatus { installed: boolean; runtimeAvailable: boolean; downloading: boolean; partialBytes: number; sizeBytes: number; removable: boolean }
 export interface DownloadProgress { downloaded: number; total: number }
+/** `path` is set once the read-aloud voice is installed; `available` when this build can get it. */
+export interface VoicePackStatus { path: string | null; available: boolean; downloading: boolean; partialBytes: number; sizeBytes: number; removable: boolean }
+export interface VoicePackProgress extends DownloadProgress { unpacking: boolean }
 const isDesktop = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 let saveQueue: Promise<void> = Promise.resolve()
 
@@ -67,6 +70,11 @@ export const desktop = {
   downloadDiarizationModel: () => invoke<DiarizationModelStatus>('download_diarization_model'),
   cancelDiarizationDownload: () => invoke<void>('cancel_diarization_download'),
   removeDiarizationModel: () => invoke<DiarizationModelStatus>('remove_diarization_model'),
+  voicePackStatus: () => invoke<VoicePackStatus>('voice_pack_status'),
+  downloadVoicePack: () => invoke<VoicePackStatus>('download_voice_pack'),
+  cancelVoicePackDownload: () => invoke<void>('cancel_voice_pack_download'),
+  removeVoicePack: () => invoke<VoicePackStatus>('remove_voice_pack'),
+  onVoicePackDownload: (callback: (progress: VoicePackProgress) => void): Promise<UnlistenFn> => listen<VoicePackProgress>('voice-pack-download', e => callback(e.payload)),
   pickAudioFile: () => invoke<AudioFile | null>('pick_audio_file'),
   fileJobStart: (filename: string, estimatedSeconds: number | null) => invoke<{ job_id: string; reserved_seconds: number; balance_seconds: number }>('file_job_start', { filename, estimatedSeconds }),
   fileJobUpload: (jobId: string, path: string, language: Language, translate: boolean, onProgress: (percent: number) => void) => {

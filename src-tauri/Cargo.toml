@@ -1,6 +1,6 @@
 [package]
 name = "vietnote"
-version = "0.8.10"
+version = "0.8.11"
 description = "VietNote desktop shell"
 authors = ["VietNote"]
 edition = "2021"
@@ -24,6 +24,8 @@ symphonia = { version = "0.5", features = ["mp3", "aac", "isomp4", "alac"] }
 clipclip = { version = "0.2.5", default-features = false }
 # Plays spoken translations from this process, so the system-audio tap excludes them.
 cpal = "0.18"
+# Unpacks the downloaded voice pack.
+zip = { version = "4", default-features = false, features = ["deflate"] }
 base64 = "0.22"
 sha2 = "0.10"
 keyring = { version = "3.6.3", default-features = false, features = ["apple-native", "windows-native"] }

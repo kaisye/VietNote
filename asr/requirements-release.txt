@@ -3,3 +3,6 @@ openai>=2,<3
 websocket-client>=1.8,<2
 pyinstaller>=6.12,<7
 certifi>=2024
+# Read-aloud voice. Only its ONNX runtime path ships: the build excludes the file
+# and download helpers it pulls in (scipy, soundfile, sounddevice, huggingface_hub).
+zerotts==0.1.5
