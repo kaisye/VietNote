@@ -67,8 +67,14 @@ export interface WorkerMessage {
   raw_text?: string; started_at?: number; vi_model_ready?: boolean; tts_voice?: string;
   asr_backend?: string; asr_model?: string; id?: string; pcm?: string; sample_rate?: number; voice?: string;
   final?: boolean; live?: boolean; live_audio?: boolean; provider?: string; model?: string; language?: SpokenLanguage; pcm_format?: 'f32le' | 's16le';
-  ready?: boolean; ended_at?: number; speaker?: string | null; speaker_provisional?: boolean
+  ready?: boolean; ended_at?: number; speaker?: string | null; speaker_provisional?: boolean; state?: string
+  /** live_translation: the finalized prefix of `text`, which will not change. */
+  stable?: string
+  /** connected: whether this install can read translations aloud. */
+  tts_available?: boolean
 }
-// showSource is false for foreign speech being translated: only its live translation is shown.
-export interface InterimTranscript { id: string; text: string; source: string; startedAt: number; speaker?: string | null; showSource: boolean }
+/** Speech PCM for native playback: base64 little-endian Float32 ('f32') or Int16 ('s16'). */
+export interface AudioChunk { pcm: string; format: 'f32' | 's16'; sampleRate: number }
+/** Speech still being recognized; foreign speech shows its source text while the live translation catches up. */
+export interface InterimTranscript { id: string; text: string; source: string; startedAt: number; speaker?: string | null }
 

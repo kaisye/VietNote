@@ -1,0 +1,118 @@
+/* VietNote Island: the floating pill window. Everything outside the shape is transparent. */
+.settings-card .translation-mode-note { margin:0; }
+
+html.island-host, html.island-host body, html.island-host #root { background:transparent; overflow:hidden; }
+html.island-host body { font-size:13px; user-select:none; -webkit-user-select:none; }
+.island-root { position:fixed; inset:0; --island-bg:rgba(16,14,30,.95); --island-ink:#f6f6ff; --island-muted:#aca8e5; --island-lilac:#d4cefa; --island-line:rgba(173,168,255,.16); }
+.island-root.at-notch { --island-bg:#000; }
+
+.island-shape { position:absolute; overflow:hidden; color:var(--island-ink); background:var(--island-bg); border:1px solid rgba(173,168,255,.2); border-radius:19px; cursor:pointer; }
+.island-shape.animate { transition:left .24s cubic-bezier(.3,.9,.3,1), top .24s cubic-bezier(.3,.9,.3,1), width .24s cubic-bezier(.3,.9,.3,1), height .24s cubic-bezier(.3,.9,.3,1), border-radius .24s ease; }
+.island-shape.open { border-radius:22px; cursor:default; }
+.island-shape.dragging { cursor:grabbing; box-shadow:0 0 0 2px rgba(173,168,255,.5); }
+/* At the notch the island is part of the black camera housing: square top, round bottom. */
+.at-notch .island-shape { border:0; border-radius:0 0 14px 14px; }
+.at-notch .island-shape.open { border-radius:0 0 26px 26px; }
+
+.island-handle { position:absolute; inset:0; display:flex; align-items:center; gap:8px; padding:0 12px 0 9px; }
+.at-notch .island-handle { justify-content:space-between; padding:0 16px; }
+.island-logo { display:grid; place-items:center; flex:none; border-radius:5px; overflow:hidden; }
+.island-handle-label { flex:1; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:12px; font-weight:600; color:var(--island-muted); direction:ltr; }
+.island-led { width:7px; height:7px; flex:none; border-radius:50%; background:#6c6890; }
+.island-led.paused { background:#f2b84b; }
+.island-root .island-wave { height:14px; }
+
+/* Content fades in once the shape has finished growing. */
+.island-peek, .island-panel { position:absolute; inset:0; animation:island-content .2s ease .1s both; }
+@keyframes island-content { from { opacity:0; } to { opacity:1; } }
+.at-notch .island-peek, .at-notch .island-panel { top:var(--notch-height); }
+
+.island-peek { display:flex; flex-direction:column; justify-content:flex-end; gap:8px; padding:12px 18px 14px; }
+.island-line p { font-size:14px; line-height:1.42; }
+.island-peek .island-line p { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.island-line .island-translation { margin-top:2px; font-size:13px; color:var(--island-lilac); opacity:.86; }
+.island-line.interim p { opacity:.66; }
+.island-hint { color:var(--island-muted); font-size:12.5px; }
+
+.island-panel { display:flex; flex-direction:column; padding:10px 12px 12px; gap:8px; }
+.island-header { position:relative; z-index:6; display:flex; align-items:center; gap:9px; padding:0 2px 0 4px; min-height:30px; cursor:grab; }
+.dragging .island-header { cursor:grabbing; }
+.island-header svg:first-child { border-radius:5px; flex:none; }
+.island-title { display:flex; flex-direction:column; line-height:1.15; }
+.island-title strong { font-size:13px; }
+.island-title small { display:flex; align-items:center; gap:6px; color:var(--island-muted); font-size:11px; }
+.island-title .island-wave { height:10px; }
+.island-icon { display:grid; place-items:center; width:28px; height:28px; flex:none; padding:0; border:0; border-radius:8px; color:var(--island-muted); background:transparent; }
+.island-icon:hover { color:var(--island-ink); background:rgba(173,168,255,.16); }
+.island-icon.on { color:var(--island-ink); background:rgba(173,168,255,.22); }
+
+.island-lines { flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:4px; padding:2px; scrollbar-width:thin; user-select:text; -webkit-user-select:text; }
+.island-lines .island-line { padding:6px 9px; border-radius:10px; border:1px solid transparent; cursor:pointer; }
+.island-lines .island-line:hover { background:rgba(173,168,255,.08); }
+.island-lines .island-line.selected { background:rgba(98,83,212,.32); border-color:rgba(173,168,255,.5); }
+.island-lines .island-line.interim { cursor:default; }
+.island-latest { position:absolute; left:50%; transform:translateX(-50%); bottom:64px; z-index:1; }
+
+.island-idle { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; text-align:center; padding:0 26px; color:var(--island-muted); }
+.island-idle p { color:var(--island-ink); font-size:14px; }
+.island-idle-actions { display:flex; gap:8px; }
+
+.island-button { display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 12px; border-radius:100px; border:1px solid rgba(173,168,255,.26); color:var(--island-ink); background:rgba(173,168,255,.12); font-size:12px; font-weight:650; white-space:nowrap; }
+.island-button:not(:disabled):hover { background:rgba(173,168,255,.24); }
+.island-button.primary { color:#17142a; background:#f6f6ff; border-color:transparent; }
+.island-button.primary:not(:disabled):hover { background:#fff; }
+
+.island-answer { max-height:42%; flex:none; display:flex; flex-direction:column; padding:4px 4px 4px 11px; border-radius:12px; background:rgba(173,168,255,.09); border:1px solid var(--island-line); }
+.island-answer-head { display:flex; align-items:center; gap:4px; min-height:28px; cursor:pointer; }
+.island-answer-head .island-question { flex:1; min-width:0; margin:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.island-answer-head .island-icon { width:24px; height:24px; }
+.island-answer-head .island-wave { height:10px; }
+.island-answer-body { min-height:0; overflow-y:auto; padding:2px 7px 6px 0; user-select:text; -webkit-user-select:text; }
+.island-answer .chat-markdown { font-size:13px; line-height:1.55; color:var(--island-ink); }
+.island-question { font-size:12px; font-weight:700; color:var(--island-lilac); }
+.island-error { display:flex; align-items:center; gap:7px; color:#ff9fcb; font-size:12.5px; }
+
+.island-quote { display:flex; align-items:center; gap:6px; padding:5px 6px 5px 11px; border-radius:10px; border-left:3px solid #ada8ff; background:rgba(173,168,255,.1); font-size:12px; color:var(--island-lilac); }
+.island-quote span { flex:1; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.island-quote .island-icon { width:22px; height:22px; }
+.island-actions { display:flex; flex-wrap:wrap; gap:6px; }
+
+.island-composer { display:flex; align-items:center; gap:6px; flex:none; padding:4px 4px 4px 13px; border-radius:100px; background:rgba(255,255,255,.07); border:1px solid rgba(173,168,255,.22); }
+.island-composer:focus-within { border-color:rgba(173,168,255,.55); }
+.island-composer input { flex:1; min-width:0; height:30px; border:0; outline:0; color:var(--island-ink); background:transparent; font-size:13px; }
+.island-composer input::placeholder { color:rgba(172,168,229,.75); }
+.island-send { display:grid; place-items:center; width:30px; height:30px; flex:none; border:0; border-radius:50%; color:#17142a; background:#f6f6ff; }
+
+/* Subtitle mode: a caption band; only the box itself takes the mouse. */
+.subtitle-root { position:fixed; inset:0; display:flex; align-items:flex-end; justify-content:center; --island-ink:#f6f6ff; --island-muted:#aca8e5; }
+.subtitle-box { position:relative; width:100%; padding:10px 128px 12px 22px; border-radius:16px; text-align:left; color:#fff; background:rgba(8,7,18,.7); -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px); cursor:grab; transition:background .2s ease, box-shadow .2s ease; }
+.subtitle-box:active { cursor:grabbing; }
+.subtitle-box.hover { background:rgba(8,7,18,.84); box-shadow:0 0 0 1px rgba(173,168,255,.32); }
+/* Two lines at most; a long sentence keeps its newest words in view. */
+.subtitle-clip { overflow:hidden; line-height:1.36; }
+.subtitle-clip.source { font-size:20px; height:calc(2 * 1.36em); }
+.subtitle-clip.translation { font-size:17px; height:calc(2 * 1.36em); margin-top:3px; }
+.subtitle-source { font-weight:600; text-shadow:0 1px 2px rgba(0,0,0,.5); }
+.subtitle-translation { color:#d4cefa; transition:opacity .25s ease; }
+.subtitle-translation.lagging { opacity:.55; }
+.subtitle-hint { color:#aca8e5; font-size:14px; }
+.subtitle-controls { position:absolute; top:5px; right:6px; display:flex; gap:2px; opacity:0; transition:opacity .15s ease; }
+.subtitle-box.hover .subtitle-controls { opacity:1; }
+
+/* Language and audio-source menus: above the button in subtitles, below it in the island. */
+.hover-menu { position:relative; display:inline-flex; }
+.menu-options { position:absolute; right:-4px; bottom:calc(100% + 8px); z-index:5; display:flex; gap:2px; padding:3px; border-radius:11px; background:#14122a; border:1px solid rgba(173,168,255,.28); box-shadow:0 8px 20px rgba(0,0,0,.45); }
+.menu-options.below { bottom:auto; top:calc(100% + 6px); }
+.menu-options button { height:26px; padding:0 10px; border:0; border-radius:8px; color:var(--island-muted); background:transparent; font-size:12px; font-weight:650; white-space:nowrap; }
+.menu-options button:not(:disabled):hover { color:var(--island-ink); background:rgba(173,168,255,.16); }
+.menu-options button.selected { color:#17142a; background:#f6f6ff; }
+.subtitle-source.awaiting, .island-line p.island-awaiting { opacity:.5; }
+.subtitle-source.lagging { opacity:.6; }
+
+.island-root .speech-loading, .subtitle-root .speech-loading { animation:island-spin 1s linear infinite; }
+@keyframes island-spin { to { transform:rotate(360deg); } }
+
+@media (prefers-reduced-motion:reduce) {
+  .island-shape.animate { transition-duration:.01s; }
+  .island-peek, .island-panel { animation:none; }
+}

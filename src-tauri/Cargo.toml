@@ -1,6 +1,6 @@
 [package]
 name = "vietnote"
-version = "0.8.8"
+version = "0.8.9"
 description = "VietNote desktop shell"
 authors = ["VietNote"]
 edition = "2021"
@@ -13,7 +13,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["macos-private-api"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
@@ -22,18 +22,21 @@ futures-util = { version = "0.3", default-features = false, features = ["alloc"]
 # Reads a recording's length before upload, to quote its price.
 symphonia = { version = "0.5", features = ["mp3", "aac", "isomp4", "alac"] }
 clipclip = { version = "0.2.5", default-features = false }
+# Plays spoken translations from this process, so the system-audio tap excludes them.
+cpal = "0.18"
 base64 = "0.22"
 sha2 = "0.10"
 keyring = { version = "3.6.3", default-features = false, features = ["apple-native", "windows-native"] }
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 tauri-plugin-dialog = "2"
+tauri-plugin-global-shortcut = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSURL", "NSDictionary", "NSObject"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPrintInfo", "NSPrintOperation", "NSResponder", "NSView", "NSWindow"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSURL", "NSDictionary", "NSObject", "NSGeometry"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPrintInfo", "NSPrintOperation", "NSResponder", "NSView", "NSWindow", "NSPanel", "NSScreen"] }
 objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "objc2-app-kit", "WKWebView"] }
 
 [patch.crates-io]

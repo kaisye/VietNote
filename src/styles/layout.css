@@ -188,18 +188,21 @@
 .select-row { gap:20px; }
 .translator-speech-panel { margin-top:16px; padding:14px; border:1px solid var(--border); border-radius:16px; background:rgba(126,129,181,.06); transition:background .18s ease, border-color .18s ease, box-shadow .18s ease; }
 .translator-speech-panel.enabled { background:rgba(173,168,255,.11); border-color:rgba(77,94,190,.34); box-shadow:0 8px 22px rgba(19,26,46,.07); }
-.translator-speech-header { display:flex; align-items:flex-end; justify-content:space-between; gap:18px; }
+.translator-speech-header { display:flex; flex-wrap:wrap; align-items:flex-end; gap:12px 14px; }
+.translator-speech-header .speech-master-toggle { flex:1 1 260px; }
 .speech-master-toggle { min-width:0; display:flex; align-items:center; gap:11px; cursor:pointer; }
 .speech-master-toggle input { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
 .speech-toggle-icon { width:42px; height:42px; flex:none; display:grid; place-items:center; color:var(--muted); background:var(--glass-strong); border:1px solid var(--border); border-radius:13px; transition:color .18s ease, background .18s ease, border-color .18s ease, transform .18s ease; }
 .speech-master-toggle:hover .speech-toggle-icon { transform:translateY(-1px); }
 .speech-master-toggle input:checked + .speech-toggle-icon { color:var(--bar-selected-text); background:var(--bar-selected); border-color:var(--accent); }
 .speech-master-toggle input:focus-visible + .speech-toggle-icon { outline:2px solid var(--accent); outline-offset:2px; }
+.speech-loading { animation:orbit-spin 1s linear infinite; }
 .speech-toggle-copy { min-width:0; display:flex; flex-direction:column; gap:3px; }
 .speech-toggle-copy strong { font-size:15px; }
 .speech-toggle-copy small { color:var(--muted); }
 .speed-select { min-width:0; display:flex; flex-direction:column; gap:6px; }
 .speed-select { width:138px; flex:none; }
+.speed-select.wide { width:178px; }
 .speed-select>span { font-size:10px; font-weight:800; letter-spacing:1px; color:var(--muted); }
 .speed-select .meeting-choice { height:40px; }
 .translator-voice-options { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:13px; padding-top:13px; border-top:1px solid var(--border); }

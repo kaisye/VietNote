@@ -1,7 +1,7 @@
 import { invoke, Channel } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { FileToken } from './fileTranscript'
-import type { AudioInput, DocumentKind, DocumentLength, Language, SpokenLanguage, MeetingNote, NoteGroup, StructuredMeetingSummary, TranscriptSegment, WorkerMessage } from './types'
+import type { AudioChunk, AudioInput, DocumentKind, DocumentLength, Language, SpokenLanguage, MeetingNote, NoteGroup, StructuredMeetingSummary, TranscriptSegment, WorkerMessage } from './types'
 
 export interface NoteChatRequest {
   title: string; summary: string; transcript: string; segments: TranscriptSegment[];
@@ -44,6 +44,9 @@ export const desktop = {
   sendWorker: (payload: Record<string, unknown>) => invoke<void>('send_worker', { payload }),
   startCapture: (source: AudioInput) => invoke<void>('start_capture', { source }),
   stopCapture: () => invoke<void>('stop_capture'),
+  /** Returns the seconds of speech still queued. */
+  playAudio: (chunks: AudioChunk[], rate: number) => invoke<number>('play_audio', { chunks, rate }),
+  stopAudio: () => invoke<void>('stop_audio'),
   setMicrophone: (enabled: boolean) => invoke<void>('set_microphone', { enabled }),
   setSystemAudio: (enabled: boolean) => invoke<void>('set_system_audio', { enabled }),
   summarizeSegments: (segments: TranscriptSegment[], previousSummary?: StructuredMeetingSummary) =>

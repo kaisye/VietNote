@@ -7,6 +7,7 @@ import { useLiveChat } from './useLiveChat'
 import { requestSignIn } from '../services/credits'
 import { useFileJob } from './useFileJob'
 import { useNoteDocuments } from './useNoteDocuments'
+import { useSpeech } from './useSpeech'
 
 const now = () => new Date().toISOString()
 const countWords = (text: string) => text.trim().split(/\s+/).filter(Boolean).length
@@ -69,9 +70,12 @@ export function useAppModel() {
   const capturingRef = useRef(false)
   const asrKeyStatusRef = useRef<'checking' | 'available' | 'missing'>('checking')
   const generationRef = useRef(0)
+  const speech = useSpeech(() => generationRef.current)
   const languageRef = useRef<Language>(sourceLanguage)
   // Spoken language per utterance id; in auto mode Vietnamese turns get no live translation.
   const spokenLanguageRef = useRef(new Map<string, SpokenLanguage>())
+  // Speaker per utterance id, so its translation is read in that speaker's voice.
+  const speakerRef = useRef(new Map<string, string>())
   const audioRef = useRef<AudioInput>('both')
   // The microphone and system audio can each be switched off and on while a recording runs.
   const [microphoneOn, setMicrophoneOn] = useState(false)
@@ -124,8 +128,8 @@ export function useAppModel() {
     let disposed = false
     const unlisten: Array<() => void> = []
     void desktop.loadNotes().then(data => { if (!disposed) persist([demoNote, ...data.notes.filter(n => !n.isDemo)], data.groups) }).catch(error => setStatus(`Không đọc được ghi chú: ${error}`))
-    void desktop.onWorker(message => { if (!disposed) handleWorkerRef.current(message) }).then(fn => unlisten.push(fn))
-    void desktop.onStatus(value => { if (!disposed) { setStatus(/loading/i.test(value) ? 'Đang khởi động…' : /closed|exited/i.test(value) ? 'Đã dừng' : /failed|missing/i.test(value) ? 'Không thể khởi động' : value); if (/loading|exited|closed|failed|missing/i.test(value)) { setReady(false); if (/exited|closed|failed|missing/i.test(value)) { setStartRequested(false); setBusy(false) } } } }).then(fn => unlisten.push(fn))
+    const workerEvents = desktop.onWorker(message => { if (!disposed) handleWorkerRef.current(message) }).then(fn => { unlisten.push(fn) })
+    const statusEvents = desktop.onStatus(value => { if (!disposed) { setStatus(/loading/i.test(value) ? 'Đang khởi động…' : /closed|exited/i.test(value) ? 'Đã dừng' : /failed|missing/i.test(value) ? 'Không thể khởi động' : value); if (/loading|exited|closed|failed|missing/i.test(value)) { setReady(false); if (/exited|closed|failed|missing/i.test(value)) { setStartRequested(false); setBusy(false) } } } }).then(fn => { unlisten.push(fn) })
     void desktop.accountSignedIn().then(available => {
       if (disposed) return
       asrKeyStatusRef.current = available ? 'available' : 'missing'
@@ -136,7 +140,9 @@ export function useAppModel() {
       asrKeyStatusRef.current = 'missing'; setAsrKeyAvailable(false)
       setStatus('Đang chuẩn bị nhận diện…')
     })
-    void desktop.startWorker().catch(() => setStatus('Không khởi động được dịch vụ nhận diện'))
+    // The worker can be ready within milliseconds, so start it only once its messages are heard;
+    // a worker that is already running repeats its "connected" message to the new listener.
+    void Promise.all([workerEvents, statusEvents]).then(() => desktop.startWorker()).catch(() => setStatus('Không khởi động được dịch vụ nhận diện'))
     return () => { disposed = true; unlisten.forEach(fn => fn()) }
   }, [persist])
 
@@ -146,7 +152,7 @@ export function useAppModel() {
     translationIdleTimerRef.current = null; translationMaxTimerRef.current = null
   }
   const resetTranslations = () => {
-    clearTranslationTimers(); publishTranslationBlocks([]); liveTranslationRef.current = false; spokenLanguageRef.current.clear()
+    clearTranslationTimers(); publishTranslationBlocks([]); liveTranslationRef.current = false; spokenLanguageRef.current.clear(); speakerRef.current.clear()
     translationCursorRef.current = 0; translationContextRef.current = ''; translationQueueRef.current = Promise.resolve()
   }
   const setSourceLanguage = (value: Language) => {
@@ -159,7 +165,7 @@ export function useAppModel() {
     translateForeignRef.current = value; setTranslateForeignState(value); localStorage.setItem('translateForeign', String(value))
     // Toggling never back-fills: only speech after the switch is (not) translated.
     clearTranslationTimers(); translationCursorRef.current = entriesRef.current.length
-    if (!value) publishTranslationBlocks(translationBlocksRef.current.filter(block => !block.pending))
+    if (!value) { publishTranslationBlocks(translationBlocksRef.current.filter(block => !block.pending)); speech.clear() }
     if (meetingRef.current) setTranslationStatus(value ? 'Đã bật dịch sang tiếng Việt' : 'Đã tắt dịch tiếng nước ngoài')
   }
   const setAudioInput = (value: AudioInput) => { audioRef.current = value; setAudioInputState(value); publishEntries([]); setInterimTranscripts([]); resetTranslations() }
@@ -226,6 +232,9 @@ export function useAppModel() {
         translationContextRef.current = block.sourceText
         publishTranslationBlocks(translationBlocksRef.current.map(item => item.id === block.id ? { ...item, translatedText, pending: false } : item))
         setTranslationStatus(live ? 'Dịch trực tiếp · chuẩn hóa theo đoạn' : `${language === 'en' ? 'Anh' : 'Trung'} → Việt theo đoạn`)
+        // Without live translation, the paragraph is the first Vietnamese there is to read aloud.
+        const last = paragraphEntries.at(-1)
+        if (!live && capturingRef.current && last?.generation === generationRef.current) speech.speak(block.id, last.generation, translatedText, last.speaker ?? undefined)
         if (meetingRef.current) await summarize(overallSummaryCursor.current === 0)
       } catch (error) {
         publishTranslationBlocks(translationBlocksRef.current.map(item => item.id === block.id ? { ...item, translatedText: 'Chưa dịch được đoạn này.', pending: false, failed: true } : item))
@@ -245,6 +254,7 @@ export function useAppModel() {
   }
 
   const handleWorker = (message: WorkerMessage) => {
+    if (speech.handle(message)) return
     switch (message.type) {
       case 'diarization_status':
         setDiarizationReady(message.ready ?? false)
@@ -262,6 +272,7 @@ export function useAppModel() {
         setReady(true)
         setStatus('Sẵn sàng sử dụng')
         setVietnameseASRStatus('Nhận diện sẵn sàng')
+        speech.onConnected(Boolean(message.tts_available))
         break
       case 'transcript': {
         // While a meeting is stopping the worker still flushes the running live turn.
@@ -271,6 +282,7 @@ export function useAppModel() {
         if (meetingRef.current && countWords(text) >= 8 && entriesRef.current.slice(-20).some(entry => entry.sourceText.toLocaleLowerCase() === text.toLocaleLowerCase() && Date.now() - new Date(entry.timestamp).getTime() < 90000)) break
         const language = spokenLanguage(message)
         spokenLanguageRef.current.set(message.id ?? '', language)
+        if (message.id && message.speaker) speakerRef.current.set(message.id, message.speaker)
         const needsTranslation = language !== 'vi' && translating()
         const startedAt = message.started_at ?? Date.now() / 1000
         const entry: Subtitle = { id: message.id ?? crypto.randomUUID(), timestamp: new Date(startedAt * 1000).toISOString(), sourceText: text, rawText: message.raw_text ?? text, audioSource: message.source ?? 'system', translatedText: '', startedAt, generation: generationRef.current, endedAt: message.ended_at, speaker: message.speaker, speakerProvisional: message.speaker_provisional, language }
@@ -289,7 +301,8 @@ export function useAppModel() {
         const source = message.source ?? 'system'
         const language = spokenLanguage(message)
         if (message.id) spokenLanguageRef.current.set(message.id, language)
-        const interim = { id: message.id ?? `${message.generation}:${source}`, text: message.text, source, startedAt: message.started_at ?? Date.now() / 1000, speaker: message.speaker, showSource: language === 'vi' || !translating() }
+        if (message.id && message.speaker) speakerRef.current.set(message.id, message.speaker)
+        const interim = { id: message.id ?? `${message.generation}:${source}`, text: message.text, source, startedAt: message.started_at ?? Date.now() / 1000, speaker: message.speaker }
         setInterimTranscripts(current => [...current.filter(item => item.source !== source), interim])
         break
       }
@@ -314,6 +327,7 @@ export function useAppModel() {
         const startedAt = message.started_at ?? Date.now() / 1000
         const block: TranslationBlock = { id: message.id, entryIds: [message.id], sourceText: '', translatedText: message.text, createdAt: new Date(startedAt * 1000).toISOString(), pending: !message.final, kind: 'live' }
         publishTranslationBlocks([...translationBlocksRef.current.filter(value => value.id !== message.id), block])
+        if (capturingRef.current) speech.translation(message.id, message.generation, message.stable ?? '', message.text, Boolean(message.final), speakerRef.current.get(message.id))
         break
       }
       case 'warning': case 'error': audioIssueRef.current = true; setStatus(audioIssueText(message.message)); break
@@ -359,6 +373,12 @@ export function useAppModel() {
     } catch (error) { setStatus(`Không đổi được ${name}: ${error}`) }
     finally { sourceBusy.current = false }
   }
+  /** Switches a running recording to `target`, one source at a time (each switch is exclusive). */
+  const setSources = async (target: AudioInput) => {
+    const wantMicrophone = target !== 'system', wantSystem = target !== 'microphone'
+    if (wantSystem !== systemAudioRef.current) await toggleSource('system')
+    if (wantMicrophone !== microphoneRef.current) await toggleSource('microphone')
+  }
   const startMeeting = async () => {
     // Recognition, translation and summaries all run on the account's credit.
     if (desktop.isDesktop && !await desktop.accountSignedIn().catch(() => false)) {
@@ -396,6 +416,7 @@ export function useAppModel() {
     microphoneRef.current = false; setMicrophoneOn(false)
     systemAudioRef.current = false; setSystemAudioOn(false)
     setInterimTranscripts([])
+    speech.clear()
     try {
       await desktop.stopCapture()
       // Wait for the native stream tail and speaker updates before saving notes.
@@ -524,11 +545,11 @@ export function useAppModel() {
   }, [refreshAccount])
   const fileJob = useFileJob(addNote, () => void refreshAccount())
 
-  return { account, refreshAccount, status, startError, ready, diarizationReady, diarizationStatus, busy, capturing, meetingActive, sourceLanguage, setSourceLanguage, translateForeign, setTranslateForeign, audioInput, setAudioInput, microphoneOn, toggleMicrophone: () => void toggleSource('microphone'), systemAudioOn, toggleSystemAudio: () => void toggleSource('system'),
+  return { account, refreshAccount, status, startError, ready, diarizationReady, diarizationStatus, busy, capturing, meetingActive, sourceLanguage, setSourceLanguage, translateForeign, setTranslateForeign, audioInput, setAudioInput, microphoneOn, toggleMicrophone: () => void toggleSource('microphone'), systemAudioOn, toggleSystemAudio: () => void toggleSource('system'), setSources,
     entries, interimTranscripts, translationBlocks, overallSummary, suggestedTitle, titlePending, suggestTitleNow: () => void suggestTitleNow(), summaryStatus, summaryCadence, setSummaryCadence: setCadence,
     cadenceValue, setCadenceValue: setCadenceAmount, notes, noteGroups, savingNoteID, savingNoteGroupID, vietnameseASRStatus, translationStatus,
     canStartMeeting: ready || asrKeyAvailable, canSummarizeNow: meetingActive && !summaryBusy.current && (entries.length > overallSummaryCursor.current || (translating() && entries.length > translationCursorRef.current)),
-    noteChat, noteDocuments, liveChat, start, startMeeting, stop, summarizeNow: () => void summarizeNow(), newNote, addNote, updateNote, deleteNote, fileJob, createGroup, renameGroup, deleteGroup, meetingStartedAt: meetingStartedAt.current }
+    noteChat, noteDocuments, liveChat, speech, start, startMeeting, stop, summarizeNow: () => void summarizeNow(), newNote, addNote, updateNote, deleteNote, fileJob, createGroup, renameGroup, deleteGroup, meetingStartedAt: meetingStartedAt.current }
 }
 
 export type AppModel = ReturnType<typeof useAppModel>

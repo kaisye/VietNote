@@ -27,6 +27,8 @@ from audio_buffer import (AudioBuffer, deduplicate, is_repetitive,
 from protocol import encode, decode, MAX_LINE
 from echo_gate import EchoGate
 from echo_text import TranscriptEcho
+from speech import Speaker
+from voice_pitch import SpeakerPitch
 
 ROOT = Path(__file__).resolve().parents[1]
 os.environ.setdefault('HF_HOME', str(ROOT / '.cache' / 'huggingface'))
@@ -40,6 +42,7 @@ GROQ_ASR_MODEL = 'whisper-large-v3'
 # monologues) would otherwise become one endless interim spanning every speaker.
 LIVE_SEGMENT_WORDS = 25
 LIVE_SEGMENT_SECONDS = 10.0
+PITCH_HISTORY_SECONDS = 20
 
 def log(message):
     print(message, flush=True)
@@ -177,6 +180,18 @@ class SpeakerLabels:
     def __init__(self):
         self.lock = threading.Lock()
         self.labels = {}
+        # Voice pitch per label, so translations can be read in a matching voice.
+        self.pitch = SpeakerPitch()
+
+    def name(self, source, speaker):
+        key = (source, str(speaker))
+        with self.lock:
+            if key not in self.labels:
+                self.labels[key] = f'Người nói {len(self.labels) + 1}'
+            return self.labels[key]
+
+    def gender(self, label):
+        return self.pitch.gender(label) if label else (None, False)
 
     def label(self, source, tokens):
         counts = {}
@@ -186,11 +201,7 @@ class SpeakerLabels:
                 counts[speaker] = counts.get(speaker, 0) + len(token.get('text') or '')
         if not counts:
             return None
-        key = (source, max(counts, key=counts.get))
-        with self.lock:
-            if key not in self.labels:
-                self.labels[key] = f'Người nói {len(self.labels) + 1}'
-            return self.labels[key]
+        return self.name(source, max(counts, key=counts.get))
 
 
 class ProviderDiarization:
@@ -289,6 +300,9 @@ class SonioxStream:
         self.echoed = {}           # microphone utterance id -> spoken language, dropped as echo
         self.translate = language in ('en', 'zh', 'auto')
         self.audio = queue.Queue(maxsize=500)
+        # PCM sent on this connection, newest PITCH_HISTORY_SECONDS, to measure speakers' pitch.
+        self.history = bytearray()
+        self.history_ms = 0.0
         self.closed = threading.Event()
         self.flush_requested = threading.Event()
         self.flushed = threading.Event()
@@ -334,6 +348,31 @@ class SonioxStream:
         if self.translate:
             config['translation'] = {'type': 'one_way', 'target_language': 'vi'}
         return config
+
+    def remember(self, pcm):
+        self.history += pcm
+        excess = len(self.history) - PITCH_HISTORY_SECONDS * RATE * 2
+        if excess > 0:
+            excess += excess % 2
+            del self.history[:excess]
+            self.history_ms += excess / 2 / RATE * 1000
+
+    def measure_pitch(self, tokens):
+        """Feed each speaker's newly final words to their pitch estimate."""
+        spans = {}
+        for token in tokens:
+            speaker, start, end = token.get('speaker'), token.get('start_ms'), token.get('end_ms')
+            if speaker is None or not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
+                continue
+            low, high = spans.get(speaker, (start, end))
+            spans[speaker] = (min(low, start), max(high, end))
+        for speaker, (start, end) in spans.items():
+            first = int((start - self.history_ms) * RATE / 1000)
+            last = int((end - self.history_ms) * RATE / 1000)
+            if last - first < RATE // 4 or first < 0:
+                continue
+            pcm = np.frombuffer(bytes(self.history[first * 2:last * 2]), dtype='<i2')
+            self.speakers.pitch.observe(self.speakers.name(self.source, speaker), pcm.astype(np.float32) / 32768)
 
     def utterance_id(self, index=None):
         return f'{self.generation}:{self.source}:{self.utterance if index is None else index}'
@@ -434,6 +473,8 @@ class SonioxStream:
             type='live_translation',
             id=target[0] if target else self.utterance_id(),
             text=text, final=final,
+            # The finalized part never changes again, so it can be read aloud before the sentence ends.
+            stable=self.translation.strip(),
             started_at=target[1] if target else self.clock(self.tokens, 'start_ms', time.time()),
             generation=self.generation, source=self.source,
         ))
@@ -460,6 +501,8 @@ class SonioxStream:
         if payload.get('error_code'):
             raise RuntimeError(f"ASR {payload.get('error_code')}: {payload.get('error_message')}")
         final, interim, final_tr, interim_tr, endpoint, finalized = soniox_tokens(payload)
+        try: self.measure_pitch(final)
+        except Exception as exc: log(f'[PITCH] {exc}')
         with self.lock:
             for token in final:
                 # A new speaker starts a new utterance so each line keeps one label.
@@ -521,6 +564,8 @@ class SonioxStream:
                 log(f'[ASR] {self.source} connected')
                 self.origin = None
                 self.latest_captured_at = None
+                self.history = bytearray()
+                self.history_ms = 0.0
                 sent_finalize = False
                 last_sent = time.monotonic()
                 while not self.closed.is_set():
@@ -537,6 +582,7 @@ class SonioxStream:
                             self.origin = captured_at - len(pcm) / 2 / RATE
                         self.latest_captured_at = captured_at
                         ws.send_binary(pcm)
+                        self.remember(pcm)
                         last_sent = time.monotonic()
                     if self.flush_requested.is_set() and self.audio.empty():
                         if not sent_finalize:
@@ -764,7 +810,9 @@ def serve(recognizer, token):
                     except queue.Full:
                         send(dict(type='warning', message='ASR overloaded: dropped segment to bound latency.'))
             echo_gate = EchoGate(accept_audio)
-            send(dict(type='connected',
+            speaker = Speaker(send, lambda: generation,
+                              lambda label: getattr(getattr(recognizer, 'speakers', None), 'gender', lambda _: (None, False))(label))
+            send(dict(type='connected', tts_available=speaker.available,
                       vi_model_ready=getattr(recognizer, 'vi_model_ready', False),
                       asr_backend=getattr(recognizer, 'backend_name', 'Local'),
                       asr_model=getattr(recognizer, 'model_name', 'Whisper')))
@@ -832,6 +880,13 @@ def serve(recognizer, token):
                         if (thread := closing.pop(source, None)) is not None:
                             thread.join(timeout=5)
                         muted.discard(source)
+                    elif message['type'] == 'tts_enable':
+                        speaker.enable(message.get('voice'))
+                    elif message['type'] == 'tts_disable':
+                        speaker.disable()
+                    elif message['type'] == 'synthesize':
+                        speaker.speak(str(message.get('id', '')), int(message.get('generation', generation)),
+                                      str(message.get('text', '')), message.get('speaker'))
                     elif message['type'] == 'soniox_key':
                         if getattr(recognizer, 'broker', None):
                             recognizer.broker.deliver(message)
@@ -844,6 +899,7 @@ def serve(recognizer, token):
                         diarizer.finish(str(message.get('id', '')))
             finally:
                 closed.set()
+                speaker.close()
                 diarizer.close()
                 if streaming:
                     recognizer.close()

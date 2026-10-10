@@ -3,6 +3,8 @@ mod ai_stream;
 mod note_chat;
 mod diarization_model;
 mod file_job;
+mod island;
+mod playback;
 mod writer;
 use base64::Engine;
 use clipclip::{start_with_tap, Config, Recording, Source};
@@ -856,15 +858,20 @@ pub fn run() {
             remove_retired_tts_model(app.handle());
             #[cfg(target_os = "macos")]
             reset_microphone_after_update(app.handle());
+            #[cfg(target_os = "macos")]
+            island::create(app.handle())?;
             Ok(())
         })
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(island::shortcut_plugin())
         .manage(NativeState::default())
-        .invoke_handler(tauri::generate_handler![load_notes, save_notes, account::account_status, account::account_signed_in, account::account_send_code, account::account_offers, account::account_buy, account::account_order_status, account_verify, account_sign_out, start_worker, stop_worker, send_worker, start_capture, stop_capture, set_microphone, set_system_audio, note_chat::ask_note, summarize_segments, suggest_title, translate_text, open_permission, open_link, save_export, reveal_file, print_page, #[cfg(target_os = "macos")] save_pdf, file_job::pick_audio_file, file_job::file_job_start, file_job::file_job_upload, file_job::file_job_status, file_job::file_job_cleanup, file_job::file_job_cancel, writer::write_document, diarization_model_status, download_diarization_model, cancel_diarization_download, remove_diarization_model])
+        .invoke_handler(tauri::generate_handler![load_notes, save_notes, account::account_status, account::account_signed_in, account::account_send_code, account::account_offers, account::account_buy, account::account_order_status, account_verify, account_sign_out, start_worker, stop_worker, send_worker, start_capture, stop_capture, set_microphone, set_system_audio, note_chat::ask_note, summarize_segments, suggest_title, translate_text, open_permission, open_link, save_export, reveal_file, print_page, #[cfg(target_os = "macos")] save_pdf, file_job::pick_audio_file, file_job::file_job_start, file_job::file_job_upload, file_job::file_job_status, file_job::file_job_cleanup, file_job::file_job_cancel, writer::write_document, diarization_model_status, download_diarization_model, cancel_diarization_download, remove_diarization_model, island::island_screens, island::island_set_frame, island::island_set_visible, island::island_focus, island::island_open_main, island::island_cursor, island::island_ignore_cursor, playback::play_audio, playback::stop_audio])
         .on_window_event(|window, event| {
-            if matches!(event, tauri::WindowEvent::Destroyed) {
+            // Closing the main window quits VietNote; the island goes with it.
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
+                if let Some(island) = window.app_handle().get_webview_window(island::LABEL) { let _ = island.destroy(); }
                 let state = window.app_handle().state::<NativeState>();
                 if let Ok(mut system) = state.system.lock() { *system = None; }
                 if let Ok(mut microphone) = state.microphone.lock() { *microphone = None; }

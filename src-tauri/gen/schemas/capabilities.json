@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Main VietNote window","local":true,"windows":["main"],"permissions":["core:default","updater:default","process:allow-restart"]}}
+{"default":{"identifier":"default","description":"Main VietNote window and the floating island","local":true,"windows":["main","island"],"permissions":["core:default","updater:default","process:allow-restart"]}}
