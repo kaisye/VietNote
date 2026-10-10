@@ -25,6 +25,7 @@
       "icons/icon.ico"
     ],
     "macOS": { "minimumSystemVersion": "15.0", "infoPlist": "Info.plist", "entitlements": "Entitlements.plist" },
+    "windows": { "nsis": { "installerHooks": "windows/hooks.nsh" } },
     "resources": ["../asr"]
   },
   "plugins": {
