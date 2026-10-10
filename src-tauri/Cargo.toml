@@ -1,6 +1,6 @@
 [package]
 name = "vietnote"
-version = "0.8.13"
+version = "0.8.14"
 description = "VietNote desktop shell"
 authors = ["VietNote"]
 edition = "2021"
@@ -33,6 +33,8 @@ tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-global-shortcut = "2"
+# Two copies would each overwrite the other's saved notes; a second launch focuses the first.
+tauri-plugin-single-instance = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"
@@ -46,5 +48,6 @@ windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging"] }
 
 [patch.crates-io]
 # clipclip captures through cpal. The vendored copy keeps VietNote's own audio
-# out of the Core Audio tap and tolerates WASAPI loopback discontinuities.
+# out of system capture (Core Audio tap, WASAPI process loopback) and tolerates
+# WASAPI loopback discontinuities.
 cpal = { path = "../vendor/cpal" }

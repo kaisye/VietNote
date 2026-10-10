@@ -875,6 +875,7 @@ def serve(recognizer, token):
                                 vads[source] = AudioBuffer(max_segment_seconds=segment_seconds)
                             # The next chunk restarts this source's clock.
                             audio_clocks.pop(source, None)
+                            audio_levels.pop(source, None)
                     elif message['type'] == 'open_source':
                         source = message.get('source')
                         if (thread := closing.pop(source, None)) is not None:

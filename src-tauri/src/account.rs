@@ -340,7 +340,7 @@ mod tests {
             let (mut stream, _) = listener.accept().unwrap();
             stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
             let mut request = [0u8; 4096];
-            stream.read(&mut request).unwrap();
+            let _ = stream.read(&mut request).unwrap();
             write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{first}", first.len() + tail.len()).unwrap();
             stream.flush().unwrap();
             wait.recv_timeout(Duration::from_secs(3)).expect("client buffered the stream instead of reporting progress");

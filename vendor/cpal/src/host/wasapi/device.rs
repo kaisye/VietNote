@@ -352,50 +352,88 @@ unsafe fn activate_audio_interface_sync(
     device_interface_path: windows::core::PWSTR,
     activation_timeout: Option<Duration>,
 ) -> windows::core::Result<Audio::IAudioClient> {
+    activate_audio_interface_with(
+        windows::core::PCWSTR(device_interface_path.0),
+        None,
+        activation_timeout,
+    )
+}
+
+/// VietNote patch: activates a process-loopback client that captures everything the system
+/// plays except this process tree, so VietNote's own read-aloud voice is not transcribed
+/// again (the macOS tap excludes the process the same way). Needs Windows 10 2004 or later.
+unsafe fn activate_process_loopback(
+    activation_timeout: Option<Duration>,
+) -> windows::core::Result<Audio::IAudioClient> {
+    use windows::Win32::System::Com::StructuredStorage::{
+        PROPVARIANT, PROPVARIANT_0, PROPVARIANT_0_0, PROPVARIANT_0_0_0,
+    };
+    let mut params = Audio::AUDIOCLIENT_ACTIVATION_PARAMS {
+        ActivationType: Audio::AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
+        Anonymous: Audio::AUDIOCLIENT_ACTIVATION_PARAMS_0 {
+            ProcessLoopbackParams: Audio::AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS {
+                TargetProcessId: std::process::id(),
+                ProcessLoopbackMode: Audio::PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE,
+            },
+        },
+    };
+    // ManuallyDrop: dropping a PROPVARIANT clears it, which would free `params` (stack memory).
+    let variant = std::mem::ManuallyDrop::new(PROPVARIANT {
+        Anonymous: PROPVARIANT_0 {
+            Anonymous: std::mem::ManuallyDrop::new(PROPVARIANT_0_0 {
+                vt: windows::Win32::System::Variant::VT_BLOB,
+                wReserved1: 0,
+                wReserved2: 0,
+                wReserved3: 0,
+                Anonymous: PROPVARIANT_0_0_0 {
+                    blob: windows::Win32::System::Com::BLOB {
+                        cbSize: size_of::<Audio::AUDIOCLIENT_ACTIVATION_PARAMS>() as u32,
+                        pBlobData: &mut params as *mut _ as *mut u8,
+                    },
+                },
+            }),
+        },
+    });
+    // `params` and `variant` outlive the call: activation completes before it returns.
+    activate_audio_interface_with(
+        Audio::VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK,
+        Some(&variant),
+        activation_timeout,
+    )
+}
+
+unsafe fn activate_audio_interface_with(
+    device_interface_path: windows::core::PCWSTR,
+    activation_params: Option<&windows::Win32::System::Com::StructuredStorage::PROPVARIANT>,
+    activation_timeout: Option<Duration>,
+) -> windows::core::Result<Audio::IAudioClient> {
     use windows::core::IUnknown;
 
     #[windows::core::implement(Audio::IActivateAudioInterfaceCompletionHandler)]
-    struct CompletionHandler(std::sync::mpsc::Sender<windows::core::Result<IUnknown>>);
-
-    fn retrieve_result(
-        operation: &Audio::IActivateAudioInterfaceAsyncOperation,
-    ) -> windows::core::Result<IUnknown> {
-        let mut result = windows::core::HRESULT::default();
-        let mut interface: Option<IUnknown> = None;
-        unsafe {
-            operation.GetActivateResult(&mut result, &mut interface)?;
-        }
-        result.ok()?;
-        interface.ok_or_else(|| {
-            windows::core::Error::new(
-                Audio::AUDCLNT_E_DEVICE_INVALIDATED,
-                "audio interface not available after activation",
-            )
-        })
-    }
+    struct CompletionHandler(std::sync::mpsc::Sender<()>);
 
     impl Audio::IActivateAudioInterfaceCompletionHandler_Impl for CompletionHandler_Impl {
         fn ActivateCompleted(
             &self,
-            operation: windows::core::Ref<'_, Audio::IActivateAudioInterfaceAsyncOperation>,
+            _operation: windows::core::Ref<'_, Audio::IActivateAudioInterfaceAsyncOperation>,
         ) -> windows::core::Result<()> {
-            let result = operation.ok().and_then(retrieve_result);
-            let _ = self.0.send(result);
+            // The waiting thread reads the result from the operation it holds.
+            let _ = self.0.send(());
             Ok(())
         }
     }
 
     let (tx, rx) = std::sync::mpsc::channel();
     let handler: Audio::IActivateAudioInterfaceCompletionHandler = CompletionHandler(tx).into();
-    Audio::ActivateAudioInterfaceAsync(
+    let operation = Audio::ActivateAudioInterfaceAsync(
         device_interface_path,
         &Audio::IAudioClient::IID,
-        None,
+        activation_params.map(|params| params as *const _),
         &handler,
     )?;
     // If a timeout was given use it; otherwise block until Windows calls ActivateCompleted.
     // `handler` holds the sender and remains live on the stack, so `recv` cannot fail.
-    let result = if let Some(dur) = activation_timeout {
+    if let Some(dur) = activation_timeout {
         rx.recv_timeout(dur).map_err(|_| {
             windows::core::Error::new(
                 ERROR_TIMEOUT.to_hresult(),
@@ -405,7 +443,18 @@ unsafe fn activate_audio_interface_sync(
     } else {
         rx.recv().expect("activation channel closed; this is a bug")
     };
-    result?.cast()
+    let mut result = windows::core::HRESULT::default();
+    let mut interface: Option<IUnknown> = None;
+    operation.GetActivateResult(&mut result, &mut interface)?;
+    result.ok()?;
+    interface
+        .ok_or_else(|| {
+            windows::core::Error::new(
+                Audio::AUDCLNT_E_DEVICE_INVALIDATED,
+                "audio interface not available after activation",
+            )
+        })?
+        .cast()
 }
 
 impl Device {
@@ -839,20 +888,47 @@ impl Device {
             // It's not actually sure that this is required, but when in doubt do it.
             com::com_initialized();
 
+            // VietNote patch: system audio leaves out VietNote's own playback when Windows
+            // supports process loopback; older versions fall back to endpoint loopback.
+            if self.data_flow() == Audio::eRender {
+                if let Ok(audio_client) = activate_process_loopback(activation_timeout) {
+                    if let Ok(inner) = Self::init_input_stream(audio_client, config.clone(), sample_format, true) {
+                        return Ok(inner);
+                    }
+                }
+            }
+
             // Obtaining a `IAudioClient`.
             let audio_client = self
                 .build_audioclient(activation_timeout)
                 .context("Failed to build audio client")?;
+            Self::init_input_stream(audio_client, config, sample_format, self.data_flow() == Audio::eRender)
+        }
+    }
 
+    unsafe fn init_input_stream(
+        audio_client: Audio::IAudioClient,
+        config: StreamConfig,
+        sample_format: SampleFormat,
+        loopback: bool,
+    ) -> Result<StreamInner, Error> {
+        unsafe {
             // No further range validation: IAudioClient::Initialize accepts any positive duration
             // in shared mode. The callback period is always GetDevicePeriod() regardless of what
             // is requested here; the value only affects ring-buffer latency.
-            let buffer_duration = buffer_size_to_duration(&config.buffer_size, config.sample_rate);
+            let mut buffer_duration = buffer_size_to_duration(&config.buffer_size, config.sample_rate);
 
             let mut stream_flags = DEFAULT_FLAGS;
 
-            if self.data_flow() == Audio::eRender {
+            if loopback {
                 stream_flags |= Audio::AUDCLNT_STREAMFLAGS_LOOPBACK;
+                // The process-loopback device has no mix format of its own: let it convert to
+                // the requested one, and give it an explicit buffer (it has no default period).
+                stream_flags |= Audio::AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
+                    | Audio::AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
+                if buffer_duration == 0 {
+                    buffer_duration = 1_000_000; // 100 ms
+                }
             }
 
             // Computing the format and initializing the device.
@@ -907,14 +983,11 @@ impl Device {
             // `run()` method and added to the `RunContext`.
             let client_flow = AudioClientFlow::Capture { capture_client };
 
-            let audio_clock = audio_client
-                .GetService::<Audio::IAudioClock>()
-                .context("Failed to get audio clock")?;
+            // A process-loopback client offers neither a clock nor a latency figure.
+            let audio_clock = audio_client.GetService::<Audio::IAudioClock>().ok();
 
             let stream_latency = {
-                let hns = audio_client
-                    .GetStreamLatency()
-                    .context("Failed to get stream latency")?;
+                let hns = audio_client.GetStreamLatency().unwrap_or(0);
                 Duration::from_nanos(hns.max(0) as u64 * 100)
             };
 
@@ -930,7 +1003,7 @@ impl Device {
                 config,
                 sample_format,
                 stream_latency,
-                loopback: self.data_flow() == Audio::eRender,
+                loopback,
             })
         }
     }
@@ -1011,9 +1084,11 @@ impl Device {
             // `run()` method and added to the `RunContext`.
             let client_flow = AudioClientFlow::Render { render_client };
 
-            let audio_clock = audio_client
-                .GetService::<Audio::IAudioClock>()
-                .context("Failed to get audio clock")?;
+            let audio_clock = Some(
+                audio_client
+                    .GetService::<Audio::IAudioClock>()
+                    .context("Failed to get audio clock")?,
+            );
 
             let stream_latency = {
                 let hns = audio_client

@@ -290,7 +290,8 @@ pub enum AudioClientFlow {
 
 pub struct StreamInner {
     pub audio_client: Audio::IAudioClient,
-    pub audio_clock: Audio::IAudioClock,
+    // VietNote patch: None for a process-loopback capture, which has no clock of its own.
+    pub audio_clock: Option<Audio::IAudioClock>,
     pub client_flow: AudioClientFlow,
     // Event that is signalled by WASAPI whenever audio data must be written.
     pub event: Foundation::HANDLE,
@@ -669,9 +670,10 @@ fn run_output(
     }
 
     // The clock frequency is constant for the stream's lifetime.
-    let clock_frequency = match unsafe { run_ctxt.stream.audio_clock.GetFrequency() }
-        .context("Failed to get audio clock frequency")
-    {
+    let clock_frequency = match run_ctxt.stream.audio_clock.as_ref().map_or(
+        Err(Error::with_message(ErrorKind::BackendError, "Output stream has no audio clock")),
+        |clock| unsafe { clock.GetFrequency() }.context("Failed to get audio clock frequency"),
+    ) {
         Ok(0) => {
             emit_error(
                 error_callback,
@@ -925,9 +927,12 @@ fn process_output(
 fn clock_position(stream: &StreamInner) -> Result<(StreamInstant, u64), Error> {
     let mut position: u64 = 0;
     let mut qpc_position: u64 = 0;
+    let clock = stream
+        .audio_clock
+        .as_ref()
+        .ok_or_else(|| Error::with_message(ErrorKind::BackendError, "Stream has no audio clock"))?;
     unsafe {
-        stream
-            .audio_clock
+        clock
             .GetPosition(&mut position, Some(&mut qpc_position))
             .context("Failed to get clock position")?;
     };
@@ -956,7 +961,9 @@ fn input_timestamp(
         (nanos / 1_000_000_000) as u64,
         (nanos % 1_000_000_000) as u32,
     );
-    let (callback, _position) = clock_position(stream)?;
+    // VietNote patch: a process-loopback client may not report a clock position; fall back
+    // to the capture instant rather than failing every callback (which ends the stream).
+    let callback = clock_position(stream).map_or(capture, |(callback, _)| callback);
     Ok(InputStreamTimestamp { capture, callback })
 }
 

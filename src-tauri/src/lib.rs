@@ -475,7 +475,12 @@ fn start_source(source: Source, label: &'static str, tx: mpsc::SyncSender<(Strin
     start_with_tap(config, |_| {}, Box::new(move |frames| {
         let captured = frames.captured_at.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs_f64();
         let _ = tx.try_send((label.to_string(), frames.samples.to_vec(), captured));
-    })).map_err(|e| e.to_string())
+    })).map_err(|e| match e {
+        // A desktop without a microphone (or with every output disabled) is common on Windows.
+        clipclip::Error::NoDevice(_) if label == "microphone" => "không tìm thấy micro. Hãy cắm micro hoặc chọn nguồn \"Âm thanh máy\".".to_string(),
+        clipclip::Error::NoDevice(_) => "không tìm thấy loa hay tai nghe đang bật để thu âm thanh máy.".to_string(),
+        other => other.to_string(),
+    })
 }
 
 fn capturing(state: &tauri::State<'_, NativeState>) -> Result<bool, String> {
@@ -775,7 +780,7 @@ fn open_link(url: String) -> Result<(), String> {
 /// choose an arbitrary path to write to.
 fn pick_save_path(app: &tauri::AppHandle, file_name: &str) -> Result<Option<PathBuf>, String> {
     use tauri_plugin_dialog::DialogExt;
-    let name: String = file_name.chars().map(|c| if matches!(c, '/' | '\\' | ':') || c.is_control() { ' ' } else { c }).collect();
+    let name: String = file_name.chars().map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() { ' ' } else { c }).collect();
     let extension = Path::new(&name).extension().and_then(|e| e.to_str()).unwrap_or("").to_string();
     let mut dialog = app.dialog().file().set_file_name(name.trim());
     if !extension.is_empty() { dialog = dialog.add_filter(extension.to_uppercase(), &[extension.as_str()]); }
@@ -845,7 +850,12 @@ fn reveal_file(path: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     Command::new("open").args(["-R", &path]).spawn().map_err(|e| e.to_string())?;
     #[cfg(target_os = "windows")]
-    hide_console(Command::new("explorer").arg(format!("/select,{path}"))).spawn().map_err(|e| e.to_string())?;
+    {
+        // Explorer only understands `/select,"C:\a b\x.docx"`; Rust's own quoting wraps the whole
+        // argument when the path has spaces, and Explorer then opens Documents instead.
+        use std::os::windows::process::CommandExt;
+        hide_console(Command::new("explorer").raw_arg(format!("/select,\"{path}\""))).spawn().map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -878,11 +888,18 @@ fn remove_retired_tts_model(app: &tauri::AppHandle) {
 
 pub fn run() {
     tauri::Builder::default()
+        // Registered first, so a second launch exits before it opens anything of its own.
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            if let Some(main) = app.get_webview_window("main") {
+                let _ = main.unminimize();
+                let _ = main.show();
+                let _ = main.set_focus();
+            }
+        }))
         .setup(|app| {
             remove_retired_tts_model(app.handle());
             #[cfg(target_os = "macos")]
             reset_microphone_after_update(app.handle());
-            #[cfg(target_os = "macos")]
             island::create(app.handle())?;
             Ok(())
         })
