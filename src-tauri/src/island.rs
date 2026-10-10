@@ -4,6 +4,8 @@
 //!
 //! On macOS the window is turned into a non-activating panel: it floats above full-screen
 //! apps on every Space, and typing into it never brings VietNote's main window forward.
+//! On Windows it is a topmost window that clicks don't activate; it takes the keyboard only
+//! while the question box is open, and gives it back once the user clicks elsewhere.
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
@@ -11,8 +13,14 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 
 pub const LABEL: &str = "island";
 
-/// ⌥Space opens the island's question box from any app.
-fn shortcut() -> Shortcut { Shortcut::new(Some(Modifiers::ALT), Code::Space) }
+/// ⌥Space (Ctrl+Shift+Space on Windows, where Alt+Space opens the window menu) opens the
+/// island's question box from any app.
+fn shortcut() -> Shortcut {
+    #[cfg(target_os = "macos")]
+    { Shortcut::new(Some(Modifiers::ALT), Code::Space) }
+    #[cfg(not(target_os = "macos"))]
+    { Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space) }
+}
 
 pub fn shortcut_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     tauri_plugin_global_shortcut::Builder::new()
@@ -43,7 +51,14 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
     #[cfg(target_os = "macos")]
     unsafe { mac::make_panel(window.ns_window()?) };
     #[cfg(not(target_os = "macos"))]
-    let _ = window;
+    {
+        // A click must not pull focus from the video underneath (it would leave full screen).
+        window.set_focusable(false)?;
+        let island = window.clone();
+        window.on_window_event(move |event| {
+            if let tauri::WindowEvent::Focused(false) = event { let _ = island.set_focusable(false); }
+        });
+    }
     Ok(())
 }
 
@@ -131,7 +146,10 @@ pub fn island_focus(window: WebviewWindow) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     unsafe { mac::make_key(window.ns_window().map_err(|e| e.to_string())?) };
     #[cfg(not(target_os = "macos"))]
-    window.set_focus().map_err(|e| e.to_string())?;
+    {
+        window.set_focusable(true).map_err(|e| e.to_string())?;
+        window.set_focus().map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 

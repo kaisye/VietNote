@@ -208,12 +208,14 @@ export const islandEvents = {
 export type IslandAsk = LiveQuestion
 
 export const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform || navigator.userAgent)
+/** Matches the global shortcut registered in island.rs. */
+export const shortcutLabel = isMac ? '⌥Space' : 'Ctrl+Shift+Space'
 
 const read = (key: string) => { try { return localStorage.getItem(key) } catch { return null } }
 const write = (key: string, value: string) => { try { localStorage.setItem(key, value) } catch { /* Keep working without storage. */ } }
 
-/** On by default on macOS, where the island is available. */
-export const islandEnabled = () => isMac && read('islandEnabled') !== 'false'
+/** On by default; switched off from Settings. */
+export const islandEnabled = () => read('islandEnabled') !== 'false'
 export const saveIslandEnabled = (enabled: boolean) => write('islandEnabled', String(enabled))
 export const islandMode = (): IslandMode => read('islandMode') === 'subtitle' ? 'subtitle' : 'island'
 export const saveIslandMode = (mode: IslandMode) => write('islandMode', mode)

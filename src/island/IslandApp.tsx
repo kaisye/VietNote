@@ -10,7 +10,7 @@ import { HoverMenu } from './HoverMenu'
 import { SpeechMenu } from './SpeechMenu'
 import { useStickToBottom } from '../hooks/useStickToBottom'
 import {
-  atNotch, displayOptions, islandActions, sourceOptions, islandEnabled, islandEvents, islandMode, saveIslandMode, islandPinned, islandDisplay, LEVEL_SIZE, loadPlacements, openFrame, PILL, pillForPanel, pillRect,
+  atNotch, displayOptions, shortcutLabel, islandActions, sourceOptions, islandEnabled, islandEvents, islandMode, saveIslandMode, islandPinned, islandDisplay, LEVEL_SIZE, loadPlacements, openFrame, PILL, pillForPanel, pillRect,
   saveIslandPinned, saveIslandDisplay, savePlacement, shownDisplay, screenAt, snapPlacement, startScreen,
   type Display, type IslandAsk, type IslandLine, type IslandMode, type IslandScreen, type IslandState, type Level, type Placement, type Rect,
 } from '../services/island'
@@ -336,7 +336,7 @@ export function IslandApp() {
   return <div className={`island-root ${notchShaped ? 'at-notch' : ''} ${view.growsUp ? 'grows-up' : ''}`}>
     <div className={`island-shape level-${view.level} ${view.animate ? 'animate' : ''} ${view.open ? 'open' : ''} ${dragging ? 'dragging' : ''}`} style={shapeStyle}
       onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onDoubleClick={onDoubleClick}>
-      {!view.open && <div className="island-handle" title="VietNote · kéo để di chuyển, nhấp đúp để về notch">
+      {!view.open && <div className="island-handle" title={`VietNote · kéo để di chuyển, nhấp đúp để về ${screen?.notch ? 'notch' : 'giữa cạnh trên'}`}>
         <span className="island-logo"><BrandIcon size={notchShaped ? 18 : 20}/></span>
         {!notchShaped && <span className="island-handle-label">{listening && lines.length ? lines.at(-1)!.text || lines.at(-1)!.translation : status}</span>}
         {listening ? <Wave/> : <i className={`island-led ${state?.active ? 'paused' : ''}`}/>}
@@ -344,7 +344,7 @@ export function IslandApp() {
 
       {view.open && view.level === 'peek' && <div className="island-peek">
         {recent.length ? recent.map(line => <Line key={line.id} line={line} display={shown}/>)
-          : <p className="island-hint">{state?.active ? 'Đang chờ lời nói…' : 'VietNote chưa nghe.'} Bấm để mở · ⌥Space để hỏi</p>}
+          : <p className="island-hint">{state?.active ? 'Đang chờ lời nói…' : 'VietNote chưa nghe.'} Bấm để mở · {shortcutLabel} để hỏi</p>}
       </div>}
 
       {view.open && view.level === 'expanded' && <div className="island-panel">
@@ -401,7 +401,7 @@ export function IslandApp() {
         })}</div>}
         <form className="island-composer" onSubmit={event => { event.preventDefault(); ask(draft) }}>
           <input ref={input} value={draft} onChange={event => setDraft(event.target.value)} disabled={!lines.length}
-            placeholder={lines.length ? (selected ? 'Hỏi về câu đã chọn…' : 'Hỏi về nội dung đang nghe… (⌥Space)') : 'Chưa có lời nói để hỏi'}/>
+            placeholder={lines.length ? (selected ? 'Hỏi về câu đã chọn…' : `Hỏi về nội dung đang nghe… (${shortcutLabel})`) : 'Chưa có lời nói để hỏi'}/>
           <button className="island-send" type="submit" disabled={!canAsk || !draft.trim()} aria-label="Gửi câu hỏi"><Send size={15}/></button>
         </form>
       </div>}
