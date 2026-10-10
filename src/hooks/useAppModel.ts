@@ -23,7 +23,9 @@ function audioIssueText(message?: string) {
   if (message?.startsWith('ASR audio queue full')) return 'Mạng chậm · đã bỏ qua một đoạn âm thanh'
   if (message?.startsWith('VietNote credit exhausted')) return 'Đã hết phút sử dụng · xem tài khoản ở góc trái dưới'
   if (message?.startsWith('VietNote signed out')) return 'Phiên đăng nhập đã hết · đăng nhập lại ở góc trái dưới'
-  return message ? `Lỗi xử lý âm thanh: ${message}` : 'Đã xảy ra lỗi xử lý âm thanh'
+  // Raw errors name the speech provider; people only need to know something went wrong.
+  if (message) console.error('audio issue', message)
+  return 'Đã xảy ra lỗi xử lý âm thanh · đang thử lại'
 }
 
 export function useAppModel() {

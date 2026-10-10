@@ -114,7 +114,8 @@ export function useSpeech(currentGeneration: () => number) {
       case 'tts_status': {
         const next = (message.state ?? 'off') as SpeechState
         stateRef.current = next; setState(next)
-        setMessage(next === 'error' ? message.message ?? 'Không tải được giọng đọc' : '')
+        // The worker's detail (model paths, runtime errors) goes to its log, not on screen.
+        setMessage(next === 'error' ? 'Không tải được giọng đọc · hãy thử bật lại' : '')
         return true
       }
       case 'tts_begin':

@@ -34,7 +34,7 @@ class NativeDiarizer:
         model = Path(os.environ.get('NEMOTRON_MODEL', str(
             ROOT / '.cache/models/Nemotron-3-Diarization.q8_0.gguf')))
         if not library.is_file():
-            raise RuntimeError('Bản cài này chưa kèm bộ chạy Nemotron 3 (chỉ hỗ trợ Mac Apple Silicon).')
+            raise RuntimeError('Bản cài này chưa hỗ trợ nhận diện người nói trên máy (chỉ có trên Mac Apple Silicon).')
         if not model.is_file():
             raise RuntimeError('Chưa tải model nhận diện người nói. Vào Cài đặt để tải (~107 MB).')
         self.lib = C.CDLL(str(library))
@@ -59,7 +59,7 @@ class NativeDiarizer:
         self.check(self.lib.nemo_speech_diar_create(C.byref(cfg), C.byref(self.model)))
         if self.lib.nemo_speech_diar_num_speakers(self.model) != 8:
             self.close()
-            raise RuntimeError('Cần Nemotron 3 (8 người nói), không phải Sortformer V2.')
+            raise RuntimeError('Gói nhận diện người nói không đúng phiên bản; hãy tải lại trong Cài đặt.')
 
     def check(self, status):
         if status:
@@ -145,7 +145,7 @@ class DiarizationWorker:
             self.jobs.put_nowait(('audio', self.generation, source, audio.copy(), captured_at))
         except queue.Full:
             self.overloaded = True
-            self.status(False, 'Nemotron quá tải; dừng gán người nói trong phiên này để tránh lệch thời gian.')
+            self.status(False, 'Máy đang quá tải; tạm dừng gán người nói trong phiên này để tránh lệch thời gian.')
 
     def observe(self, message):
         if message.get('type') not in ('transcript', 'transcript_interim') or not message.get('id'):
@@ -185,12 +185,15 @@ class DiarizationWorker:
         native, streams = None, {}
         try:
             if self.enabled:
-                self.status(False, 'Đang tải Nemotron 3…')
+                self.status(False, 'Đang tải bộ nhận diện người nói…')
                 try:
                     native = self.factory()
-                    self.status(True, 'Nemotron 3 sẵn sàng · xử lý trên máy')
+                    self.status(True, 'Nhận diện người nói sẵn sàng · xử lý trên máy')
                 except Exception as exc:
-                    self.status(False, str(exc))
+                    # Our own messages are for people; native errors and paths go to the log.
+                    print(f'[DIARIZATION] {exc}', flush=True)
+                    text = str(exc)
+                    self.status(False, text if text.startswith(('Bản cài', 'Gói', 'Chưa', 'Hãy')) else 'Chưa dùng được nhận diện người nói trên máy')
             else:
                 self.status(False, 'Nhận diện người nói đã tắt.')
             while True:
@@ -203,7 +206,7 @@ class DiarizationWorker:
                         native.close_stream(stream)
                     streams.clear()
                     if native:
-                        self.status(True, 'Nemotron 3 sẵn sàng · xử lý trên máy')
+                        self.status(True, 'Nhận diện người nói sẵn sàng · xử lý trên máy')
                     continue
                 if job[1] != self.generation:
                     continue
@@ -220,7 +223,8 @@ class DiarizationWorker:
                             self.publish(native, streams, source, job[1], final=True)
                 except Exception as exc:
                     self.overloaded = True
-                    self.status(False, f'Nemotron: {exc}')
+                    print(f'[DIARIZATION] {exc}', flush=True)
+                    self.status(False, 'Chưa dùng được nhận diện người nói trên máy')
                 finally:
                     if kind == 'finish':
                         self.send(dict(type='diarization_finished', id=job[2], generation=job[1]))

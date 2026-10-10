@@ -1,5 +1,9 @@
 project_id = "vietnote"
 
+[functions.speech-session]
+verify_jwt = true
+
+# Old names of speech-session, file-job and checkout, for apps up to 0.8.9.
 [functions.soniox-key]
 verify_jwt = true
 
@@ -7,10 +11,16 @@ verify_jwt = true
 # Authenticated by the x-cron-secret header instead of a user JWT.
 verify_jwt = false
 
+[functions.file-job]
+verify_jwt = true
+
 [functions.soniox-file]
 verify_jwt = true
 
 [functions.ai-complete]
+verify_jwt = true
+
+[functions.checkout]
 verify_jwt = true
 
 [functions.payos]

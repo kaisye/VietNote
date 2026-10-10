@@ -1,4 +1,4 @@
-//! Transcribing a recorded file: the app picks the file, the `soniox-file` Edge
+//! Transcribing a recorded file: the app picks the file, the `file-job` Edge
 //! Function reserves credit, the file streams through it to Soniox's async API,
 //! and the app polls until the transcript is ready.
 use crate::account;
@@ -63,7 +63,7 @@ async fn call(body: Value, timeout: Duration) -> Result<Value, String> {
     let (url, anon) = account::config().ok_or("not_configured")?;
     let token = account::access_token().await?;
     let response = reqwest::Client::builder().timeout(timeout).build().map_err(|e| e.to_string())?
-        .post(format!("{url}/functions/v1/soniox-file"))
+        .post(format!("{url}/functions/v1/file-job"))
         .header("apikey", anon).bearer_auth(token).json(&body).send().await
         .map_err(|_| "offline".to_string())?;
     let status = response.status().as_u16();
@@ -111,7 +111,7 @@ pub(crate) async fn file_job_upload(job_id: String, path: String, language: Stri
     let query = [("action", "upload"), ("job_id", job_id.as_str()), ("language", language.as_str()), ("translate", if translate { "1" } else { "0" })];
     // No overall timeout: a long recording on a slow uplink takes minutes.
     let response = reqwest::Client::builder().connect_timeout(Duration::from_secs(20)).build().map_err(|e| e.to_string())?
-        .post(format!("{url}/functions/v1/soniox-file")).query(&query)
+        .post(format!("{url}/functions/v1/file-job")).query(&query)
         .header("apikey", anon).bearer_auth(token)
         .header("Content-Type", "application/octet-stream")
         .header("Content-Length", total.to_string())

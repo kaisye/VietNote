@@ -24,7 +24,10 @@ function errorText(error: unknown, file: AudioFile | null): string {
   if (code === 'signed_out') return 'Hãy đăng nhập tài khoản VietNote ở góc trái dưới.'
   if (code === 'offline' || code === 'upload_interrupted') return 'Mất kết nối khi gửi file. Phút đã giữ được hoàn lại; hãy thử lại.'
   if (code === 'upload_failed') return 'Máy chủ không nhận được file. Phút đã giữ được hoàn lại; hãy thử lại.'
-  return `Không dịch được file: ${code}`
+  // Our own messages are already for people; provider errors stay in the console.
+  if (/^(Không|Chưa|Hãy)/.test(code)) return code
+  console.error('file job failed', code)
+  return 'Không dịch được file này. Phút đã giữ được hoàn lại; hãy thử lại sau.'
 }
 
 /** The recording's start: its last write minus its length, i.e. roughly when the meeting began. */
@@ -62,7 +65,7 @@ export function useFileJob(addNote: (note: MeetingNote) => void, refreshAccount:
       await new Promise(resolve => setTimeout(resolve, POLL_MS))
     }
     if (running.current !== run) return
-    if (result.status === 'failed') throw new Error(result.error ?? 'soniox_error')
+    if (result.status === 'failed') throw new Error(result.error ?? 'transcription_failed')
     setCharged(result.charged_seconds ?? null)
     refreshAccount()
     setPhase('summarizing')

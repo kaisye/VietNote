@@ -11,7 +11,7 @@ import { LiveAssistant } from '../components/LiveAssistant'
 const speechNote = (model: AppModel) => {
   const { speech } = model
   if (speech.message) return speech.message
-  if (!speech.enabled) return 'Đọc bản dịch tiếng Việt bằng giọng ZeroTTS chạy trên máy'
+  if (!speech.enabled) return 'Đọc bản dịch tiếng Việt bằng giọng đọc chạy ngay trên máy'
   if (speech.state === 'loading') return 'Đang tải giọng đọc…'
   if (model.microphoneOn) return 'Đang bật mic: nên dùng tai nghe để mic không thu lại giọng đọc'
   return 'Giọng đọc sẵn sàng · đọc từng câu ngay khi dịch xong'

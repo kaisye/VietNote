@@ -1,5 +1,5 @@
 //! VietNote account: Supabase email-code sign-in and credit-metered Soniox keys.
-//! The long-lived Soniox key lives only in the `soniox-key` Edge Function; the
+//! The long-lived Soniox key lives only in the `speech-session` Edge Function; the
 //! app holds a Supabase session and trades it for single-use temporary keys.
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -115,8 +115,8 @@ pub(crate) async fn access_token() -> Result<String, String> {
     }
 }
 
-/// Calls the `soniox-key` Edge Function; errors are short machine codes.
-async fn credit_call(body: Value) -> Result<Value, String> { function_call("soniox-key", body).await }
+/// Calls the `speech-session` Edge Function; errors are short machine codes.
+async fn credit_call(body: Value) -> Result<Value, String> { function_call("speech-session", body).await }
 
 /// Calls a signed-in Edge Function; errors are short machine codes.
 pub(crate) async fn function_call(name: &str, body: Value) -> Result<Value, String> {
@@ -246,13 +246,13 @@ pub fn account_signed_in() -> bool { signed_in() }
 /// Credit packages on sale, with any promotion applied.
 #[tauri::command]
 pub async fn account_offers() -> Result<Value, String> {
-    Ok(function_call("payos", json!({"action": "offers"})).await?.get("offers").cloned().unwrap_or(Value::Array(vec![])))
+    Ok(function_call("checkout", json!({"action": "offers"})).await?.get("offers").cloned().unwrap_or(Value::Array(vec![])))
 }
 
 /// Creates a payOS order and opens its checkout page in the browser.
 #[tauri::command]
 pub async fn account_buy(package_id: String) -> Result<i64, String> {
-    let order = function_call("payos", json!({"action": "create", "package_id": package_id})).await?;
+    let order = function_call("checkout", json!({"action": "create", "package_id": package_id})).await?;
     let url = order.get("checkout_url").and_then(Value::as_str).ok_or("payment_unavailable")?;
     if !url.starts_with("https://") { return Err("payment_unavailable".into()); }
     open_browser(url)?;
@@ -262,7 +262,7 @@ pub async fn account_buy(package_id: String) -> Result<i64, String> {
 /// `{status: pending|paid|cancelled, balance_seconds}` of the user's order.
 #[tauri::command]
 pub async fn account_order_status(order_code: i64) -> Result<Value, String> {
-    function_call("payos", json!({"action": "status", "order_code": order_code})).await
+    function_call("checkout", json!({"action": "status", "order_code": order_code})).await
 }
 
 fn open_browser(url: &str) -> Result<(), String> {

@@ -2,7 +2,7 @@
 
 Users sign in with an email code. Credit is counted in seconds of Soniox
 streaming. The app never sees the long-lived Soniox key: for each stream it
-calls the `soniox-key` Edge Function, which does the following:
+calls the `speech-session` Edge Function, which does the following:
 
 1. Reserves up to 30 minutes of the user's balance.
 2. Mints a Soniox temporary key for that reservation:
@@ -29,9 +29,14 @@ calls the `soniox-key` Edge Function, which does the following:
    2. Run `./scripts/supabase-secrets.sh`. It reads the key from the Keychain, then sets `SONIOX_API_KEY` and a fresh `CRON_SECRET` as function secrets and mirrors `CRON_SECRET` into Vault.
    3. Deploy the functions:
       ```sh
-      supabase functions deploy soniox-key --use-api
+      supabase functions deploy speech-session --use-api
       supabase functions deploy soniox-reconcile --use-api
+      supabase functions deploy file-job --use-api
+      supabase functions deploy checkout --use-api
+      # Old names, still called by apps up to 0.8.9; delete them once those have updated:
+      supabase functions deploy soniox-key --use-api
       supabase functions deploy soniox-file --use-api
+      supabase functions deploy payos --use-api
       ```
 3. **Enable email codes.** Go to Authentication → Email Templates → *Magic Link*. Include `{{ .Token }}` in the template so the email contains the 6-digit code. The app has no redirect URL to receive a link.
 4. **Schedule reconciliation.** In the SQL editor, enable `pg_cron` and `pg_net`, then run the SQL below. The job reads the secret from Vault, so the job definition holds no secret.

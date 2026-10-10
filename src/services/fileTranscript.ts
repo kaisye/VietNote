@@ -6,7 +6,7 @@ export const FILE_RATE = 0.75
 /** Credit (in live seconds) a recording of this length costs. */
 export const fileCost = (audioSeconds: number) => Math.ceil(audioSeconds * FILE_RATE)
 
-/** [text, start_ms, end_ms, speaker, language, is_translation], as the `soniox-file` function sends tokens. */
+/** [text, start_ms, end_ms, speaker, language, is_translation], as the `file-job` function sends tokens. */
 export type FileToken = [string, number, number, string | null, string | null, 0 | 1]
 
 export interface FileParagraph { entryIds: string[]; translatedText: string }
