@@ -44,7 +44,7 @@ export function useAppModel() {
   // The idle screen hides `status` once the worker is ready, so a failed start needs its own slot.
   const [startError, setStartError] = useState('')
   const [sourceLanguage, setSourceLanguageState] = useState<Language>(savedLanguage)
-  const [audioInput, setAudioInputState] = useState<AudioInput>('both')
+  const [audioInput, setAudioInputState] = useState<AudioInput>('system')
   const [translateForeign, setTranslateForeignState] = useState(() => localStorage.getItem('translateForeign') !== 'false')
   const [entries, setEntries] = useState<Subtitle[]>([])
   const [interimTranscripts, setInterimTranscripts] = useState<InterimTranscript[]>([])
@@ -78,7 +78,7 @@ export function useAppModel() {
   const spokenLanguageRef = useRef(new Map<string, SpokenLanguage>())
   // Speaker per utterance id, so its translation is read in that speaker's voice.
   const speakerRef = useRef(new Map<string, string>())
-  const audioRef = useRef<AudioInput>('both')
+  const audioRef = useRef<AudioInput>('system')
   // The microphone and system audio can each be switched off and on while a recording runs.
   const [microphoneOn, setMicrophoneOn] = useState(false)
   const [systemAudioOn, setSystemAudioOn] = useState(false)
@@ -100,6 +100,8 @@ export function useAppModel() {
   const translationMaxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSummaryAt = useRef(Date.now())
   const meetingStartedAt = useRef(Date.now())
+  /** A listening session started outside a meeting (the translator page): saved as its own note on stop. */
+  const translationSession = useRef<{ startedAt: number; firstEntry: number } | null>(null)
   const generationPending = useRef(false)
   const liveTranslationRef = useRef(false)
   const translateForeignRef = useRef(translateForeign)
@@ -348,6 +350,7 @@ export function useAppModel() {
       microphoneRef.current = audioRef.current !== 'system'; setMicrophoneOn(microphoneRef.current)
       systemAudioRef.current = audioRef.current !== 'microphone'; setSystemAudioOn(systemAudioRef.current)
       capturingRef.current = true; setCapturing(true); setStatus(`● Listening — ${audioRef.current}`)
+      translationSession.current = meetingRef.current ? null : { startedAt: Date.now(), firstEntry: entriesRef.current.length }
     } catch (error) { setStatus(`Capture stopped: ${error}`); setStartError(`Không ghi âm được: ${error}`); meetingRef.current = false; setMeetingActive(false) }
     finally { generationPending.current = false; setBusy(false) }
   }
@@ -404,6 +407,8 @@ export function useAppModel() {
   // `discard` ends the meeting without a final summary or a saved note.
   const stop = async (saveOptions?: { title: string; groupID: string | null }, discard = false) => {
     const wasMeeting = meetingRef.current && !discard
+    const translation = !meetingRef.current && !discard ? translationSession.current : null
+    translationSession.current = null
     const started = new Date(meetingStartedAt.current)
     const defaultTitle = `Cuộc họp · ${started.toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' })}`
     const pendingNoteID = wasMeeting ? crypto.randomUUID() : null
@@ -458,6 +463,7 @@ export function useAppModel() {
       publishEntries([]); publishOverallSummary(''); publishStructured(emptyStructuredSummary()); resetTranslations(); liveChat.reset()
       setSummaryStatus('Đã bỏ cuộc họp · không lưu ghi chú')
     }
+    if (translation) { await saveTranslation(translation, entriesSnapshot, blocksSnapshot, endedAtMs); return }
     if (!wasMeeting) return
     let structured = overallStructuredRef.current
     try {
@@ -502,6 +508,31 @@ export function useAppModel() {
       // Another meeting may have been stopped meanwhile; only clear our own marker.
       if (savingNoteIDRef.current === note.id) { savingNoteIDRef.current = null; setSavingNoteID(null); setSavingNoteGroupID(null) }
     }
+  }
+  /** A translator-page session becomes a note titled "Phiên dịch": the Vietnamese paragraphs, then the source transcript. */
+  const saveTranslation = async (session: { startedAt: number; firstEntry: number }, allEntries: Subtitle[], blocks: TranslationBlock[], endedAtMs: number) => {
+    const entries = allEntries.slice(session.firstEntry)
+    if (!entries.length) return
+    const ids = new Set(entries.map(entry => entry.id))
+    const liveText = new Map(blocks.filter(block => block.kind === 'live' && !block.pending && ids.has(block.id)).map(block => [block.id, block.translatedText]))
+    const paragraphs = blocks.filter(block => block.kind !== 'live' && block.entryIds.some(id => ids.has(id)))
+      .map(block => block.failed ? block.entryIds.map(id => liveText.get(id)).filter(Boolean).join(' ') || block.translatedText : block.translatedText)
+      .filter(text => text.trim())
+    // Translation off or a Vietnamese source: the live lines are all there is.
+    const translated = paragraphs.length ? paragraphs : [...liveText.values()].filter(text => text.trim()).length ? [[...liveText.values()].join(' ')] : []
+    const started = new Date(session.startedAt)
+    const sourceTranscript = entries.map(entry => `${new Date(entry.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })} · ${entry.audioSource === 'microphone' ? 'Microphone' : 'System audio'}${entry.speaker ? ` · ${entry.speaker}` : ''}: ${entry.sourceText}`).join('\n')
+    const note: MeetingNote = {
+      id: crypto.randomUUID(), title: `Phiên dịch · ${started.toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' })}`, groupID: null,
+      createdAt: started.toISOString(), updatedAt: now(), duration: (endedAtMs - session.startedAt) / 1000,
+      summary: translated.map((text, index) => `ĐOẠN ${index + 1}\n${text}`).join('\n\n'),
+      transcriptSegments: entries.map(toTranscriptSegment),
+      transcript: sourceTranscript + (translated.length ? `\n\nBẢN DỊCH TIẾNG VIỆT THEO ĐOẠN\n${translated.map((text, index) => `ĐOẠN ${index + 1}\n${text}`).join('\n\n')}` : ''),
+    }
+    const nextNotes = [note, ...notesRef.current]
+    publishNotes(nextNotes, groupsRef.current)
+    try { if (desktop.isDesktop) await desktop.saveNotes({ notes: notesForStorage(nextNotes), groups: groupsRef.current }); setStatus(`Đã lưu “${note.title}” vào Ghi chú`) }
+    catch (error) { setStatus(`Không lưu được bản phiên dịch: ${error}`) }
   }
   const newNote = (groupID?: string | null) => { const note = createNote(groupID); persist([note, ...notesRef.current], groupsRef.current); return note.id }
   const updateNote = (id: string, patch: Partial<Pick<MeetingNote, 'title' | 'summary' | 'groupID'>>) => persist(notesRef.current.map(note => note.id === id && !note.isDemo ? { ...note, ...patch, ...(patch.summary === undefined ? {} : { structuredSummary: undefined }), updatedAt: now() } : note), groupsRef.current)

@@ -145,6 +145,8 @@ pub fn island_set_visible(app: AppHandle, visible: bool) -> Result<(), String> {
 pub fn island_focus(window: WebviewWindow) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     unsafe { mac::make_key(window.ns_window().map_err(|e| e.to_string())?) };
+    #[cfg(windows)]
+    win::remember_foreground(&window);
     #[cfg(not(target_os = "macos"))]
     {
         window.set_focusable(true).map_err(|e| e.to_string())?;
@@ -153,8 +155,46 @@ pub fn island_focus(window: WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
-/// The mouse pointer in the island's coordinates. A panel behind another app's window gets no
-/// hover events, so the island polls this to open when the pointer reaches it.
+/// Gives the keyboard back to the app the user was in, once the island closes.
+#[tauri::command]
+pub fn island_release(window: WebviewWindow) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    unsafe { mac::resign_key(window.ns_window().map_err(|e| e.to_string())?) };
+    #[cfg(windows)]
+    win::restore_foreground(&window);
+    #[cfg(not(target_os = "macos"))]
+    window.set_focusable(false).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[cfg(windows)]
+mod win {
+    use std::sync::atomic::{AtomicIsize, Ordering};
+    use tauri::WebviewWindow;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, IsWindow, SetForegroundWindow};
+
+    /// The window that had the keyboard before the island took it.
+    static PREVIOUS: AtomicIsize = AtomicIsize::new(0);
+
+    fn own(window: &WebviewWindow) -> isize { window.hwnd().map(|hwnd| hwnd.0 as isize).unwrap_or(0) }
+
+    pub fn remember_foreground(window: &WebviewWindow) {
+        let current = unsafe { GetForegroundWindow() } as isize;
+        if current != 0 && current != own(window) { PREVIOUS.store(current, Ordering::SeqCst); }
+    }
+
+    pub fn restore_foreground(window: &WebviewWindow) {
+        let previous = PREVIOUS.swap(0, Ordering::SeqCst);
+        // Only while the island still holds the keyboard; never pull another app forward.
+        if previous == 0 || unsafe { GetForegroundWindow() } as isize != own(window) { return }
+        unsafe {
+            if IsWindow(previous as _) != 0 { SetForegroundWindow(previous as _); }
+        }
+    }
+}
+
+/// The mouse pointer in the island's coordinates. A panel behind another app's window, or one
+/// that lets clicks through, gets no hover events, so the island polls this instead.
 #[tauri::command]
 pub fn island_cursor(window: WebviewWindow) -> Result<(f64, f64), String> {
     #[cfg(target_os = "macos")]
@@ -189,6 +229,7 @@ mod mac {
     use objc2_app_kit::{NSPanel, NSScreen};
     use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize};
     use std::ffi::c_void;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::OnceLock;
 
     // NSWindowStyleMaskNonactivatingPanel
@@ -198,7 +239,11 @@ mod mac {
     // NSStatusWindowLevel: above the menu bar, so the island can sit over the notch.
     const LEVEL: isize = 25;
 
-    extern "C-unwind" fn yes(_: &AnyObject, _: Sel) -> Bool { Bool::YES }
+    /// The panel takes the keyboard only when asked to (the question box), never from a plain
+    /// click, so clicking the island leaves typing with the app in front and nothing to give back.
+    static KEY_ALLOWED: AtomicBool = AtomicBool::new(false);
+
+    extern "C-unwind" fn may_become_key(_: &AnyObject, _: Sel) -> Bool { Bool::new(KEY_ALLOWED.load(Ordering::SeqCst)) }
     extern "C-unwind" fn no(_: &AnyObject, _: Sel) -> Bool { Bool::NO }
 
     fn panel_class() -> &'static AnyClass {
@@ -206,7 +251,7 @@ mod mac {
         let class = *CLASS.get_or_init(|| {
             let mut builder = ClassBuilder::new(c"VietNoteIslandPanel", NSPanel::class()).expect("island panel class");
             unsafe {
-                builder.add_method(sel!(canBecomeKeyWindow), yes as extern "C-unwind" fn(_, _) -> _);
+                builder.add_method(sel!(canBecomeKeyWindow), may_become_key as extern "C-unwind" fn(_, _) -> _);
                 builder.add_method(sel!(canBecomeMainWindow), no as extern "C-unwind" fn(_, _) -> _);
             }
             builder.register() as *const AnyClass as usize
@@ -287,7 +332,20 @@ mod mac {
     }
 
     pub unsafe fn make_key(window: *mut c_void) {
+        KEY_ALLOWED.store(true, Ordering::SeqCst);
         let window = &*(window as *mut AnyObject);
         let _: () = msg_send![window, makeKeyAndOrderFront: std::ptr::null::<AnyObject>()];
+    }
+
+    /// Ordering the panel out and back in drops its key status, so typing goes to the app
+    /// in front again; the panel never activated VietNote, so that app is still active.
+    /// Only needed after the question box had the keyboard.
+    pub unsafe fn resign_key(window: *mut c_void) {
+        KEY_ALLOWED.store(false, Ordering::SeqCst);
+        let window = &*(window as *mut AnyObject);
+        let key: bool = msg_send![window, isKeyWindow];
+        if !key { return }
+        let _: () = msg_send![window, orderOut: std::ptr::null::<AnyObject>()];
+        let _: () = msg_send![window, orderFrontRegardless];
     }
 }

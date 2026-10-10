@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { islandChat, islandLines, openFrame, PILL, pillForPanel, pillRect, screenAt, snapPlacement, startScreen, subtitleFor, subtitleRect, type IslandScreen } from './island'
+import { islandChat, islandLines, openFrame, PILL, pillForPanel, pillRect, screenAt, snapPlacement, startScreen, subtitleDocks, subtitleFor, subtitleRect, type IslandScreen } from './island'
 import type { Subtitle, TranslationBlock } from './types'
 
 const laptop: IslandScreen = {
@@ -89,6 +89,14 @@ describe('subtitle mode', () => {
   it('sits bottom-center above the player controls, or where it was dragged', () => {
     expect(subtitleRect(laptop)).toEqual({ x: 326, y: 912 - 190 - 96, width: 860, height: 190 })
     expect(subtitleRect(laptop, { dx: 5000, dy: 100 })).toEqual({ x: 1512 - 860, y: 100, width: 860, height: 190 })
+    // Dragged up to the top centre, it docks back into the island; elsewhere along the top it doesn't.
+    expect(subtitleDocks(laptop, { x: 326 + 60, y: laptop.visible.y + 10, width: 860, height: 190 })).toBe(true)
+    expect(subtitleDocks(laptop, { x: 326, y: 400, width: 860, height: 190 })).toBe(false)
+    expect(subtitleDocks(laptop, { x: 0, y: laptop.visible.y, width: 860, height: 190 })).toBe(false)
+    // Dropped near the centre line or the usual height, the caption snaps onto it.
+    expect(subtitleRect(laptop, { dx: 326 + 40, dy: 912 - 190 - 96 - 50 })).toEqual(subtitleRect(laptop))
+    expect(subtitleRect(laptop, { dx: 326 + 40, dy: 100 })).toEqual({ x: 326, y: 100, width: 860, height: 190 })
+    expect(subtitleRect(laptop, { dx: 100, dy: 912 - 190 - 96 + 30 })).toEqual({ x: 100, y: 912 - 190 - 96, width: 860, height: 190 })
   })
 
   it('captions the sentence being spoken, keeping the last translation until the new one arrives', () => {

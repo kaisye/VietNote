@@ -1,6 +1,6 @@
 [package]
 name = "vietnote"
-version = "0.8.12"
+version = "0.8.13"
 description = "VietNote desktop shell"
 authors = ["VietNote"]
 edition = "2021"
@@ -40,6 +40,9 @@ objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSURL", "NSDictionary", "NSObject", "NSGeometry"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPrintInfo", "NSPrintOperation", "NSResponder", "NSView", "NSWindow", "NSPanel", "NSScreen"] }
 objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "objc2-app-kit", "WKWebView"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging"] }
 
 [patch.crates-io]
 # clipclip captures through cpal. The vendored copy keeps VietNote's own audio

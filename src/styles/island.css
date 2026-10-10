@@ -9,6 +9,8 @@ html.island-host body { font-size:13px; user-select:none; -webkit-user-select:no
 .island-shape { position:absolute; overflow:hidden; color:var(--island-ink); background:var(--island-bg); border:1px solid rgba(173,168,255,.2); border-radius:19px; cursor:pointer; }
 .island-shape.animate { transition:left .24s cubic-bezier(.3,.9,.3,1), top .24s cubic-bezier(.3,.9,.3,1), width .24s cubic-bezier(.3,.9,.3,1), height .24s cubic-bezier(.3,.9,.3,1), border-radius .24s ease; }
 .island-shape.open { border-radius:22px; cursor:default; }
+.island-shape.open.level-expanded { cursor:grab; }
+.island-shape.open.level-expanded .island-panel { cursor:default; }
 .island-shape.dragging { cursor:grabbing; box-shadow:0 0 0 2px rgba(173,168,255,.5); }
 /* At the notch the island is part of the black camera housing: square top, round bottom. */
 .at-notch .island-shape { border:0; border-radius:0 0 14px 14px; }
@@ -23,13 +25,11 @@ html.island-host body { font-size:13px; user-select:none; -webkit-user-select:no
 .island-root .island-wave { height:14px; }
 
 /* Content fades in once the shape has finished growing. */
-.island-peek, .island-panel { position:absolute; inset:0; animation:island-content .2s ease .1s both; }
+.island-panel { position:absolute; inset:0; animation:island-content .2s ease .1s both; }
 @keyframes island-content { from { opacity:0; } to { opacity:1; } }
-.at-notch .island-peek, .at-notch .island-panel { top:var(--notch-height); }
+.at-notch .island-panel { top:var(--notch-height); }
 
-.island-peek { display:flex; flex-direction:column; justify-content:flex-end; gap:8px; padding:12px 18px 14px; }
 .island-line p { font-size:14px; line-height:1.42; }
-.island-peek .island-line p { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
 .island-line .island-translation { margin-top:2px; font-size:13px; color:var(--island-lilac); opacity:.86; }
 .island-line.interim p { opacity:.66; }
 .island-hint { color:var(--island-muted); font-size:12.5px; }
@@ -38,6 +38,7 @@ html.island-host body { font-size:13px; user-select:none; -webkit-user-select:no
 .island-header { position:relative; z-index:6; display:flex; align-items:center; gap:9px; padding:0 2px 0 4px; min-height:30px; cursor:grab; }
 .dragging .island-header { cursor:grabbing; }
 .island-header svg:first-child { border-radius:5px; flex:none; }
+.island-header-logo { display:flex; flex:none; }
 .island-title { display:flex; flex-direction:column; line-height:1.15; }
 .island-title strong { font-size:13px; }
 .island-title small { display:flex; align-items:center; gap:6px; color:var(--island-muted); font-size:11px; }
@@ -101,10 +102,15 @@ html.island-host body { font-size:13px; user-select:none; -webkit-user-select:no
 
 /* Language and audio-source menus: above the button in subtitles, below it in the island. */
 .hover-menu { position:relative; display:inline-flex; }
-.menu-options { position:absolute; right:-4px; bottom:calc(100% + 8px); z-index:5; display:flex; gap:2px; padding:3px; border-radius:11px; background:#14122a; border:1px solid rgba(173,168,255,.28); box-shadow:0 8px 20px rgba(0,0,0,.45); }
+.menu-options { position:absolute; right:-4px; bottom:calc(100% + 8px); z-index:5; display:flex; flex-direction:column; gap:3px; padding:3px; border-radius:11px; background:#14122a; border:1px solid rgba(173,168,255,.28); box-shadow:0 8px 20px rgba(0,0,0,.45); }
 .menu-options.below { bottom:auto; top:calc(100% + 6px); }
+.menu-caption { padding:4px 8px 1px; max-width:280px; color:var(--island-muted); font-size:11.5px; font-weight:600; line-height:1.35; white-space:normal; }
+.menu-choices { display:flex; gap:2px; }
+/* Native tooltips and :hover don't reach a window behind another app, so the island draws its own from pointer polling. */
+.island-icon[data-hover] { color:var(--island-ink); background:rgba(173,168,255,.16); }
+.island-tip { position:absolute; z-index:7; max-width:260px; padding:6px 10px; border-radius:9px; color:var(--island-ink); background:#14122a; border:1px solid rgba(173,168,255,.28); box-shadow:0 8px 20px rgba(0,0,0,.45); font-size:12px; font-weight:600; line-height:1.35; pointer-events:none; animation:island-content .12s ease both; }
 .menu-options button { height:26px; padding:0 10px; border:0; border-radius:8px; color:var(--island-muted); background:transparent; font-size:12px; font-weight:650; white-space:nowrap; }
-.menu-options button:not(:disabled):hover { color:var(--island-ink); background:rgba(173,168,255,.16); }
+.menu-options button:not(:disabled):hover, .menu-options button:not(:disabled)[data-hover] { color:var(--island-ink); background:rgba(173,168,255,.16); }
 .menu-options button.selected { color:#17142a; background:#f6f6ff; }
 .subtitle-source.awaiting, .island-line p.island-awaiting { opacity:.5; }
 .subtitle-source.lagging { opacity:.6; }
@@ -114,5 +120,5 @@ html.island-host body { font-size:13px; user-select:none; -webkit-user-select:no
 
 @media (prefers-reduced-motion:reduce) {
   .island-shape.animate { transition-duration:.01s; }
-  .island-peek, .island-panel { animation:none; }
+  .island-panel { animation:none; }
 }

@@ -14,13 +14,13 @@ export interface Rect { x: number; y: number; width: number; height: number }
 export interface Size { width: number; height: number }
 export interface IslandScreen { key: string; frame: Rect; visible: Rect; notch: Size | null; primary: boolean }
 
-export type Level = 'collapsed' | 'peek' | 'expanded'
+export type Level = 'collapsed' | 'expanded'
 export type Anchor = 'notch' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'left' | 'right'
 /** Snapped to an anchor, or left where it was dropped (offset from the screen's corner). */
 export type Placement = { anchor: Anchor } | { anchor: null; dx: number; dy: number }
 
 export const PILL: Size = { width: 196, height: 38 }
-export const LEVEL_SIZE: Record<Exclude<Level, 'collapsed'>, Size> = { peek: { width: 460, height: 178 }, expanded: { width: 520, height: 540 } }
+export const LEVEL_SIZE: Record<Exclude<Level, 'collapsed'>, Size> = { expanded: { width: 520, height: 540 } }
 /** Room on each side of the camera housing for the logo and the wave. */
 const NOTCH_WING = 66
 const MARGIN = 12
@@ -125,11 +125,22 @@ export const SUBTITLE: Size = { width: 860, height: 190 }
 const SUBTITLE_LIFT = 96
 
 /** The subtitle band: bottom-center by default, or where it was dragged on this display. */
+/** A caption dragged up to the top centre (the notch) turns back into the island there. */
+export function subtitleDocks(screen: IslandScreen, rect: Rect): boolean {
+  const { frame, visible } = screen
+  return rect.y <= visible.y + SUBTITLE_SNAP && Math.abs(rect.x + rect.width / 2 - (frame.x + frame.width / 2)) <= rect.width / 4
+}
+
+/** A dragged caption this close to the centre line or its usual height snaps onto it. */
+const SUBTITLE_SNAP = 56
 export function subtitleRect(screen: IslandScreen, offset?: { dx: number; dy: number }): Rect {
   const { frame, visible } = screen
   const width = Math.min(SUBTITLE.width, visible.width - 2 * MARGIN), height = SUBTITLE.height
-  const x = offset ? frame.x + offset.dx : visible.x + (visible.width - width) / 2
-  const y = offset ? frame.y + offset.dy : visible.y + visible.height - height - SUBTITLE_LIFT
+  const centreX = visible.x + (visible.width - width) / 2, homeY = visible.y + visible.height - height - SUBTITLE_LIFT
+  let x = offset ? frame.x + offset.dx : centreX
+  let y = offset ? frame.y + offset.dy : homeY
+  if (Math.abs(x - centreX) <= SUBTITLE_SNAP) x = centreX
+  if (Math.abs(y - homeY) <= SUBTITLE_SNAP) y = homeY
   return { x: clamp(x, visible.x, visible.x + visible.width - width), y: clamp(y, visible.y, visible.y + visible.height - height), width, height }
 }
 
