@@ -3,7 +3,7 @@ import { formatTime } from './notes'
 import { documentTitle, kindLabel } from './noteDocument'
 
 /** One export, described once and rendered to HTML (copy, PDF) and Word. Text may hold **bold** runs. */
-export type ReportBlock = { kind: 'paragraph'; text: string } | { kind: 'quote'; text: string } | { kind: 'bullets'; items: string[] } | { kind: 'numbered'; items: string[] }
+export type ReportBlock = { kind: 'paragraph'; text: string } | { kind: 'quote'; text: string } | { kind: 'bullets'; items: string[] } | { kind: 'numbered'; items: string[] } | { kind: 'table'; header: string[]; rows: string[][] }
 export interface ReportSection { title: string; blocks: ReportBlock[] }
 export interface Report {
   title: string
@@ -53,6 +53,11 @@ export function textSections(text: string): ReportSection[] {
   return sections
 }
 
+/** Cells of a `| a | b |` row, or null when the line is not a table row. `\|` stays a literal pipe. */
+const tableCells = (line: string) => /^\|.*\|$/.test(line) && line.length > 1
+  ? line.slice(1, -1).split(/(?<!\\)\|/).map(cell => cell.trim().replace(/\\\|/g, '|'))
+  : null
+
 /** An AI-written Markdown document: its `#` heading is the report title, `##`… start sections. */
 export function markdownSections(markdown: string): ReportSection[] {
   const sections: ReportSection[] = []
@@ -79,6 +84,14 @@ export function markdownSections(markdown: string): ReportSection[] {
     const quote = line.match(/^>\s?(.*)$/)
     const last = current.blocks[current.blocks.length - 1]
     if (quote) { if (last?.kind === 'quote' && quoteContinues) last.text += ` ${quote[1]}`; else current.blocks.push({ kind: 'quote', text: quote[1] }); continue }
+    const cells = tableCells(line)
+    if (cells) {
+      // The `| :--- |` divider is dropped; rows join one table even when blank lines sit between them.
+      if (cells.every(cell => /^:?-+:?$/.test(cell))) continue
+      if (last?.kind === 'table') last.rows.push(last.header.map((_, index) => cells[index] ?? ''))
+      else current.blocks.push({ kind: 'table', header: cells, rows: [] })
+      continue
+    }
     const bullet = line.match(/^[-•*+]\s+(.+)$/)
     if (bullet) { add('bullets', bullet[1]); continue }
     const numbered = line.match(/^\d+[.)]\s+(.+)$/)
@@ -124,6 +137,7 @@ const inline = (text: string) => inlineRuns(text).map(run => run.bold ? `<strong
 export function reportHtml(report: Report): string {
   const blocks = (items: ReportBlock[]) => items.map(block => block.kind === 'paragraph' ? `<p>${inline(block.text)}</p>`
     : block.kind === 'quote' ? `<blockquote><p>${inline(block.text)}</p></blockquote>`
+    : block.kind === 'table' ? `<table><thead><tr>${block.header.map(cell => `<th>${inline(cell)}</th>`).join('')}</tr></thead><tbody>${block.rows.map(row => `<tr>${row.map(cell => `<td>${inline(cell)}</td>`).join('')}</tr>`).join('')}</tbody></table>`
     : `<${block.kind === 'numbered' ? 'ol' : 'ul'}>${block.items.map(item => `<li>${inline(item)}</li>`).join('')}</${block.kind === 'numbered' ? 'ol' : 'ul'}>`).join('')
   const sections = report.sections.map(section => `${section.title ? `<h2>${escape(section.title)}</h2>` : ''}${blocks(section.blocks)}`).join('')
   const transcript = report.transcript.length ? `<h2>Transcript gốc</h2>${report.transcript.map(line => `<p>${line.time ? `<strong>[${escape(line.time)}]</strong> ` : ''}${line.speaker ? `<strong>${escape(line.speaker)}:</strong> ` : ''}${escape(line.text)}</p>`).join('')}` : ''
@@ -132,7 +146,9 @@ export function reportHtml(report: Report): string {
 
 /** Markdown export: the document as written, or the report's sections. */
 export function reportMarkdown(report: Report): string {
+  const row = (cells: string[]) => `| ${cells.map(cell => cell.replace(/\|/g, '\\|')).join(' | ')} |`
   const block = (item: ReportBlock) => item.kind === 'paragraph' ? item.text : item.kind === 'quote' ? `> ${item.text}`
+    : item.kind === 'table' ? [row(item.header), row(item.header.map(() => '---')), ...item.rows.map(row)].join('\n')
     : item.items.map((text, index) => `${item.kind === 'numbered' ? `${index + 1}.` : '-'} ${text}`).join('\n')
   const parts = [`# ${report.title}`, `_${report.meta.join(' · ')}_`]
   for (const section of report.sections) {
@@ -150,16 +166,29 @@ export function reportFileName(report: Report, extension: string): string {
 
 /** Word document, loaded on demand so `docx` stays out of the main bundle. */
 export async function reportDocx(report: Report): Promise<Uint8Array> {
-  const { Document, Packer, Paragraph, TextRun, HeadingLevel, BorderStyle } = await import('docx')
-  const children = [
+  const { Document, Packer, Paragraph, Table, TableRow, TableCell, TextRun, HeadingLevel, BorderStyle, ShadingType, WidthType } = await import('docx')
+  const runs = (text: string, italics = false, bold = false) => inlineRuns(text).map(run => new TextRun({ text: run.text, bold: bold || run.bold, italics }))
+  // A4 less the default 1-inch margins, in twentieths of a point; Word and Docs both need explicit column widths.
+  const tableWidth = 9026
+  const table = (header: string[], rows: string[][]) => new Table({
+    width: { size: tableWidth, type: WidthType.DXA },
+    columnWidths: header.map(() => Math.floor(tableWidth / header.length)),
+    rows: [header, ...rows].map((cells, rowIndex) => new TableRow({ tableHeader: rowIndex === 0, cantSplit: true, children: cells.map(cell => new TableCell({
+      width: { size: Math.floor(tableWidth / header.length), type: WidthType.DXA },
+      margins: { top: 60, bottom: 60, left: 100, right: 100 },
+      shading: rowIndex === 0 ? { type: ShadingType.CLEAR, color: 'auto', fill: 'EEF0FB' } : undefined,
+      children: [new Paragraph({ spacing: { after: 0 }, children: runs(cell, false, rowIndex === 0) })],
+    })) })),
+  })
+  const children: (InstanceType<typeof Paragraph> | InstanceType<typeof Table>)[] = [
     new Paragraph({ heading: HeadingLevel.TITLE, children: [new TextRun(report.title)] }),
     new Paragraph({ spacing: { after: 240 }, children: [new TextRun({ text: report.meta.join(' · '), italics: true, color: '666666' })] }),
   ]
   for (const section of report.sections) {
     if (section.title) children.push(new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun(section.title)] }))
     for (const block of section.blocks) {
-      const runs = (text: string, italics = false) => inlineRuns(text).map(run => new TextRun({ text: run.text, bold: run.bold, italics }))
-      if (block.kind === 'paragraph') children.push(new Paragraph({ children: runs(block.text) }))
+      if (block.kind === 'table') children.push(table(block.header, block.rows), new Paragraph({ spacing: { after: 0 }, children: [] }))
+      else if (block.kind === 'paragraph') children.push(new Paragraph({ children: runs(block.text) }))
       else if (block.kind === 'quote') children.push(new Paragraph({ indent: { left: 567 }, border: { left: { style: BorderStyle.SINGLE, size: 12, color: '4D5EBE', space: 8 } }, children: runs(block.text, true) }))
       else if (block.kind === 'numbered') block.items.forEach((item, index) => children.push(new Paragraph({ indent: { left: 567, hanging: 340 }, children: [new TextRun(`${index + 1}. `), ...runs(item)] })))
       else for (const item of block.items) children.push(new Paragraph({ bullet: { level: 0 }, children: runs(item) }))

@@ -2,7 +2,8 @@
 .sidebar { width:236px; flex:none; display:flex; flex-direction:column; padding:18px; position:relative; z-index:2; }
 .glass-sidebar { background:var(--sidebar); backdrop-filter:blur(26px) saturate(140%); -webkit-backdrop-filter:blur(26px) saturate(140%); border-right:1px solid var(--border); }
 .brand-row { display:flex; align-items:center; gap:10px; margin-bottom:35px; }
-.brand-icon { width:38px; height:38px; flex:none; display:grid; place-items:center; border-radius:12px; color:#131a2e; background:linear-gradient(135deg,#fff 2%,#ff9fcb 53%,#ada8ff 100%); border:1px solid rgba(255,255,255,.8); box-shadow:0 5px 11px rgba(255,159,203,.3); }
+.brand-icon { width:38px; height:38px; flex:none; display:grid; place-items:center; border-radius:10px; overflow:hidden; box-shadow:0 5px 12px rgba(82,106,222,.28); }
+.brand-icon svg { display:block; }
 .brand-copy { display:flex; flex-direction:column; min-width:0; }
 .brand-copy strong { font-size:21px; line-height:1.1; }
 .brand-copy small { font-size:7px; color:var(--muted); letter-spacing:1.1px; font-weight:800; white-space:nowrap; }
@@ -343,6 +344,10 @@
   .print-report ul, .print-report ol { margin:0 0 6pt; padding-left:18pt; }
   .print-report blockquote { margin:6pt 0 8pt; padding:2pt 0 2pt 10pt; border-left:2pt solid #4d5ebe; color:#444; font-style:italic; }
   .print-report li { margin:0 0 3pt; }
+  .print-report table { width:100%; border-collapse:collapse; margin:4pt 0 10pt; font-size:10pt; line-height:1.45; }
+  .print-report th, .print-report td { border:1px solid #cfd2e6; padding:4pt 6pt; text-align:left; vertical-align:top; }
+  .print-report th { background:#eef0fb; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .print-report tr { break-inside:avoid; }
   .print-report p, .print-report li { break-inside:avoid; }
 }
 /* Expanded note: only title, time and content fill the page. */

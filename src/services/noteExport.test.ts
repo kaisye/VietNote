@@ -53,6 +53,19 @@ describe('note export', () => {
     expect(reportMarkdown(report)).toContain('## Ba ý chính\n\n1. **Một**: giải thích\n2. Hai\n\n> Câu trích tiếp dòng')
   })
 
+  it('turns Markdown tables into tables in every format', async () => {
+    const markdown = '## Lộ trình\n\n| Chặng | Nội dung | Mục tiêu |\n| :--- | :--- | :--- |\n\n| **1. Làm quen** | Email, meeting. | Nắm quy trình. |\n\n| 2. Thực hành | a \\| b |\n\nSau bảng.'
+    const table = { kind: 'table', header: ['Chặng', 'Nội dung', 'Mục tiêu'], rows: [['**1. Làm quen**', 'Email, meeting.', 'Nắm quy trình.'], ['2. Thực hành', 'a | b', '']] }
+    expect(markdownSections(markdown)).toEqual([{ title: 'Lộ trình', blocks: [table, { kind: 'paragraph', text: 'Sau bảng.' }] }])
+    const report = documentReport(demoNote, { id: 'd', kind: 'workshop', length: 'medium', markdown, createdAt: '', updatedAt: '' })
+    const html = reportHtml(report)
+    expect(html).toContain('<table><thead><tr><th>Chặng</th><th>Nội dung</th><th>Mục tiêu</th></tr></thead><tbody><tr><td><strong>1. Làm quen</strong></td>')
+    expect(html).not.toContain('| :---')
+    expect(reportMarkdown(report)).toContain('| Chặng | Nội dung | Mục tiêu |\n| --- | --- | --- |\n| **1. Làm quen** | Email, meeting. | Nắm quy trình. |\n| 2. Thực hành | a \\| b |  |')
+    const bytes = await reportDocx(report)
+    expect(String.fromCharCode(bytes[0], bytes[1])).toBe('PK')
+  })
+
   it('keeps bold runs and drops other inline marks', () => {
     expect(inlineRuns('A **b** `c` _d_ 2*3*4')).toEqual([{ text: 'A ', bold: false }, { text: 'b', bold: true }, { text: ' c d 2*3*4', bold: false }])
   })

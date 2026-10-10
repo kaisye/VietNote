@@ -1,17 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <defs>
-    <linearGradient id="brand" x1="72" y1="48" x2="448" y2="472" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#ffffff"/>
-      <stop offset=".52" stop-color="#ff9fcb"/>
-      <stop offset="1" stop-color="#ada8ff"/>
-    </linearGradient>
-  </defs>
-  <rect x="16" y="16" width="480" height="480" rx="116" fill="url(#brand)"/>
-  <g fill="#131a2e">
-    <rect x="116" y="202" width="34" height="108" rx="17"/>
-    <rect x="178" y="157" width="34" height="198" rx="17"/>
-    <rect x="239" y="111" width="34" height="290" rx="17"/>
-    <rect x="300" y="157" width="34" height="198" rx="17"/>
-    <rect x="362" y="202" width="34" height="108" rx="17"/>
+  <!-- marketing/branding/app-icon-depth.svg, inset 16px like the previous icon so it sits the same size in the Dock. -->
+  <g transform="translate(16 16) scale(.9375)">
+    <rect width="512" height="512" rx="96" fill="#526ADE"/>
+    <g transform="translate(10 66) scale(1.1)">
+      <path fill="#FFFFFF" d="M 80 80 L 168 32 L 168 168 L 168 280 L 80 232 Z"/>
+      <path fill="#D4CEFA" d="M 168 168 L 280 104 L 368 152 L 280 216 L 168 280 Z"/>
+      <path fill="#F4F2FF" d="M 280 216 L 368 152 L 368 272 L 280 320 Z"/>
+    </g>
   </g>
 </svg>
