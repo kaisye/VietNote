@@ -684,6 +684,8 @@
 .file-or::before, .file-or::after { content:""; flex:1; height:1px; background:var(--border); }
 .link-form { display:flex; flex-direction:column; gap:8px; margin-top:16px; padding:8px 8px 10px 16px; }
 .link-form-row { display:flex; align-items:center; gap:10px; }
+.link-input-frame { flex:1; min-width:0; display:flex; align-items:center; gap:10px; min-height:42px; padding:0 12px; border:1px solid color-mix(in srgb, var(--border) 75%, var(--accent) 25%); border-radius:10px; background:var(--input-bg); cursor:text; transition:border-color .15s ease, box-shadow .15s ease; }
+.link-input-frame:focus-within { border-color:var(--accent); box-shadow:0 0 0 2px rgba(var(--tint-strong),.12); }
 .purpose-chips { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
 .purpose-chips>span { margin-right:4px; font-size:10px; font-weight:800; letter-spacing:1px; color:var(--muted); text-transform:uppercase; }
 .purpose-chips button { display:inline-flex; align-items:center; gap:5px; height:28px; padding:0 11px; border-radius:999px; border:1px solid var(--border); background:var(--input-bg); color:var(--muted); font:inherit; font-size:12px; font-weight:650; cursor:pointer; transition:border-color .15s ease, color .15s ease, background .15s ease; }
@@ -708,7 +710,7 @@
 .preview-plain { white-space:pre-wrap; margin:0; font-size:14px; line-height:1.6; }
 .link-form-icon { flex:none; color:var(--accent); }
 .link-form input { flex:1; min-width:0; border:0; outline:0; background:transparent; color:var(--ink); font:inherit; font-size:14px; padding:8px 0; }
-.link-form:focus-within { border-color:var(--accent); }
+.link-form input::placeholder { color:color-mix(in srgb, var(--ink) 55%, var(--canvas)); }
 .file-hint { display:flex; align-items:center; gap:6px; margin-top:12px; color:var(--muted); font-size:12px; }
 @media (prefers-reduced-motion: reduce) { .nav-busy { animation:none; } }
 

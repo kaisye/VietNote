@@ -155,9 +155,9 @@ export function FilePage({ model, setPage }: { model: AppModel; setPage: (page: 
       </button>
       <div className="file-or"><span>hoặc dán link</span></div>
       <form className="glass-card link-form" onSubmit={event => { event.preventDefault(); submitLink() }}>
-        <div className="link-form-row"><Link2 size={18} className="link-form-icon"/>
+        <div className="link-form-row"><label className="link-input-frame"><Link2 size={18} className="link-form-icon"/>
         <input value={link} onChange={event => setLink(event.target.value)}
-          placeholder="Link YouTube, bài giảng, podcast hoặc file âm thanh…" aria-label="Link video hoặc âm thanh" spellCheck={false} autoComplete="off"/>
+          placeholder="Link YouTube, bài giảng, podcast hoặc file âm thanh…" aria-label="Link video hoặc âm thanh" spellCheck={false} autoComplete="off"/></label>
         <button type="submit" className="pill-btn primary" disabled={!looksLikeLink(link) || !purposeReady(job.followUp)}>Bắt đầu</button></div>
         <Purpose value={job.followUp} onChange={job.setFollowUp}/>
       </form>
