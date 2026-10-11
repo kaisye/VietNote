@@ -540,7 +540,7 @@ export function useAppModel() {
     catch (error) { setStatus(`Không lưu được bản phiên dịch: ${error}`) }
   }
   const newNote = (groupID?: string | null) => { const note = createNote(groupID); persist([note, ...notesRef.current], groupsRef.current); return note.id }
-  const updateNote = (id: string, patch: Partial<Pick<MeetingNote, 'title' | 'summary' | 'groupID'>>) => persist(notesRef.current.map(note => note.id === id && !note.isDemo ? { ...note, ...patch, ...(patch.title === undefined ? {} : { titleEdited: true }), ...(patch.summary === undefined ? {} : { structuredSummary: undefined }), updatedAt: now() } : note), groupsRef.current)
+  const updateNote = (id: string, patch: Partial<Pick<MeetingNote, 'title' | 'summary' | 'structuredSummary' | 'groupID'>>) => persist(notesRef.current.map(note => note.id === id && !note.isDemo ? { ...note, ...patch, ...(patch.title === undefined ? {} : { titleEdited: true }), ...(patch.summary === undefined ? {} : { structuredSummary: undefined }), updatedAt: now() } : note), groupsRef.current)
   const addNote = (note: MeetingNote) => persist([note, ...notesRef.current], groupsRef.current)
   /** Removes these notes (never the demo) and hands them back, so the deletion can be undone. */
   const deleteNotes = (ids: string[]) => {

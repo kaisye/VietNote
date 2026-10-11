@@ -365,6 +365,7 @@
 .note-content-actions { display:flex; align-items:center; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
 .note-content-actions .copy-btn { color:var(--ink); background:var(--input-bg); }
 .note-content-actions .segmented button.selected { color:var(--accent); }
+.note-content-actions .icon-btn.selected { color:var(--accent); background:rgba(var(--tint-strong),.12); border-color:rgba(var(--tint-strong),.42); }
 .note-export { position:relative; display:flex; align-items:center; gap:8px; }
 .note-export-trigger .chevron { margin-left:-1px; opacity:.75; transition:transform .2s ease; }
 .note-export-trigger[aria-expanded="true"] .chevron { transform:rotate(180deg); }
@@ -463,11 +464,29 @@
 .structured-section li > strong, .structured-section li > small { display:block; }
 .structured-section li > span + .evidence-link { margin:0 0 0 7px; vertical-align:1px; }
 .structured-summary { position:relative; }
-.evidence-toggle { align-self:flex-end; display:inline-flex; align-items:center; gap:5px; margin-bottom:-4px; border:0; background:transparent; color:var(--muted); font-size:11.5px; padding:2px 4px; border-radius:6px; }
-.evidence-toggle:hover { color:var(--accent); }
 .hide-evidence .evidence-link { display:none; }
 .structured-section li > small { color:var(--muted); margin-top:3px; }
 .evidence-link { display:inline-flex; align-items:center; gap:4px; margin-top:5px; padding:3px 7px; border:1px solid rgba(var(--tint),.45); border-radius:999px; color:var(--accent); background:rgba(var(--tint),.12); font-size:11px; }
+.section-edit-button { display:grid; place-items:center; width:26px; height:26px; margin:-5px -4px -5px auto; padding:0; border:1px solid transparent; border-radius:8px; color:currentColor; background:transparent; opacity:0; transition:opacity .15s ease, background .15s ease, border-color .15s ease; }
+.structured-tldr:hover .section-edit-button, .structured-section:hover .section-edit-button, .section-edit-button:focus-visible { opacity:.72; }
+.section-edit-button:hover { opacity:1; background:var(--input-bg); border-color:var(--border); }
+.inline-section-editor { display:flex; flex-direction:column; gap:7px; margin-top:9px; }
+.inline-section-editor textarea, .inline-section-editor input { width:100%; padding:9px 10px; color:var(--ink); background:var(--input-bg); border:1px solid var(--border); border-radius:9px; font:inherit; font-size:14px; line-height:1.5; }
+.inline-section-editor textarea { min-height:64px; resize:vertical; }
+.inline-section-editor textarea:focus, .inline-section-editor input:focus { border-color:var(--accent); outline:none; box-shadow:0 0 0 2px rgba(var(--tint-strong),.1); }
+.inline-editor-row { display:flex; align-items:flex-start; gap:7px; }
+.inline-editor-row textarea { min-height:54px; flex:1; }
+.inline-editor-row>button { flex:none; display:grid; place-items:center; width:30px; height:30px; margin-top:2px; padding:0; border:0; border-radius:8px; color:var(--danger, #b94f5a); background:transparent; }
+.inline-editor-row>button:hover { background:rgba(185,79,90,.1); }
+.inline-editor-row.action { display:grid; grid-template-columns:minmax(110px,.55fr) minmax(220px,1.6fr) minmax(130px,.7fr) 30px; align-items:start; }
+.inline-editor-row.action textarea { min-height:42px; }
+.inline-editor-row.topic { display:grid; grid-template-columns:minmax(260px,1.5fr) minmax(220px,1fr) 30px; align-items:start; }
+@media (max-width:850px) { .inline-editor-row.action, .inline-editor-row.topic { grid-template-columns:1fr 30px; } .inline-editor-row.action textarea, .inline-editor-row.topic input { grid-column:1; } .inline-editor-row.action>button, .inline-editor-row.topic>button { grid-column:2; grid-row:1; } }
+.inline-editor-actions { display:flex; align-items:center; gap:6px; }
+.inline-editor-actions span { flex:1; }
+.inline-editor-actions button { display:inline-flex; align-items:center; gap:5px; min-height:30px; padding:4px 9px; border:1px solid var(--border); border-radius:8px; color:var(--ink); background:var(--input-bg); font-size:12px; font-weight:650; }
+.inline-editor-actions button.save { color:#fff; background:var(--accent); border-color:var(--accent); }
+.inline-empty { margin-top:7px; color:var(--muted); font-size:13px; font-style:italic; }
 .saved-transcript { display:flex; flex-direction:column; gap:8px; margin-top:10px; }
 .saved-transcript article { padding:9px 11px; border:1px solid transparent; border-radius:9px; transition:background .2s ease,border-color .2s ease; }
 .saved-transcript article p { color:var(--ink); margin-top:4px; }
