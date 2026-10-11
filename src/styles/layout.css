@@ -363,6 +363,8 @@
 .copy-btn { display:inline-flex; align-items:center; gap:5px; height:30px; padding:0 10px; flex:none; border-radius:9px; border:1px solid var(--border); color:var(--accent); background:rgba(var(--tint),.14); font:inherit; font-size:12px; font-weight:650; cursor:pointer; transition:background .18s ease; }
 .copy-btn:hover { background:rgba(var(--tint),.28); }
 .note-content-actions { display:flex; align-items:center; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+.note-content-actions .copy-btn { color:var(--ink); background:var(--input-bg); }
+.note-content-actions .segmented button.selected { color:var(--accent); }
 .note-export { position:relative; display:flex; align-items:center; gap:8px; }
 .note-export-trigger .chevron { margin-left:-1px; opacity:.75; transition:transform .2s ease; }
 .note-export-trigger[aria-expanded="true"] .chevron { transform:rotate(180deg); }
@@ -444,10 +446,15 @@
 .transcript-disclosure summary::-webkit-details-marker { display:none; }
 .transcript-disclosure p { color:var(--muted); font-size:13px; margin-top:10px; white-space:pre-wrap; }
 .structured-summary { display:flex; flex-direction:column; gap:11px; }
-.structured-sheet { border:1px solid var(--border); border-radius:14px; background:rgba(var(--tint),.06); }
+.structured-sheet { border:1px solid var(--border); border-radius:14px; background:#f7f8f6; }
 .structured-tldr, .structured-section { padding:16px 18px; }
 .structured-sheet > * + * { border-top:1px solid var(--border); }
 .structured-tldr h4, .structured-section h4 { display:flex; align-items:center; gap:7px; color:var(--accent); font-size:13px; }
+.structured-sheet .tone-summary h4 { color:var(--summary, var(--accent)); }
+.structured-sheet .tone-decision h4 { color:var(--decision, #6759a6); }
+.structured-sheet .tone-action h4 { color:var(--action, #327565); }
+.structured-sheet .tone-unresolved h4 { color:var(--unresolved, #a56a2b); }
+.structured-sheet .tone-muted h4 { color:var(--muted); }
 .structured-tldr p { margin-top:8px; font-size:14.5px; line-height:1.62; }
 .structured-section ul { margin:9px 0 0; padding-left:18px; }
 .structured-section li { margin:0 0 10px; font-size:14.5px; line-height:1.58; }
@@ -490,6 +497,9 @@
 /* Meeting Q&A island: a pill at rest that springs open into a card (Dynamic Island style). */
 .notes-page .note-editor-scroll, .notes-page.note-expanded .note-editor-scroll { padding-bottom:88px; scroll-padding-bottom:88px; }
 .note-chat.island { --spring:cubic-bezier(.22,1,.36,1); position:absolute; left:calc(50% - 125px); bottom:14px; z-index:10; width:250px; height:44px; overflow:hidden; border-radius:22px; border:1px solid var(--border); background:var(--glass-strong); backdrop-filter:blur(22px) saturate(170%); -webkit-backdrop-filter:blur(22px) saturate(170%); contain:layout paint; box-shadow:0 14px 34px var(--shadow), inset 0 1px 0 rgba(255,255,255,.35); }
+.note-chat.island:not(.open):has(.island-pill:not(:disabled)) { border-color:var(--accent); background:var(--accent); box-shadow:0 12px 28px rgba(var(--tint-strong),.24); }
+.note-chat.island:not(.open) .island-pill:not(:disabled) { color:#fff; }
+.note-chat.island:not(.open) .island-pill:not(:disabled) .island-spark { color:currentColor; }
 /* A critically tuned spring (about 2% overshoot); the cubic-bezier above is the fallback. */
 @supports (transition-timing-function:linear(0, 1)) { .note-chat.island { --spring:linear(0, 0.022, 0.08, 0.159, 0.25, 0.346, 0.442, 0.533, 0.616, 0.692, 0.758, 0.814, 0.862, 0.902, 0.934, 0.959, 0.979, 0.994, 1.004, 1.012, 1.016, 1.019, 1.02, 1.02, 1.019, 1.017, 1.016, 1.014, 1.012, 1.01, 1.008, 1.007, 1.005, 1.004, 1.003, 1.002, 1.002, 1.001, 1.001, 1, 1); } }
 .note-chat.island.ready { transition:left .6s var(--spring), width .6s var(--spring), height .6s var(--spring), border-radius .6s var(--spring), bottom .6s var(--spring), box-shadow .3s ease, scale .25s ease; }
