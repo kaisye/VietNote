@@ -59,6 +59,7 @@ select { min-height:35px; padding:5px 28px 5px 11px; }
 :root[data-theme='light'] .note-day > .note-row + .note-row::before { content:''; position:absolute; top:-1px; left:36px; right:12px; height:1px; background:rgba(var(--tint-strong),.1); pointer-events:none; }
 
 /* Dark gradient: subdued glass edges and blue note accents. */
+:root[data-theme='dark-gradient'] { --unresolved:#b9b5e8; }
 :root[data-theme='dark-gradient'] .glass-card { border-color:var(--border); }
 :root[data-theme='dark-gradient'] .atmosphere::after { background:linear-gradient(180deg,rgba(109,136,213,.035),transparent 65%,rgba(132,91,156,.04)); }
 :root[data-theme='dark-gradient'] .orb-lilac { opacity:.2; }
