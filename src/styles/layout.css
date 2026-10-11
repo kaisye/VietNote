@@ -358,9 +358,8 @@
 .note-group-choice { width:min(260px, 100%); height:36px; padding:0 10px; }
 .note-group-row small { margin-left:auto; white-space:nowrap; }
 .notes-page.note-expanded .note-group-row small { margin-left:0; }
-.note-content-heading { justify-content:space-between; min-height:60px; padding:10px 2px; border-bottom:1px solid var(--border); }
-.note-editor-scroll > .divider + .note-content-heading { margin-top:-15px; }
-.notes-page.note-expanded .note-content-heading { margin-top:0; }
+.note-content-heading { justify-content:space-between; min-height:37px; padding:0 2px 2px; border-bottom:1px solid var(--border); }
+.note-editor-scroll > .divider:has(+ .note-content-heading) { display:none; }
 .note-content-heading h3 { font-size:16px; }
 .copy-btn { display:inline-flex; align-items:center; gap:5px; height:30px; padding:0 10px; flex:none; border-radius:9px; border:1px solid var(--border); color:var(--accent); background:rgba(var(--tint),.14); font:inherit; font-size:12px; font-weight:650; cursor:pointer; transition:background .18s ease; }
 .copy-btn:hover { background:rgba(var(--tint),.28); }
@@ -713,9 +712,9 @@
 
 /* AI viết: documents written from a note */
 .note-view-tabs.segmented { align-self:stretch; gap:18px; padding:0; border:0; border-radius:0; background:transparent; }
-.note-view-tabs button { position:relative; display:inline-flex; align-items:center; gap:6px; min-height:38px; padding:0 2px; border-radius:0; font-size:14px; }
+.note-view-tabs button { position:relative; display:inline-flex; align-items:center; gap:6px; min-height:34px; padding:0 2px; border-radius:0; font-size:14px; }
 .note-view-tabs button.selected { color:var(--ink); background:transparent; box-shadow:none; }
-.note-view-tabs button.selected::after { content:''; position:absolute; left:0; right:0; bottom:-11px; height:2px; border-radius:999px; background:var(--accent); }
+.note-view-tabs button.selected::after { content:''; position:absolute; left:0; right:0; bottom:-3px; height:2px; border-radius:999px; background:var(--accent); }
 .note-view-tabs button:hover { color:var(--ink); }
 .note-view-tabs small { min-width:18px; padding:0 5px; border-radius:999px; background:rgba(var(--tint),.24); color:var(--accent); font-size:10px; font-weight:800; line-height:16px; }
 .note-documents { display:flex; flex-direction:column; gap:14px; margin-top:12px; }
