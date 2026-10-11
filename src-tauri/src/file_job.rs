@@ -8,7 +8,7 @@ use std::path::Path;
 use std::time::Duration;
 
 /// Soniox accepts files up to 500 MB.
-const MAX_BYTES: u64 = 500 * 1024 * 1024;
+pub(crate) const MAX_BYTES: u64 = 500 * 1024 * 1024;
 const EXTENSIONS: [&str; 11] = ["mp3", "m4a", "wav", "aac", "flac", "ogg", "opus", "webm", "mp4", "mov", "aiff"];
 
 #[derive(Serialize)]
@@ -21,6 +21,19 @@ pub(crate) struct AudioFile {
     duration_seconds: Option<f64>,
     /// When the recording was last written, roughly when the meeting ended.
     modified_ms: Option<u64>,
+    /// The page the audio was fetched from, when it came from a link.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_url: Option<String>,
+}
+
+impl AudioFile {
+    /// A file fetched from a link: its length from the page, or read from the file.
+    pub(crate) fn fetched(path: &Path, name: String, duration_seconds: Option<f64>, source_url: String) -> Result<Self, String> {
+        let size = std::fs::metadata(path).map_err(|e| format!("Không đọc được file: {e}"))?.len();
+        let modified_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|age| age.as_millis() as u64);
+        let duration_seconds = duration_seconds.filter(|seconds| *seconds > 0.0).or_else(|| self::duration_seconds(path));
+        Ok(Self { path: path.to_string_lossy().into_owned(), name, size, duration_seconds, modified_ms, source_url: Some(source_url) })
+    }
 }
 
 /// Reads the length from the container header without decoding the audio.
@@ -56,7 +69,7 @@ pub(crate) async fn pick_audio_file(app: tauri::AppHandle) -> Result<Option<Audi
     let probe = path.clone();
     let duration = tauri::async_runtime::spawn_blocking(move || duration_seconds(&probe)).await.unwrap_or(None);
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("audio").to_string();
-    Ok(Some(AudioFile { path: path.to_string_lossy().into_owned(), name, size, duration_seconds: duration, modified_ms }))
+    Ok(Some(AudioFile { path: path.to_string_lossy().into_owned(), name, size, duration_seconds: duration, modified_ms, source_url: None }))
 }
 
 async fn call(body: Value, timeout: Duration) -> Result<Value, String> {

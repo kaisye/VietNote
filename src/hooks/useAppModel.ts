@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { desktop, type AccountStatus } from '../services/desktop'
-import { createNote, demoNote, emptyStructuredSummary, formatStructuredSummary, toTranscriptSegment } from '../services/notes'
+import { createNote, demoNote, emptyStructuredSummary, formatStructuredSummary, timedTranslations, toTranscriptSegment } from '../services/notes'
 import type { AudioInput, Cadence, InterimTranscript, Language, MeetingNote, NoteGroup, SpokenLanguage, StructuredMeetingSummary, Subtitle, TranslationBlock, WorkerMessage } from '../services/types'
 import { useNoteChat } from './useNoteChat'
 import { useLiveChat } from './useLiveChat'
 import { requestSignIn } from '../services/credits'
 import { useFileJob } from './useFileJob'
 import { useNoteDocuments } from './useNoteDocuments'
+import { useNoteTitles } from './useNoteTitles'
 import { useSpeech } from './useSpeech'
 
 const now = () => new Date().toISOString()
@@ -125,6 +126,7 @@ export function useAppModel() {
 
   const noteChat = useNoteChat(notesRef, groupsRef, persist)
   const noteDocuments = useNoteDocuments(notesRef, groupsRef, persist)
+  useNoteTitles(notes, notesRef, groupsRef, persist)
   const liveChat = useLiveChat(() => ({ title: 'Cuộc họp đang diễn ra', summary: overallSummaryRef.current, entries: entriesRef.current }))
 
   useEffect(() => {
@@ -413,7 +415,7 @@ export function useAppModel() {
     const defaultTitle = `Cuộc họp · ${started.toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' })}`
     const pendingNoteID = wasMeeting ? crypto.randomUUID() : null
     if (pendingNoteID) {
-      const pendingNote: MeetingNote = { id: pendingNoteID, title: saveOptions?.title.trim() || defaultTitle, groupID: saveOptions?.groupID ?? null, createdAt: started.toISOString(), updatedAt: now(), duration: 0, summary: '', transcript: '', saving: true }
+      const pendingNote: MeetingNote = { id: pendingNoteID, title: saveOptions?.title.trim() || defaultTitle, groupID: saveOptions?.groupID ?? null, createdAt: started.toISOString(), updatedAt: now(), duration: 0, summary: '', transcript: '', saving: true, source: 'meeting' }
       publishNotes([pendingNote, ...notesRef.current], groupsRef.current)
       savingNoteIDRef.current = pendingNoteID; setSavingNoteID(pendingNoteID); setSavingNoteGroupID(pendingNote.groupID ?? null)
     }
@@ -488,13 +490,14 @@ export function useAppModel() {
     // Notes keep the LLM paragraph translation; Soniox live lines only fill in
     // paragraphs whose LLM pass failed.
     const liveText = new Map(blocksSnapshot.filter(block => block.kind === 'live' && !block.pending).map(block => [block.id, block.translatedText]))
-    const paragraphs = blocksSnapshot.filter(block => block.kind !== 'live').map(block => block.failed
+    const paragraphBlocks = blocksSnapshot.filter(block => block.kind !== 'live')
+    const paragraphs = paragraphBlocks.map(block => block.failed
       ? block.entryIds.map(id => liveText.get(id)).filter(Boolean).join(' ') || block.translatedText
       : block.translatedText)
     const translatedTranscript = !paragraphs.length ? '' : `\n\nBẢN DỊCH TIẾNG VIỆT THEO ĐOẠN\n${paragraphs.map((text, index) => `ĐOẠN ${index + 1}\n${text}`).join('\n\n')}`
     // A title left at the date-based default is replaced by the final summary's suggestion.
     const chosenTitle = saveOptions?.title.trim() || defaultTitle
-    const note: MeetingNote = { id: pendingNoteID!, title: chosenTitle === defaultTitle && structured.title ? structured.title : chosenTitle, groupID: saveOptions?.groupID ?? null, createdAt: started.toISOString(), updatedAt: now(), duration: (endedAtMs - startedAtMs) / 1000, summary: summary || 'Chưa có tóm tắt · vui lòng kiểm tra kết nối.', structuredSummary: structured, transcriptSegments: entriesSnapshot.map(toTranscriptSegment), transcript: sourceTranscript + translatedTranscript, saving: true }
+    const note: MeetingNote = { id: pendingNoteID!, title: chosenTitle === defaultTitle && structured.title ? structured.title : chosenTitle, groupID: saveOptions?.groupID ?? null, createdAt: started.toISOString(), updatedAt: now(), duration: (endedAtMs - startedAtMs) / 1000, summary: summary || 'Chưa có tóm tắt · vui lòng kiểm tra kết nối.', structuredSummary: structured, transcriptSegments: entriesSnapshot.map(toTranscriptSegment), translations: timedTranslations(liveText, paragraphBlocks.map((block, index) => ({ entryIds: block.entryIds, text: paragraphs[index] }))), transcript: sourceTranscript + translatedTranscript, saving: true, source: 'meeting' }
     // Answers that arrived while the final summary ran still belong to this meeting.
     const chatMessages = session === meetingSessionRef.current ? liveChat.messagesRef.current : chatSnapshot
     if (chatMessages.length) note.chatMessages = chatMessages
@@ -515,18 +518,20 @@ export function useAppModel() {
     if (!entries.length) return
     const ids = new Set(entries.map(entry => entry.id))
     const liveText = new Map(blocks.filter(block => block.kind === 'live' && !block.pending && ids.has(block.id)).map(block => [block.id, block.translatedText]))
-    const paragraphs = blocks.filter(block => block.kind !== 'live' && block.entryIds.some(id => ids.has(id)))
-      .map(block => block.failed ? block.entryIds.map(id => liveText.get(id)).filter(Boolean).join(' ') || block.translatedText : block.translatedText)
-      .filter(text => text.trim())
+    const paragraphBlocks = blocks.filter(block => block.kind !== 'live' && block.entryIds.some(id => ids.has(id)))
+      .map(block => ({ entryIds: block.entryIds, text: block.failed ? block.entryIds.map(id => liveText.get(id)).filter(Boolean).join(' ') || block.translatedText : block.translatedText }))
+      .filter(block => block.text.trim())
+    const paragraphs = paragraphBlocks.map(block => block.text)
     // Translation off or a Vietnamese source: the live lines are all there is.
     const translated = paragraphs.length ? paragraphs : [...liveText.values()].filter(text => text.trim()).length ? [[...liveText.values()].join(' ')] : []
     const started = new Date(session.startedAt)
     const sourceTranscript = entries.map(entry => `${new Date(entry.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })} · ${entry.audioSource === 'microphone' ? 'Microphone' : 'System audio'}${entry.speaker ? ` · ${entry.speaker}` : ''}: ${entry.sourceText}`).join('\n')
     const note: MeetingNote = {
-      id: crypto.randomUUID(), title: `Phiên dịch · ${started.toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' })}`, groupID: null,
+      id: crypto.randomUUID(), title: `Phiên dịch · ${started.toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' })}`, groupID: null, source: 'translate',
       createdAt: started.toISOString(), updatedAt: now(), duration: (endedAtMs - session.startedAt) / 1000,
       summary: translated.map((text, index) => `ĐOẠN ${index + 1}\n${text}`).join('\n\n'),
       transcriptSegments: entries.map(toTranscriptSegment),
+      translations: timedTranslations(liveText, paragraphBlocks),
       transcript: sourceTranscript + (translated.length ? `\n\nBẢN DỊCH TIẾNG VIỆT THEO ĐOẠN\n${translated.map((text, index) => `ĐOẠN ${index + 1}\n${text}`).join('\n\n')}` : ''),
     }
     const nextNotes = [note, ...notesRef.current]
@@ -535,9 +540,17 @@ export function useAppModel() {
     catch (error) { setStatus(`Không lưu được bản phiên dịch: ${error}`) }
   }
   const newNote = (groupID?: string | null) => { const note = createNote(groupID); persist([note, ...notesRef.current], groupsRef.current); return note.id }
-  const updateNote = (id: string, patch: Partial<Pick<MeetingNote, 'title' | 'summary' | 'groupID'>>) => persist(notesRef.current.map(note => note.id === id && !note.isDemo ? { ...note, ...patch, ...(patch.summary === undefined ? {} : { structuredSummary: undefined }), updatedAt: now() } : note), groupsRef.current)
+  const updateNote = (id: string, patch: Partial<Pick<MeetingNote, 'title' | 'summary' | 'groupID'>>) => persist(notesRef.current.map(note => note.id === id && !note.isDemo ? { ...note, ...patch, ...(patch.title === undefined ? {} : { titleEdited: true }), ...(patch.summary === undefined ? {} : { structuredSummary: undefined }), updatedAt: now() } : note), groupsRef.current)
   const addNote = (note: MeetingNote) => persist([note, ...notesRef.current], groupsRef.current)
-  const deleteNote = (id: string) => persist(notesRef.current.filter(note => note.id !== id || note.isDemo), groupsRef.current)
+  /** Removes these notes (never the demo) and hands them back, so the deletion can be undone. */
+  const deleteNotes = (ids: string[]) => {
+    const remove = new Set(ids)
+    const removed = notesRef.current.filter(note => remove.has(note.id) && !note.isDemo)
+    if (removed.length) persist(notesRef.current.filter(note => !removed.includes(note)), groupsRef.current)
+    return removed
+  }
+  const deleteNote = (id: string) => { deleteNotes([id]) }
+  const restoreNotes = (restored: MeetingNote[]) => persist([...restored.filter(note => !notesRef.current.some(item => item.id === note.id)), ...notesRef.current], groupsRef.current)
   const createGroup = (raw: string) => { const name = raw.trim(); if (!name || groupsRef.current.some(g => g.name.toLocaleLowerCase() === name.toLocaleLowerCase())) return null; const group = { id: crypto.randomUUID(), name }; persist(notesRef.current, [...groupsRef.current, group]); return group.id }
   const renameGroup = (id: string, raw: string) => { const name = raw.trim(); if (!name || groupsRef.current.some(g => g.id !== id && g.name.toLocaleLowerCase() === name.toLocaleLowerCase())) return false; persist(notesRef.current, groupsRef.current.map(g => g.id === id ? { ...g, name } : g)); return true }
   const deleteGroup = (id: string) => persist(notesRef.current.map(note => note.groupID === id ? { ...note, groupID: null } : note), groupsRef.current.filter(g => g.id !== id))
@@ -576,13 +589,13 @@ export function useAppModel() {
     const timer = window.setInterval(() => void refreshAccount(), 60_000)
     return () => window.clearInterval(timer)
   }, [refreshAccount])
-  const fileJob = useFileJob(addNote, () => void refreshAccount())
+  const fileJob = useFileJob(addNote, () => void refreshAccount(), noteDocuments.write)
 
   return { account, refreshAccount, status, startError, ready, diarizationReady, diarizationStatus, busy, capturing, meetingActive, sourceLanguage, setSourceLanguage, translateForeign, setTranslateForeign, audioInput, setAudioInput, microphoneOn, toggleMicrophone: () => void toggleSource('microphone'), systemAudioOn, toggleSystemAudio: () => void toggleSource('system'), setSources,
     entries, interimTranscripts, translationBlocks, overallSummary, suggestedTitle, titlePending, suggestTitleNow: () => void suggestTitleNow(), summaryStatus, summaryCadence, setSummaryCadence: setCadence,
     cadenceValue, setCadenceValue: setCadenceAmount, notes, noteGroups, savingNoteID, savingNoteGroupID, vietnameseASRStatus, translationStatus,
     canStartMeeting: ready || asrKeyAvailable, canSummarizeNow: meetingActive && !summaryBusy.current && (entries.length > overallSummaryCursor.current || (translating() && entries.length > translationCursorRef.current)),
-    noteChat, noteDocuments, liveChat, speech, start, startMeeting, stop, summarizeNow: () => void summarizeNow(), newNote, addNote, updateNote, deleteNote, fileJob, createGroup, renameGroup, deleteGroup, meetingStartedAt: meetingStartedAt.current }
+    noteChat, noteDocuments, liveChat, speech, start, startMeeting, stop, summarizeNow: () => void summarizeNow(), newNote, addNote, updateNote, deleteNote, deleteNotes, restoreNotes, fileJob, createGroup, renameGroup, deleteGroup, meetingStartedAt: meetingStartedAt.current }
 }
 
 export type AppModel = ReturnType<typeof useAppModel>

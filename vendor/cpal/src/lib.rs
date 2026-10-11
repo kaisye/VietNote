@@ -192,6 +192,9 @@ pub use platform::{
     SupportedInputConfigs, SupportedOutputConfigs, ALL_HOSTS,
 };
 pub use sample_format::{FromSample, Sample, SampleFormat, SizedSample, I24, U24};
+/// Per-app control of system-audio (loopback) capture on macOS.
+#[cfg(target_os = "macos")]
+pub use host::coreaudio::{audio_processes, set_excluded_apps, AudioProcess};
 #[cfg(all(
     target_arch = "wasm32",
     target_os = "unknown",

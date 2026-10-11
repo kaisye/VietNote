@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, ChevronDown, Copy, Download, FileCode2, FileDown, FileText, Printer } from 'lucide-react'
+import { Captions, Check, ChevronDown, Copy, Download, FileCode2, FileDown, FileText, Printer } from 'lucide-react'
 import type { MeetingNote, NoteDocument } from '../services/types'
 import { desktop } from '../services/desktop'
 import { noteContentText } from '../services/notes'
+import { canExportSubtitles, hasTimedTranslation, noteSrt, subtitleFileName, subtitleModes, type SubtitleMode } from '../services/subtitles'
 import { buildReport, documentReport, reportDocx, reportFileName, reportHtml, reportMarkdown, type Report } from '../services/noteExport'
 
 type Status = { kind: 'copied' | 'busy' | 'saved' | 'error'; text: string; path?: string }
@@ -97,6 +98,27 @@ export function NoteExport({ note, document: writing, groupName }: { note: Meeti
     }
   }
 
+  const exportSubtitles = async (mode: SubtitleMode) => {
+    setMenu(false)
+    try {
+      const name = subtitleFileName(note, mode)
+      const bytes = new TextEncoder().encode(noteSrt(note, mode))
+      if (!desktop.isDesktop) {
+        const url = URL.createObjectURL(new Blob([bytes], { type: 'application/x-subrip' }))
+        Object.assign(document.createElement('a'), { href: url, download: name }).click()
+        setTimeout(() => URL.revokeObjectURL(url), 1000)
+        show({ kind: 'saved', text: 'Đã tải phụ đề' })
+        return
+      }
+      const path = await desktop.saveExport(name, toBase64(bytes))
+      if (path) show({ kind: 'saved', text: 'Đã lưu phụ đề', path }, 6000)
+    } catch (error) {
+      show({ kind: 'error', text: typeof error === 'string' ? error : 'Không xuất được phụ đề' })
+    }
+  }
+  const subtitles = !writing && !note.isDemo && canExportSubtitles(note)
+  const translated = hasTimedTranslation(note)
+
   const printReport = (mode: 'pdf' | 'print') => { setMenu(false); setStatus(null); setPrinting({ report: report(), at: Date.now(), mode }) }
 
   return <div className="note-export" ref={root}>
@@ -110,6 +132,10 @@ export function NoteExport({ note, document: writing, groupName }: { note: Meeti
       <button role="menuitem" onClick={() => printReport('pdf')}><FileDown size={17}/><span><strong>PDF</strong><small>{directPdf ? 'Bản chốt để gửi, không sửa được' : pdfPrinterHint}</small></span></button>
       <button role="menuitem" onClick={() => void exportFile('md')}><FileCode2 size={17}/><span><strong>Markdown (.md)</strong><small>Đăng blog, Notion, GitHub</small></span></button>
       {directPdf && <button role="menuitem" onClick={() => printReport('print')}><Printer size={17}/><span><strong>In…</strong><small>Gửi tới máy in</small></span></button>}
+      {subtitles && <>
+        <div className="note-export-section">PHỤ ĐỀ (.SRT)</div>
+        {subtitleModes.map(item => { const needsTranslation = item.mode !== 'source' && !translated; return <button key={item.mode} role="menuitem" disabled={needsTranslation} title={needsTranslation ? 'Ghi chú này chưa có bản dịch gắn với thời gian nói' : undefined} onClick={() => void exportSubtitles(item.mode)}><Captions size={17}/><span><strong>{item.label}</strong><small>{needsTranslation ? 'Chưa có bản dịch theo thời gian' : item.hint}</small></span></button> })}
+      </>}
       <label className={hasTranscript ? '' : 'disabled'}><input type="checkbox" checked={withTranscript && hasTranscript} disabled={!hasTranscript} onChange={event => setWithTranscript(event.target.checked)}/>Kèm transcript gốc</label>
     </div>}
     {printing && createPortal(<article className="print-report" key={printing.at} dangerouslySetInnerHTML={{ __html: reportHtml(printing.report) }}/>, document.body)}

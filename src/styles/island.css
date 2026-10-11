@@ -102,7 +102,7 @@ html.island-host body { font-size:13px; user-select:none; -webkit-user-select:no
 
 /* Language and audio-source menus: above the button in subtitles, below it in the island. */
 .hover-menu { position:relative; display:inline-flex; }
-.menu-options { position:absolute; right:-4px; bottom:calc(100% + 8px); z-index:5; display:flex; flex-direction:column; gap:3px; padding:3px; border-radius:11px; background:#14122a; border:1px solid rgba(173,168,255,.28); box-shadow:0 8px 20px rgba(0,0,0,.45); }
+.menu-options { position:absolute; left:50%; transform:translateX(calc(-50% + var(--menu-shift, 0px))); bottom:calc(100% + 8px); z-index:5; display:flex; flex-direction:column; gap:3px; padding:3px; border-radius:11px; background:#14122a; border:1px solid rgba(173,168,255,.28); box-shadow:0 8px 20px rgba(0,0,0,.45); }
 .menu-options.below { bottom:auto; top:calc(100% + 6px); }
 .menu-caption { padding:4px 8px 1px; max-width:280px; color:var(--island-muted); font-size:11.5px; font-weight:600; line-height:1.35; white-space:normal; }
 .menu-choices { display:flex; gap:2px; }
@@ -112,6 +112,21 @@ html.island-host body { font-size:13px; user-select:none; -webkit-user-select:no
 .menu-options button { height:26px; padding:0 10px; border:0; border-radius:8px; color:var(--island-muted); background:transparent; font-size:12px; font-weight:650; white-space:nowrap; }
 .menu-options button:not(:disabled):hover, .menu-options button:not(:disabled)[data-hover] { color:var(--island-ink); background:rgba(173,168,255,.16); }
 .menu-options button.selected { color:#17142a; background:#f6f6ff; }
+.menu-apps { display:flex; flex-direction:column; gap:2px; min-width:250px; margin-top:3px; padding-top:4px; border-top:1px solid rgba(173,168,255,.2); }
+.menu-app-list { display:flex; flex-direction:column; gap:2px; max-height:150px; overflow-y:auto; }
+.menu-app { display:flex; align-items:center; gap:10px; padding:5px 8px; border-radius:8px; cursor:pointer; }
+.menu-app:hover { background:rgba(173,168,255,.16); }
+.menu-app > span:first-child { flex:1; min-width:0; display:flex; flex-direction:column; line-height:1.25; }
+.menu-app b { font-size:12px; font-weight:650; color:var(--island-ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.menu-app small, .menu-app-empty { font-size:10.5px; color:var(--island-muted); }
+.menu-app-empty { padding:4px 8px; }
+/* The row is the click target; the switch only shows the state. */
+.island-switch { position:relative; flex:none; width:30px; height:18px; }
+.island-switch input { position:absolute; inset:0; margin:0; opacity:0; pointer-events:none; }
+.island-switch i { position:absolute; inset:0; border-radius:99px; background:rgba(173,168,255,.28); transition:background .15s ease; }
+.island-switch i::after { content:''; position:absolute; top:2px; left:2px; width:14px; height:14px; border-radius:50%; background:#fff; transition:transform .15s ease; }
+.island-switch input:checked + i { background:#ef3184; }
+.island-switch input:checked + i::after { transform:translateX(12px); }
 .subtitle-source.awaiting, .island-line p.island-awaiting { opacity:.5; }
 .subtitle-source.lagging { opacity:.6; }
 

@@ -10,7 +10,8 @@ export interface NoteChatRequest {
 }
 export interface NoteChatAnswer { answer: string; evidenceIds: string[]; followUps?: string[]; incomplete?: boolean }
 /** A recording picked for transcription; `durationSeconds` is null when its container does not say. */
-export interface AudioFile { path: string; name: string; size: number; durationSeconds: number | null; modifiedMs: number | null }
+export interface AudioFile { path: string; name: string; size: number; durationSeconds: number | null; modifiedMs: number | null; /** The page it was fetched from, for audio from a link. */ sourceUrl?: string }
+export interface LinkProgress { stage: 'preparing' | 'downloading'; percent: number }
 export interface FileJobStatus { status: 'uploading' | 'processing' | 'completed' | 'failed'; tokens?: FileToken[]; audio_seconds?: number; charged_seconds?: number; error?: string }
 export interface WriteRequest { title: string; lines: string[]; digest: string[]; current: string; kind: DocumentKind; length: DocumentLength; instruction: string }
 export interface WriteProgress { stage: 'reading' | 'writing'; done: number; total: number; text: string }
@@ -24,6 +25,8 @@ export interface DownloadProgress { downloaded: number; total: number }
 /** `path` is set once the read-aloud voice is installed; `available` when this build can get it. */
 export interface VoicePackStatus { path: string | null; available: boolean; downloading: boolean; partialBytes: number; sizeBytes: number; removable: boolean }
 export interface VoicePackProgress extends DownloadProgress { unpacking: boolean }
+export interface AudioApp { id: string; name: string }
+
 const isDesktop = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 let saveQueue: Promise<void> = Promise.resolve()
 
@@ -52,8 +55,13 @@ export const desktop = {
   stopAudio: () => invoke<void>('stop_audio'),
   setMicrophone: (enabled: boolean) => invoke<void>('set_microphone', { enabled }),
   setSystemAudio: (enabled: boolean) => invoke<void>('set_system_audio', { enabled }),
-  summarizeSegments: (segments: TranscriptSegment[], previousSummary?: StructuredMeetingSummary) =>
-    invoke<StructuredMeetingSummary>('summarize_segments', { segments, previousSummary: previousSummary ?? null }),
+  /** Apps playing sound right now (macOS); an app's id is its bundle ID. */
+  audioApps: () => invoke<AudioApp[]>('audio_apps'),
+  /** Leaves these apps out of system audio, also mid-recording. */
+  setExcludedApps: (apps: string[]) => invoke<void>('set_excluded_apps', { apps }),
+  /** `source` describes a recording that may not be a meeting, e.g. a video from a link. */
+  summarizeSegments: (segments: TranscriptSegment[], previousSummary?: StructuredMeetingSummary, source?: string) =>
+    invoke<StructuredMeetingSummary>('summarize_segments', { segments, previousSummary: previousSummary ?? null, source: source ?? null }),
   askNote: (request: NoteChatRequest, onProgress?: (answer: NoteChatAnswer) => void) => {
     const onProgressChannel = new Channel<NoteChatAnswer>()
     onProgressChannel.onmessage = answer => onProgress?.(answer)
@@ -82,6 +90,13 @@ export const desktop = {
     channel.onmessage = onProgress
     return invoke<void>('file_job_upload', { jobId, path, language, translate, onProgress: channel })
   },
+  /** Downloads the audio behind a video or recording link; rejects with "cancelled" when stopped. */
+  fetchLinkAudio: (url: string, onProgress: (progress: LinkProgress) => void) => {
+    const channel = new Channel<LinkProgress>()
+    channel.onmessage = onProgress
+    return invoke<AudioFile>('fetch_link_audio', { url, onProgress: channel })
+  },
+  cancelLinkAudio: () => invoke<void>('cancel_link_audio'),
   fileJobStatus: (jobId: string) => invoke<FileJobStatus>('file_job_status', { jobId }),
   fileJobCleanup: (jobId: string) => invoke<void>('file_job_cleanup', { jobId }),
   fileJobCancel: (jobId: string) => invoke<void>('file_job_cancel', { jobId }),

@@ -102,7 +102,7 @@ export function SubtitleView({ screen, screens, layout, lines, status, active, c
   }, [])
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || (event.target as Element).closest('button')) return
+    if (event.button !== 0 || (event.target as Element).closest('button, label, .menu-options')) return
     dragged.current = false
     drag.current = { id: event.pointerId, screenX: event.screenX, screenY: event.screenY, from: frameRef.current }
     event.currentTarget.setPointerCapture(event.pointerId)

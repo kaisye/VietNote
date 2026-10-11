@@ -23,6 +23,7 @@ use crate::{
 mod device;
 pub mod enumerate;
 mod loopback;
+pub use loopback::{audio_processes, set_excluded_apps, AudioProcess};
 mod property_listener;
 pub use device::Device;
 

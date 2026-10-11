@@ -7,6 +7,8 @@ import { BrandIcon } from '../components/BrandIcon'
 import { ChatMarkdown } from '../components/ChatMarkdown'
 import { SubtitleView } from './SubtitleView'
 import { HoverMenu } from './HoverMenu'
+import { AppList } from './AppList'
+import { appChoiceAvailable, useAudioApps } from '../services/audioApps'
 import { SpeechMenu } from './SpeechMenu'
 import { useStickToBottom } from '../hooks/useStickToBottom'
 import {
@@ -59,6 +61,7 @@ export function IslandApp() {
   const [menu, setMenu] = useState<string | null>(null)
   const menuRef = useRef<string | null>(null)
   menuRef.current = menu
+  const audioApps = useAudioApps(menu === 'source')
   const menuProps = (name: string) => ({ name, open: menu === name, onOpen: (open: boolean) => setMenu(current => open ? name : current === name ? null : current) })
   /** The control under the pointer: its description, placed under it in panel coordinates. */
   const [tip, setTip] = useState<{ text: string; top: number; left?: number; right?: number } | null>(null)
@@ -289,8 +292,9 @@ export function IslandApp() {
     const target = event.target as Element
     pressed.current = target
     const panel = levelRef.current === 'expanded'
-    // An opened island moves by its header (or the strip beside the notch above it); buttons and the text keep their own clicks.
-    if (event.button !== 0 || !current || target.closest('button, input') || (panel && !panelGrip(target))) return
+    // An opened island moves by its header (or the strip beside the notch above it); buttons, open
+    // menus (their switch rows included) and the text keep their own clicks.
+    if (event.button !== 0 || !current || target.closest('button, input, label, .menu-options') || (panel && !panelGrip(target))) return
     const cursorX = current.frame.x + event.clientX, cursorY = current.frame.y + event.clientY
     const keepGrab = panel || (levelRef.current === 'collapsed' && !notchShaped)
     drag.current = {
@@ -414,7 +418,9 @@ export function IslandApp() {
           <button className={`island-icon ${pinned ? 'on' : ''}`} onClick={togglePinned} data-tip={pinned ? 'Bỏ ghim: tự thu gọn khi bấm ra ngoài' : 'Ghim: luôn mở'} aria-pressed={pinned}><Pin size={15}/></button>
           <HoverMenu {...menuProps('source')} below caption value={state?.source ?? null} options={sourceOptions.map(option => ({ ...option, disabled: !state?.active && !state?.canStart }))}
             onChange={value => toMain(islandEvents.source, value)} disabled={!state?.active && !state?.canStart} title={state?.active ? 'Dừng nghe và lưu' : 'Bắt đầu nghe'}
-            icon={state?.active ? <Square size={12} fill="currentColor"/> : <Mic size={15}/>} onClick={() => toMain(state?.active ? islandEvents.stop : islandEvents.start)}/>
+            icon={state?.active ? <Square size={12} fill="currentColor"/> : <Mic size={15}/>} onClick={() => toMain(state?.active ? islandEvents.stop : islandEvents.start)}>
+            {appChoiceAvailable && state?.source !== 'microphone' && <AppList audio={audioApps}/>}
+          </HoverMenu>
           <button className="island-icon" onClick={() => setMode('subtitle')} data-tip="Chế độ phụ đề: chỉ hiện câu đang nói · hoặc nhấp đúp thanh trên"><Captions size={15}/></button>
           <button className="island-icon" onClick={() => void invoke('island_open_main').catch(() => {})} data-tip="Mở cửa sổ VietNote"><AppWindow size={15}/></button>
           <button className="island-icon" onClick={collapse} data-tip="Thu gọn (Esc)"><ChevronUp size={16}/></button>

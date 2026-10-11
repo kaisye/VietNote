@@ -1,5 +1,6 @@
+/** The app's look: notebook paper or the original light glass. */
+export type Theme = 'paper' | 'light'
 export type Page = 'home' | 'notes' | 'translate' | 'file' | 'settings'
-export type Appearance = 'system' | 'light' | 'dark'
 /** Meeting setting; 'auto' lets the streaming ASR (Soniox) detect the spoken language. */
 export type Language = 'auto' | 'zh' | 'en' | 'vi'
 export type SpokenLanguage = Exclude<Language, 'auto'>
@@ -22,7 +23,15 @@ export interface MeetingNote {
   documents?: NoteDocument[]
   /** The AI's notes from reading a long transcript, reused when it writes again. */
   digest?: { size: number; parts: string[] }
+  /** The Vietnamese translation tied to the transcript lines it translates, for timed subtitles. */
+  translations?: TimedTranslation[]
+  /** Where the note came from; older notes have none and are inferred by `noteSource`. */
+  source?: NoteSource
+  /** The user named the note themselves. */
+  titleEdited?: boolean
 }
+export type NoteSource = 'meeting' | 'translate' | 'file' | 'link' | 'manual'
+export interface TimedTranslation { entryIds: string[]; text: string }
 export type DocumentKind = 'meeting' | 'lecture' | 'workshop' | 'article' | 'post' | 'custom'
 export type DocumentLength = 'short' | 'medium' | 'long'
 export interface NoteDocument {

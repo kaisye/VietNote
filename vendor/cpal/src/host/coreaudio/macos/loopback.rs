@@ -4,18 +4,24 @@ use std::{
     ffi::{c_void, CStr},
     mem::MaybeUninit,
     ptr::NonNull,
-    sync::atomic::{AtomicU32, Ordering},
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Mutex, Once,
+    },
+    time::Duration,
 };
 
 static AGGREGATE_INSTANCE_COUNTER: AtomicU32 = AtomicU32::new(0);
 
-use objc2::{rc::Retained, AnyThread};
+use objc2::{rc::Retained, runtime::NSObjectProtocol, sel, AnyThread};
 use objc2_core_audio::{
     kAudioAggregateDeviceNameKey, kAudioAggregateDeviceTapAutoStartKey,
     kAudioAggregateDeviceTapListKey, kAudioAggregateDeviceUIDKey, kAudioDevicePropertyDeviceUID,
     kAudioEndPointDeviceIsPrivateKey, kAudioObjectPropertyElementMain,
     kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject, kAudioObjectUnknown,
     kAudioHardwarePropertyTranslatePIDToProcessObject, kAudioSubTapDriftCompensationKey, kAudioSubTapUIDKey,
+    kAudioHardwarePropertyProcessObjectList, kAudioProcessPropertyBundleID, kAudioProcessPropertyIsRunningOutput,
+    kAudioProcessPropertyPID, kAudioTapPropertyDescription, AudioObjectGetPropertyDataSize, AudioObjectSetPropertyData,
     AudioHardwareCreateAggregateDevice, AudioHardwareCreateProcessTap,
     AudioHardwareDestroyAggregateDevice, AudioHardwareDestroyProcessTap,
     AudioObjectGetPropertyData, AudioObjectID, AudioObjectPropertyAddress, CATapDescription,
@@ -96,6 +102,167 @@ fn current_audio_process() -> Result<Option<AudioObjectID>, Error> {
     Ok((process != kAudioObjectUnknown as AudioObjectID).then_some(process))
 }
 
+/// Apps left out of system-audio capture, by bundle ID. A process matches its app's ID or one
+/// below it, so `com.google.Chrome` also covers `com.google.Chrome.helper`, which plays the tabs.
+static EXCLUDED_APPS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// Running taps, so a changed list (or an app that starts playing later) applies mid-recording.
+static LIVE_TAPS: Mutex<Vec<LiveTap>> = Mutex::new(Vec::new());
+static WATCHER: Once = Once::new();
+
+struct LiveTap {
+    id: AudioObjectID,
+    description: Retained<CATapDescription>,
+    excluded: Vec<AudioObjectID>,
+}
+// Only touched under LIVE_TAPS; the description's properties are atomic.
+unsafe impl Send for LiveTap {}
+
+/// A process Core Audio knows about, as listed by [`audio_processes`].
+#[derive(Clone, Debug)]
+pub struct AudioProcess {
+    pub pid: i32,
+    pub bundle_id: String,
+    /// Sending sound to an output right now.
+    pub playing: bool,
+}
+
+/// Every process connected to Core Audio, with its bundle ID (empty for plain binaries).
+pub fn audio_processes() -> Vec<AudioProcess> {
+    process_objects()
+        .into_iter()
+        .filter_map(|object| {
+            Some(AudioProcess {
+                pid: process_value::<i32>(object, kAudioProcessPropertyPID)?,
+                bundle_id: process_bundle_id(object).unwrap_or_default(),
+                playing: process_value::<u32>(object, kAudioProcessPropertyIsRunningOutput).unwrap_or(0) != 0,
+            })
+        })
+        .collect()
+}
+
+/// Leaves these apps (bundle IDs) out of system-audio capture, including recordings already running.
+pub fn set_excluded_apps(apps: Vec<String>) {
+    *EXCLUDED_APPS.lock().unwrap_or_else(|e| e.into_inner()) = apps;
+    refresh_taps();
+}
+
+fn excluded_apps_match(bundle_id: &str, apps: &[String]) -> bool {
+    apps.iter().any(|app| bundle_id == app || bundle_id.strip_prefix(app.as_str()).is_some_and(|rest| rest.starts_with('.')))
+}
+
+/// Our own process and every process of an excluded app, as Core Audio object IDs.
+fn excluded_process_objects() -> Vec<AudioObjectID> {
+    let apps = EXCLUDED_APPS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let own = std::process::id() as i32;
+    let mut objects: Vec<AudioObjectID> = process_objects()
+        .into_iter()
+        .filter(|&object| {
+            process_value::<i32>(object, kAudioProcessPropertyPID) == Some(own)
+                || (!apps.is_empty() && process_bundle_id(object).is_some_and(|id| excluded_apps_match(&id, &apps)))
+        })
+        .collect();
+    objects.sort_unstable();
+    objects
+}
+
+fn ns_numbers(objects: &[AudioObjectID]) -> Retained<NSArray<NSNumber>> {
+    let numbers: Vec<Retained<NSNumber>> = objects.iter().map(|&id| NSNumber::numberWithUnsignedInt(id)).collect();
+    NSArray::from_retained_slice(&numbers)
+}
+
+/// Points every running tap at the current exclusions. Apps open new audio processes as they go
+/// (a browser tab starting a video), so a watcher calls this every second while taps run.
+fn refresh_taps() {
+    let mut taps = LIVE_TAPS.lock().unwrap_or_else(|e| e.into_inner());
+    if taps.is_empty() {
+        return;
+    }
+    let excluded = excluded_process_objects();
+    for tap in taps.iter_mut().filter(|tap| tap.excluded != excluded) {
+        let property = AudioObjectPropertyAddress {
+            mSelector: kAudioTapPropertyDescription,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain,
+        };
+        unsafe { tap.description.setProcesses(&ns_numbers(&excluded)) };
+        let pointer: *const CATapDescription = &*tap.description;
+        let status = unsafe {
+            AudioObjectSetPropertyData(
+                tap.id,
+                NonNull::from(&property),
+                0,
+                std::ptr::null(),
+                std::mem::size_of::<*const CATapDescription>() as u32,
+                NonNull::from(&pointer).cast(),
+            )
+        };
+        if status == 0 {
+            tap.excluded = excluded.clone();
+        }
+    }
+}
+
+fn watch_taps() {
+    WATCHER.call_once(|| {
+        std::thread::Builder::new()
+            .name("cpal-tap-exclusions".into())
+            .spawn(|| loop {
+                std::thread::sleep(Duration::from_secs(1));
+                refresh_taps();
+            })
+            .ok();
+    });
+}
+
+fn process_objects() -> Vec<AudioObjectID> {
+    let property = AudioObjectPropertyAddress {
+        mSelector: kAudioHardwarePropertyProcessObjectList,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+    let system = kAudioObjectSystemObject as AudioObjectID;
+    let mut size = 0u32;
+    let status = unsafe { AudioObjectGetPropertyDataSize(system, NonNull::from(&property), 0, std::ptr::null(), NonNull::from(&mut size)) };
+    if status != 0 || size == 0 {
+        return Vec::new();
+    }
+    let mut objects = vec![0 as AudioObjectID; size as usize / std::mem::size_of::<AudioObjectID>()];
+    let status = unsafe {
+        AudioObjectGetPropertyData(system, NonNull::from(&property), 0, std::ptr::null(), NonNull::from(&mut size), NonNull::new(objects.as_mut_ptr()).unwrap().cast())
+    };
+    if status != 0 {
+        return Vec::new();
+    }
+    objects.truncate(size as usize / std::mem::size_of::<AudioObjectID>());
+    objects
+}
+
+fn process_value<T: Copy + Default>(object: AudioObjectID, selector: u32) -> Option<T> {
+    let property = AudioObjectPropertyAddress { mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain };
+    let mut value = T::default();
+    let mut size = std::mem::size_of::<T>() as u32;
+    let status = unsafe { AudioObjectGetPropertyData(object, NonNull::from(&property), 0, std::ptr::null(), NonNull::from(&mut size), NonNull::from(&mut value).cast()) };
+    (status == 0).then_some(value)
+}
+
+fn process_bundle_id(object: AudioObjectID) -> Option<String> {
+    let property = AudioObjectPropertyAddress {
+        mSelector: kAudioProcessPropertyBundleID,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+    let mut cfstring: CFStringRef = std::ptr::null_mut();
+    let mut size = std::mem::size_of::<CFStringRef>() as u32;
+    let status = unsafe { AudioObjectGetPropertyData(object, NonNull::from(&property), 0, std::ptr::null(), NonNull::from(&mut size), NonNull::from(&mut cfstring).cast()) };
+    if status != 0 || cfstring.is_null() {
+        return None;
+    }
+    // The HAL hands over a +1 reference.
+    let string: Retained<NSString> = unsafe { Retained::from_raw(cfstring as *mut NSString)? };
+    let id = string.to_string();
+    (!id.is_empty()).then_some(id)
+}
+
 /// An aggregate device with tap for recording system output.
 ///
 /// Its main difference with [`Device`] is that it's destroyed when dropped.
@@ -118,13 +285,15 @@ impl LoopbackDevice {
         let pid = std::process::id();
         let instance = AGGREGATE_INSTANCE_COUNTER.fetch_add(1, Ordering::Relaxed);
 
-        // Exclude our own playback while retaining audio from other apps.
-        let process = current_audio_process()?;
-        let process_number = process.map(NSNumber::numberWithUnsignedInt);
-        let processes = match process_number.as_ref() {
-            Some(number) => NSArray::from_slice(&[number.as_ref()]),
-            None => NSArray::new(),
-        };
+        // Exclude our own playback, and any app the user left out, while keeping other apps.
+        let mut excluded = excluded_process_objects();
+        if let Some(process) = current_audio_process()? {
+            if !excluded.contains(&process) {
+                excluded.push(process);
+                excluded.sort_unstable();
+            }
+        }
+        let processes = ns_numbers(&excluded);
         // A global tap follows whatever the system plays to, so audio keeps coming when
         // the output switches mid-recording (AirPods connecting, speakers taking over).
         // A tap bound to the device's UID goes silent as soon as another device is used.
@@ -136,10 +305,16 @@ impl LoopbackDevice {
             )
         };
         unsafe {
-            let bundle_id = NSString::from_str("local.vietnote.desktop");
-            let bundle_ids = NSArray::from_slice(&[bundle_id.as_ref()]);
-            tap_desc.setBundleIDs(&bundle_ids);
-            tap_desc.setProcessRestoreEnabled(true);
+            // bundleIDs and processRestoreEnabled arrived in macOS 26; older systems would throw on
+            // the unknown selector. The process list above covers them there.
+            if tap_desc.respondsToSelector(sel!(setBundleIDs:)) {
+                let bundle_id = NSString::from_str("local.vietnote.desktop");
+                let bundle_ids = NSArray::from_slice(&[bundle_id.as_ref()]);
+                tap_desc.setBundleIDs(&bundle_ids);
+            }
+            if tap_desc.respondsToSelector(sel!(setProcessRestoreEnabled:)) {
+                tap_desc.setProcessRestoreEnabled(true);
+            }
             tap_desc.setMuteBehavior(CATapMuteBehavior::Unmuted); // captured audio still goes to speakers
             tap_desc.setName(&NSString::from_str(&format!(
                 "cpal output recorder {pid}.{instance}"
@@ -156,6 +331,8 @@ impl LoopbackDevice {
             tap_obj_id.assume_init()
         };
         let tap_uid = unsafe { tap_desc.UUID().UUIDString() };
+        LIVE_TAPS.lock().unwrap_or_else(|e| e.into_inner()).push(LiveTap { id: tap_obj_id, description: tap_desc.clone(), excluded });
+        watch_taps();
 
         // 2 - Create aggregate device
         let aggregate_device_properties = create_audio_aggregate_device_properties(
@@ -181,6 +358,7 @@ impl LoopbackDevice {
 
 impl Drop for LoopbackDevice {
     fn drop(&mut self) {
+        LIVE_TAPS.lock().unwrap_or_else(|e| e.into_inner()).retain(|tap| tap.id != self.tap_id);
         unsafe {
             // We don't check status to avoid panic during `drop`
             let _status =

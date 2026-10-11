@@ -1,4 +1,4 @@
-import type { MeetingNote, NoteGroup, StructuredMeetingSummary, TranscriptSegment, Subtitle } from './types'
+import type { NoteSource, MeetingNote, NoteGroup, StructuredMeetingSummary, TimedTranslation, TranscriptSegment, Subtitle } from './types'
 
 export const emptyStructuredSummary = (): StructuredMeetingSummary => ({
   tldr: '', keyPoints: [], decisions: [], tentativeDecisions: [], unresolvedTopics: [],
@@ -21,6 +21,17 @@ export function formatStructuredSummary(summary: StructuredMeetingSummary): stri
 
 export function toTranscriptSegment(entry: Pick<Subtitle, 'id' | 'timestamp' | 'startedAt' | 'audioSource' | 'sourceText' | 'rawText' | 'endedAt' | 'speaker' | 'speakerProvisional'>): TranscriptSegment {
   return { id: entry.id, timestamp: entry.timestamp, startedAt: entry.startedAt, audioSource: entry.audioSource, rawText: entry.rawText ?? entry.sourceText, cleanText: entry.sourceText, endedAt: entry.endedAt, speaker: entry.speaker, speakerProvisional: entry.speakerProvisional }
+}
+
+/**
+ * The translation saved with a note for timed subtitles: each line's own live translation
+ * when there is one (it matches the speech exactly), else the paragraph covering it.
+ */
+export function timedTranslations(liveText: Map<string, string>, paragraphs: TimedTranslation[]): TimedTranslation[] {
+  const live = [...liveText].filter(([, text]) => text.trim()).map(([id, text]) => ({ entryIds: [id], text }))
+  const covered = new Set(live.flatMap(item => item.entryIds))
+  const rest = paragraphs.filter(block => block.text.trim() && !block.entryIds.some(id => covered.has(id)))
+  return [...live, ...rest]
 }
 
 export interface NoteMoment { id: number; title: string; overview: string[]; decisions: string[]; actions: string[] }
@@ -57,7 +68,7 @@ export const demoNote: MeetingNote = {
 
 export function createNote(groupID?: string | null): MeetingNote {
   const now = new Date().toISOString()
-  return { id: crypto.randomUUID(), title: 'Ghi chú mới', createdAt: now, updatedAt: now, duration: 0, summary: '', transcript: '', groupID }
+  return { id: crypto.randomUUID(), title: 'Ghi chú mới', createdAt: now, updatedAt: now, duration: 0, summary: '', transcript: '', groupID, source: 'manual' }
 }
 
 export function noteInScope(note: MeetingNote, scope: string, groups: NoteGroup[]): boolean {
@@ -81,4 +92,66 @@ export function noteContentText(note: MeetingNote): string {
 export function noteTranscriptText(note: MeetingNote): string {
   if (!note.transcriptSegments?.length) return note.transcript.trim()
   return note.transcriptSegments.map(segment => `[${formatTime(segment.timestamp, false)}] ${segment.speaker ? `${segment.speaker}: ` : ''}${segment.cleanText}`).join('\n')
+}
+
+/** Where a note came from, guessed from its content for notes saved before `source` existed. */
+export function noteSource(note: MeetingNote): NoteSource {
+  if (note.source) return note.source
+  if (/^Nguồn: https?:\/\//.test(note.transcript)) return 'link'
+  if (note.transcriptSegments?.some(segment => segment.audioSource === 'file')) return 'file'
+  if (note.title.startsWith('Phiên dịch')) return 'translate'
+  return note.transcriptSegments?.length || note.transcript.trim() || note.isDemo ? 'meeting' : 'manual'
+}
+
+/** A name made from the date alone ("Cuộc họp · 22:47 10/10/26"), which says nothing of the content. */
+export const hasDateTitle = (note: MeetingNote) => /^(Cuộc họp|Phiên dịch) · [\d:,/ ]+$/.test(note.title.trim())
+
+/** The opening of what was said, for naming a note. */
+export function titleSourceText(note: MeetingNote): string {
+  const text = note.transcriptSegments?.length ? note.transcriptSegments.map(segment => segment.cleanText).join('\n') : note.transcript
+  return text.slice(0, 6000).trim()
+}
+
+/** Lowercase without Vietnamese marks, so "hop" finds "họp". */
+export const searchKey = (text: string) => text.normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLocaleLowerCase()
+
+export function noteMatches(note: MeetingNote, query: string): boolean {
+  const words = searchKey(query).split(/\s+/).filter(Boolean)
+  if (!words.length) return true
+  const text = searchKey([note.title, note.summary, note.structuredSummary?.tldr ?? '', note.transcript, ...(note.documents ?? []).map(document => document.markdown)].join('\n'))
+  return words.every(word => text.includes(word))
+}
+
+/** The local calendar day, as YYYY-MM-DD. */
+export function dayKey(date: Date | string): string {
+  const value = typeof date === 'string' ? new Date(date) : date
+  if (Number.isNaN(value.getTime())) return ''
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`
+}
+
+/** "Hôm nay", "Hôm qua", or the weekday and date (with the year when not this year). */
+export function dayLabel(key: string, today = new Date()): string {
+  const [year, month, day] = key.split('-').map(Number)
+  const date = new Date(year, month - 1, day)
+  const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1)
+  if (key === dayKey(today)) return 'Hôm nay'
+  if (key === dayKey(yesterday)) return 'Hôm qua'
+  const weekday = new Intl.DateTimeFormat('vi-VN', { weekday: 'long' }).format(date)
+  return `${weekday.charAt(0).toLocaleUpperCase()}${weekday.slice(1)}, ${day}/${month}${year === today.getFullYear() ? '' : `/${year}`}`
+}
+
+/** Under this many seconds, or this many characters said, a recording counts as short. */
+const SHORT_SECONDS = 120
+const SHORT_CHARACTERS = 300
+
+/**
+ * A note with little in it, offered for clean-up: a short or nearly silent recording, or an empty
+ * hand-written note. Anything the user has put work into (renamed, filed in a group, asked the AI
+ * about, had a document written from) is left alone.
+ */
+export function isShortNote(note: MeetingNote): boolean {
+  if (note.isDemo || note.saving || note.titleEdited || note.groupID || note.documents?.length || note.chatMessages?.length) return false
+  if (noteSource(note) === 'manual') return note.summary.trim().length < 20
+  const said = note.transcriptSegments?.length ? note.transcriptSegments.map(segment => segment.cleanText).join(' ') : note.transcript
+  return (note.duration > 0 && note.duration < SHORT_SECONDS) || said.trim().length < SHORT_CHARACTERS
 }

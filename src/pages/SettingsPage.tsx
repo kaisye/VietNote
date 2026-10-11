@@ -1,11 +1,16 @@
 import { useState } from 'react'
 import { emitTo } from '@tauri-apps/api/event'
-import { Circle, PanelTop } from 'lucide-react'
+import { Palette, PanelTop } from 'lucide-react'
+import type { Theme } from '../services/types'
 import { islandEnabled, islandEvents, isMac, saveIslandEnabled, shortcutLabel } from '../services/island'
-import type { Appearance } from '../services/types'
 
 
-export function SettingsPage({ appearance, setAppearance }: { appearance: Appearance; setAppearance: (value: Appearance) => void }) {
+const themes: { key: Theme; label: string; hint: string }[] = [
+  { key: 'light', label: 'Sáng', hint: 'Nền trắng hồng, ánh xanh băng và kính lavender.' },
+  { key: 'paper', label: 'Giấy', hint: 'Giấy ngà chấm lưới, chữ màu mực.' },
+]
+
+export function SettingsPage({ theme, setTheme }: { theme: Theme; setTheme: (value: Theme) => void }) {
   const [island, setIsland] = useState(islandEnabled)
   const toggleIsland = (enabled: boolean) => {
     setIsland(enabled)
@@ -17,10 +22,11 @@ export function SettingsPage({ appearance, setAppearance }: { appearance: Appear
     <h1>Cài đặt & trạng thái</h1>
     <p className="page-subtitle">Tùy chỉnh VietNote theo cách bạn muốn sử dụng.</p>
 
+
     <section className="glass-card settings-card">
-      <div className="settings-heading"><Circle size={19}/><h3>Giao diện</h3><small>Liquid Glass</small></div>
-      <div className="segmented appearance-picker">{([['system','Hệ thống'], ['light','Sáng'], ['dark','Tối']] as const).map(([key, label]) => <button key={key} className={appearance === key ? 'selected' : ''} onClick={() => setAppearance(key)}>{label}</button>)}</div>
-      <small className="muted">{appearance === 'system' ? 'Tự động theo giao diện hệ thống.' : appearance === 'light' ? 'Nền trắng hồng, ánh xanh băng và kính lavender.' : 'Nền tím đêm, ánh lavender và hồng phấn.'}</small>
+      <div className="settings-heading"><Palette size={19}/><h3>Giao diện</h3></div>
+      <div className="segmented appearance-picker">{themes.map(item => <button key={item.key} className={theme === item.key ? 'selected' : ''} onClick={() => setTheme(item.key)}>{item.label}</button>)}</div>
+      <small className="muted">{themes.find(item => item.key === theme)!.hint}</small>
     </section>
 
     <section className="glass-card settings-card">

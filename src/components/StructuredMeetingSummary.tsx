@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { CheckCheck, CircleHelp, Clock3, GitBranch, ListTodo, PauseCircle, Sparkles, Text } from 'lucide-react'
 import type { ActionItem, StructuredMeetingSummary, SummaryBullet, UnresolvedTopic } from '../services/types'
 
@@ -25,8 +26,17 @@ function Unresolved({ items, onEvidence, evidenceLabel }: { items: UnresolvedTop
   return <section className="structured-section"><h4><GitBranch size={15}/>Vấn đề chưa chốt</h4><ul>{items.map((item, index) => <li key={item.id || `unresolved-${index}`}><strong>{item.topic}</strong>{item.options.length > 0 && <small>Lựa chọn: {item.options.join(', ')}</small>}<small>{item.status === 'No final decision' ? 'Chưa có quyết định cuối cùng' : item.status}</small><Evidence ids={item.evidenceIds} onEvidence={onEvidence} evidenceLabel={evidenceLabel}/></li>)}</ul></section>
 }
 
+const SHOW_KEY = 'summaryEvidenceShown'
+
 export function StructuredMeetingSummaryView({ summary, onEvidence, evidenceLabel }: { summary: StructuredMeetingSummary; onEvidence?: EvidenceHandler; evidenceLabel?: EvidenceLabel }) {
-  return <div className="structured-summary">
+  // Timestamps stay hidden unless asked for.
+  const [shown, setShown] = useState(() => { try { return localStorage.getItem(SHOW_KEY) === '1' } catch { return false } })
+  const toggle = () => { const next = !shown; setShown(next); try { localStorage.setItem(SHOW_KEY, next ? '1' : '0') } catch { /* private window */ } }
+  const hasEvidence = Boolean(onEvidence) && [summary.keyPoints, summary.decisions, summary.tentativeDecisions, summary.unresolvedTopics, summary.actionItems, summary.openQuestions, summary.deferred].some(items => items.some(item => item.evidenceIds.length))
+  return <div className={`structured-summary ${hasEvidence && !shown ? 'hide-evidence' : ''}`}>
+    {hasEvidence && <button className="evidence-toggle" aria-pressed={shown} onClick={toggle} title="Mốc thời gian dẫn tới đoạn bản ghi làm bằng chứng"><Clock3 size={13}/>{shown ? 'Ẩn mốc thời gian' : 'Hiện mốc thời gian'}</button>}
+    {/* One sheet: the sections are divided by rules, not boxed separately. */}
+    <div className="structured-sheet">
     {summary.tldr && <section className="structured-tldr"><h4><Sparkles size={15}/>Tóm tắt nhanh</h4><p>{summary.tldr}</p></section>}
     <BulletSection title="Ý chính" icon={Text} items={summary.keyPoints} onEvidence={onEvidence} evidenceLabel={evidenceLabel}/>
     <BulletSection title="Quyết định" icon={CheckCheck} items={summary.decisions} onEvidence={onEvidence} evidenceLabel={evidenceLabel}/>
@@ -35,5 +45,6 @@ export function StructuredMeetingSummaryView({ summary, onEvidence, evidenceLabe
     <Actions items={summary.actionItems} onEvidence={onEvidence} evidenceLabel={evidenceLabel}/>
     <BulletSection title="Câu hỏi mở" icon={CircleHelp} items={summary.openQuestions} onEvidence={onEvidence} evidenceLabel={evidenceLabel}/>
     <BulletSection title="Tạm hoãn" icon={PauseCircle} items={summary.deferred.map(item => ({ ...item, text: [item.text, item.target].filter(Boolean).join(' → ') }))} onEvidence={onEvidence} evidenceLabel={evidenceLabel}/>
+    </div>
   </div>
 }

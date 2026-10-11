@@ -1,4 +1,6 @@
 mod account;
+mod app_audio;
+mod link_audio;
 mod ai_stream;
 mod note_chat;
 mod diarization_model;
@@ -640,8 +642,43 @@ fn validate_summary_with(mut summary: MeetingSummary, allowed: &HashSet<String>)
     summary
 }
 
+/// The summary instructions; a `recording` (video, lecture, picked file) is not assumed to be a meeting.
+fn summary_system(merge_rule: &str, recording: bool) -> String {
+    let system = r#"Bạn là thư ký cuộc họp AI/Tech cực kỳ thận trọng. Tạo meeting note ngắn, dễ scan và có thể kiểm chứng.
+
+QUY TẮC BẮT BUỘC:
+- Toàn bộ nội dung do bạn viết trong tldr, text, topic, options, task và các trường nội dung khác phải bằng tiếng Việt, bất kể transcript dùng ngôn ngữ nào. Chỉ giữ nguyên tên riêng và thuật ngữ kỹ thuật không nên dịch.
+- Chỉ tạo decision khi transcript có lời chốt/đồng ý rõ ràng. Một người nêu preference không phải consensus.
+- Nếu nhiều option được bàn mà chưa chốt, đưa vào unresolvedTopics với status chính xác là "No final decision".
+- Preference chưa commit phải nằm ở tentativeDecisions, không phải decisions.
+- Không phát minh decision, action item, owner, deadline, blocker, next step hoặc conclusion.
+- Action item chỉ có owner/deadline khi transcript nói rõ. Dùng null khi thiếu.
+- Preserve uncertainty. Khi phân vân, dùng unresolved thay vì đoán.
+- Mỗi decision, tentative decision, unresolved topic, action item và deferred item phải có evidenceIds lấy nguyên văn từ ID trong dấu [] ở transcript.
+- Không dùng nhãn nguồn (mic)/(máy) làm tên người. Chỉ ghi owner khi tên người xuất hiện rõ trong lời nói.
+- Nhãn Người nói N là ước lượng âm thanh, riêng theo từng nguồn; không suy ra tên thật hoặc owner từ nhãn này. Một đoạn có thể chứa nhiều người nói.
+- title: tên cuộc họp tiếng Việt 3–8 từ nêu chủ đề chính và mục đích (ví dụ "Chốt kiến trúc thanh toán quý 4"), không ngày giờ, không dấu ngoặc kép, không chung chung kiểu "Cuộc họp nhóm". Chưa rõ chủ đề thì để rỗng.
+MERGE_RULE
+- Không tạo section giả để lấp chỗ trống. Dùng mảng rỗng.
+
+Chỉ trả về một JSON object, không markdown, đúng camelCase schema:
+{"title":"string","tldr":"string","keyPoints":[{"id":"string","text":"string","evidenceIds":["segment-id"]}],"decisions":[],"tentativeDecisions":[],"unresolvedTopics":[{"id":"string","text":"string","topic":"string","options":["string"],"status":"No final decision","evidenceIds":["segment-id"]}],"actionItems":[{"id":"string","owner":null,"task":"string","deadline":null,"evidenceIds":["segment-id"]}],"openQuestions":[],"deferred":[{"id":"string","text":"string","target":null,"evidenceIds":["segment-id"]}]}"#;
+    let mut system = system.replace("MERGE_RULE", merge_rule);
+    if recording {
+        // A video, lecture or podcast is not a meeting: name what it is.
+        system = system
+            .replace("Bạn là thư ký cuộc họp AI/Tech cực kỳ thận trọng. Tạo meeting note ngắn, dễ scan và có thể kiểm chứng.",
+                "Bạn là trợ lý ghi chép cực kỳ thận trọng. Bản ghi có thể là video, bài giảng, podcast, phỏng vấn, hội thảo hoặc cuộc họp: nhận ra đúng loại từ NGUỒN và nội dung, rồi tạo ghi chú ngắn, dễ scan và có thể kiểm chứng.\n- Gọi nội dung theo đúng loại của nó (\"Video trình bày…\", \"Bài giảng giải thích…\", \"Diễn giả cho rằng…\"). Chỉ gọi là cuộc họp khi transcript rõ ràng là một cuộc họp.\n- Video hay bài giảng thường không có quyết định hay việc cần làm: để các mảng đó rỗng, đưa ý chính vào keyPoints.")
+            .replace("- title: tên cuộc họp tiếng Việt 3–8 từ nêu chủ đề chính và mục đích (ví dụ \"Chốt kiến trúc thanh toán quý 4\"), không ngày giờ, không dấu ngoặc kép, không chung chung kiểu \"Cuộc họp nhóm\".",
+                "- title: tên tiếng Việt 3–8 từ nêu chủ đề chính (ví dụ \"Nguồn gốc loài người ở châu Phi\"), không ngày giờ, không dấu ngoặc kép, không chung chung.");
+    }
+    system
+}
+
+/// `source` describes a recording that may not be a meeting (a video from a link, a picked file);
+/// without it the transcript is a live meeting.
 #[tauri::command]
-async fn summarize_segments(segments: Vec<TranscriptSegment>, previous_summary: Option<MeetingSummary>) -> Result<MeetingSummary, String> {
+async fn summarize_segments(segments: Vec<TranscriptSegment>, previous_summary: Option<MeetingSummary>, source: Option<String>) -> Result<MeetingSummary, String> {
     if segments.is_empty() { return Ok(previous_summary.unwrap_or_default()); }
     // Segment IDs are UUIDs; the model sees short aliases (s1, s2, …) instead, which
     // are mapped back after parsing. Evidence already cited by the previous summary
@@ -673,35 +710,19 @@ async fn summarize_segments(segments: Vec<TranscriptSegment>, previous_summary: 
         .and_then(|summary| serde_json::to_value(summary).ok())
         .map(|value| compact_json(value).to_string())
         .unwrap_or_else(|| "null".into());
+    let source = source.map(|text| text.trim().to_string()).filter(|text| !text.is_empty());
+    let whole = if source.is_some() { "bản ghi" } else { "cuộc họp" };
     let merge_rule = if incremental {
-        "- BẢN TÓM TẮT HIỆN CÓ đã bao quát phần trước của cuộc họp; transcript cũ không được gửi lại. Giữ nguyên các mục cũ cùng evidenceIds của chúng, chỉ sửa hoặc bỏ khi transcript mới phủ định, chốt lại hay làm rõ. Thêm mục mới từ transcript mới và cập nhật tldr cho toàn bộ cuộc họp."
+        format!("- BẢN TÓM TẮT HIỆN CÓ đã bao quát phần trước của {whole}; transcript cũ không được gửi lại. Giữ nguyên các mục cũ cùng evidenceIds của chúng, chỉ sửa hoặc bỏ khi transcript mới phủ định, chốt lại hay làm rõ. Thêm mục mới từ transcript mới và cập nhật tldr cho toàn bộ {whole}.")
     } else {
-        "- Transcript là nguồn sự thật duy nhất."
+        "- Transcript là nguồn sự thật duy nhất.".to_string()
     };
-    let system = r#"Bạn là thư ký cuộc họp AI/Tech cực kỳ thận trọng. Tạo meeting note ngắn, dễ scan và có thể kiểm chứng.
-
-QUY TẮC BẮT BUỘC:
-- Toàn bộ nội dung do bạn viết trong tldr, text, topic, options, task và các trường nội dung khác phải bằng tiếng Việt, bất kể transcript dùng ngôn ngữ nào. Chỉ giữ nguyên tên riêng và thuật ngữ kỹ thuật không nên dịch.
-- Chỉ tạo decision khi transcript có lời chốt/đồng ý rõ ràng. Một người nêu preference không phải consensus.
-- Nếu nhiều option được bàn mà chưa chốt, đưa vào unresolvedTopics với status chính xác là "No final decision".
-- Preference chưa commit phải nằm ở tentativeDecisions, không phải decisions.
-- Không phát minh decision, action item, owner, deadline, blocker, next step hoặc conclusion.
-- Action item chỉ có owner/deadline khi transcript nói rõ. Dùng null khi thiếu.
-- Preserve uncertainty. Khi phân vân, dùng unresolved thay vì đoán.
-- Mỗi decision, tentative decision, unresolved topic, action item và deferred item phải có evidenceIds lấy nguyên văn từ ID trong dấu [] ở transcript.
-- Không dùng nhãn nguồn (mic)/(máy) làm tên người. Chỉ ghi owner khi tên người xuất hiện rõ trong lời nói.
-- Nhãn Người nói N là ước lượng âm thanh, riêng theo từng nguồn; không suy ra tên thật hoặc owner từ nhãn này. Một đoạn có thể chứa nhiều người nói.
-- title: tên cuộc họp tiếng Việt 3–8 từ nêu chủ đề chính và mục đích (ví dụ "Chốt kiến trúc thanh toán quý 4"), không ngày giờ, không dấu ngoặc kép, không chung chung kiểu "Cuộc họp nhóm". Chưa rõ chủ đề thì để rỗng.
-MERGE_RULE
-- Không tạo section giả để lấp chỗ trống. Dùng mảng rỗng.
-
-Chỉ trả về một JSON object, không markdown, đúng camelCase schema:
-{"title":"string","tldr":"string","keyPoints":[{"id":"string","text":"string","evidenceIds":["segment-id"]}],"decisions":[],"tentativeDecisions":[],"unresolvedTopics":[{"id":"string","text":"string","topic":"string","options":["string"],"status":"No final decision","evidenceIds":["segment-id"]}],"actionItems":[{"id":"string","owner":null,"task":"string","deadline":null,"evidenceIds":["segment-id"]}],"openQuestions":[],"deferred":[{"id":"string","text":"string","target":null,"evidenceIds":["segment-id"]}]}"#;
-    let system = system.replace("MERGE_RULE", merge_rule);
+    let system = summary_system(&merge_rule, source.is_some());
+    let context = source.map(|text| format!("NGUỒN: {text}\n\n")).unwrap_or_default();
     let user = if incremental {
-        format!("BẢN TÓM TẮT HIỆN CÓ:\n{previous}\n\nTRANSCRIPT MỚI CÓ ID:\n{transcript}")
+        format!("{context}BẢN TÓM TẮT HIỆN CÓ:\n{previous}\n\nTRANSCRIPT MỚI CÓ ID:\n{transcript}")
     } else {
-        format!("TRANSCRIPT CÓ ID:\n{transcript}")
+        format!("{context}TRANSCRIPT CÓ ID:\n{transcript}")
     };
     let raw = ai_completion( &system, user, 1800, true).await?;
     let value = parse_json_object(&raw)?;
@@ -908,7 +929,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(island::shortcut_plugin())
         .manage(NativeState::default())
-        .invoke_handler(tauri::generate_handler![load_notes, save_notes, account::account_status, account::account_signed_in, account::account_send_code, account::account_offers, account::account_buy, account::account_order_status, account_verify, account_sign_out, start_worker, stop_worker, send_worker, start_capture, stop_capture, set_microphone, set_system_audio, note_chat::ask_note, summarize_segments, suggest_title, translate_text, open_permission, open_link, save_export, reveal_file, print_page, #[cfg(target_os = "macos")] save_pdf, file_job::pick_audio_file, file_job::file_job_start, file_job::file_job_upload, file_job::file_job_status, file_job::file_job_cleanup, file_job::file_job_cancel, writer::write_document, diarization_model_status, download_diarization_model, cancel_diarization_download, remove_diarization_model, island::island_screens, island::island_set_frame, island::island_set_visible, island::island_focus, island::island_release, island::island_open_main, island::island_cursor, island::island_ignore_cursor, playback::play_audio, playback::stop_audio, voice_pack_status, download_voice_pack, cancel_voice_pack_download, remove_voice_pack])
+        .invoke_handler(tauri::generate_handler![load_notes, save_notes, account::account_status, account::account_signed_in, account::account_send_code, account::account_offers, account::account_buy, account::account_order_status, account_verify, account_sign_out, start_worker, stop_worker, send_worker, start_capture, stop_capture, set_microphone, set_system_audio, note_chat::ask_note, summarize_segments, suggest_title, translate_text, open_permission, open_link, save_export, reveal_file, print_page, #[cfg(target_os = "macos")] save_pdf, file_job::pick_audio_file, file_job::file_job_start, file_job::file_job_upload, file_job::file_job_status, file_job::file_job_cleanup, file_job::file_job_cancel, link_audio::fetch_link_audio, link_audio::cancel_link_audio, writer::write_document, diarization_model_status, download_diarization_model, cancel_diarization_download, remove_diarization_model, island::island_screens, island::island_set_frame, island::island_set_visible, island::island_focus, island::island_release, island::island_open_main, island::island_cursor, island::island_ignore_cursor, playback::play_audio, playback::stop_audio, app_audio::audio_apps, app_audio::set_excluded_apps, voice_pack_status, download_voice_pack, cancel_voice_pack_download, remove_voice_pack])
         .on_window_event(|window, event| {
             // Closing the main window quits VietNote; the island goes with it.
             if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
@@ -933,6 +954,14 @@ mod tests {
 
     fn segment(id: &str) -> TranscriptSegment {
         TranscriptSegment { id: id.into(), timestamp: "09:00".into(), started_at: 0.0, audio_source: "system".into(), raw_text: "raw".into(), clean_text: "clean".into(), speaker: None }
+    }
+
+    #[test]
+    fn a_recording_summary_does_not_assume_a_meeting() {
+        let recording = summary_system("", true);
+        assert!(!recording.contains("thư ký cuộc họp"));
+        assert!(!recording.contains("tên cuộc họp"));
+        assert!(summary_system("", false).contains("thư ký cuộc họp"));
     }
 
     #[test]

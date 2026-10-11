@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatStructuredSummary, noteContentText, noteMoments, noteTranscriptText } from './notes'
+import { dayKey, dayLabel, formatStructuredSummary, hasDateTitle, isShortNote, noteContentText, noteMatches, noteMoments, noteSource, noteTranscriptText } from './notes'
 import type { MeetingNote } from './types'
 
 describe('noteMoments', () => {
@@ -58,5 +58,51 @@ describe('note copy text', () => {
     expect(lines[0]).toMatch(/^\[.+\] Người nói 1: Hello$/)
     expect(lines[1]).toMatch(/^\[.+\] Hi$/)
     expect(noteTranscriptText({ ...note, transcriptSegments: [] })).toBe('a b')
+  })
+})
+
+describe('finding notes', () => {
+  const note = (patch: Partial<MeetingNote>): MeetingNote => ({ id: 'n', title: '', createdAt: '2026-10-10T10:00:00Z', updatedAt: '2026-10-10T10:00:00Z', duration: 0, summary: '', transcript: '', ...patch })
+
+  it('matches words without Vietnamese marks, in any order', () => {
+    const item = note({ title: 'Đánh giá năng lượng', summary: 'Cuộc họp về điện Mỹ' })
+    expect(noteMatches(item, 'dien danh gia')).toBe(true)
+    expect(noteMatches(item, 'Điện')).toBe(true)
+    expect(noteMatches(item, 'gió')).toBe(false)
+  })
+
+  it('tells where a note came from', () => {
+    expect(noteSource(note({ transcript: 'Nguồn: https://youtu.be/x\n\nhello' }))).toBe('link')
+    expect(noteSource(note({ title: 'Phiên dịch · 10:00 10/10/26', transcript: 'hi' }))).toBe('translate')
+    expect(noteSource(note({ transcript: 'hi' }))).toBe('meeting')
+    expect(noteSource(note({}))).toBe('manual')
+    expect(noteSource(note({ source: 'file' }))).toBe('file')
+  })
+
+  it('spots names made from the date alone', () => {
+    expect(hasDateTitle(note({ title: 'Cuộc họp · 22:47 10/10/26' }))).toBe(true)
+    expect(hasDateTitle(note({ title: 'Phiên dịch · 22:47, 10/10/2026' }))).toBe(true)
+    expect(hasDateTitle(note({ title: 'Cuộc họp · chốt ngân sách' }))).toBe(false)
+  })
+
+  it('offers only untouched notes with little in them for clean-up', () => {
+    const long = 'word '.repeat(100)
+    expect(isShortNote(note({ duration: 50, transcript: long }))).toBe(true)
+    expect(isShortNote(note({ duration: 900, transcript: 'Alo alo' }))).toBe(true)
+    expect(isShortNote(note({ duration: 900, transcript: long }))).toBe(false)
+    expect(isShortNote(note({ duration: 50, transcript: 'hi', titleEdited: true }))).toBe(false)
+    expect(isShortNote(note({ duration: 50, transcript: 'hi', groupID: 'g' }))).toBe(false)
+    expect(isShortNote(note({ duration: 50, transcript: 'hi', chatMessages: [{ id: 'c', role: 'user', content: 'q', createdAt: '' }] }))).toBe(false)
+    expect(isShortNote(note({ summary: '' }))).toBe(true)
+    expect(isShortNote(note({ summary: 'Gửi báo giá cho khách trước thứ Sáu' }))).toBe(false)
+  })
+
+  it('labels days', () => {
+    const today = new Date(2026, 9, 11, 9)
+    expect(dayLabel('2026-10-11', today)).toBe('Hôm nay')
+    expect(dayLabel('2026-10-10', today)).toBe('Hôm qua')
+    expect(dayLabel('2026-10-09', today)).toBe('Thứ Sáu, 9/10')
+    expect(dayLabel('2025-10-09', today)).toMatch(/9\/10\/2025$/)
+    expect(dayKey(new Date(2026, 0, 5, 23, 59))).toBe('2026-01-05')
   })
 })
