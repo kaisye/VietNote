@@ -358,14 +358,20 @@
 .note-group-choice { width:min(260px, 100%); height:36px; padding:0 10px; }
 .note-group-row small { margin-left:auto; white-space:nowrap; }
 .notes-page.note-expanded .note-group-row small { margin-left:0; }
-.note-content-heading { justify-content:space-between; min-height:48px; padding:7px 9px; border:1px solid var(--border); border-radius:12px; background:rgba(var(--tint),.055); }
+.note-content-heading { justify-content:space-between; min-height:46px; padding:0 2px 8px; border-bottom:1px solid var(--border); }
 .note-content-heading h3 { font-size:16px; }
 .copy-btn { display:inline-flex; align-items:center; gap:5px; height:30px; padding:0 10px; flex:none; border-radius:9px; border:1px solid var(--border); color:var(--accent); background:rgba(var(--tint),.14); font:inherit; font-size:12px; font-weight:650; cursor:pointer; transition:background .18s ease; }
 .copy-btn:hover { background:rgba(var(--tint),.28); }
-.note-content-actions { display:flex; align-items:center; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
-.note-content-actions .copy-btn { color:var(--ink); background:var(--input-bg); }
+.note-content-actions { display:flex; align-items:center; gap:2px; flex-wrap:wrap; justify-content:flex-end; }
+.note-content-actions .note-export { gap:2px; }
+.note-content-actions .copy-btn { height:32px; padding:0 9px; color:var(--muted); background:transparent; border-color:transparent; box-shadow:none; }
+.note-content-actions .copy-btn:hover, .note-content-actions .copy-btn[aria-expanded="true"] { color:var(--ink); background:rgba(var(--tint),.12); }
+.note-content-actions > .icon-btn { width:32px; height:32px; border-color:transparent; background:transparent; color:var(--muted); }
+.note-content-actions > .icon-btn:hover { color:var(--ink); background:rgba(var(--tint),.12); }
 .note-content-actions .segmented button.selected { color:var(--accent); }
-.note-content-actions .icon-btn.selected { color:var(--accent); background:rgba(var(--tint-strong),.12); border-color:rgba(var(--tint-strong),.42); }
+.note-content-actions .icon-btn.selected { color:var(--accent); background:rgba(var(--tint-strong),.11); border-color:transparent; }
+.note-content-actions .evidence-toolbar { position:relative; margin-left:9px; }
+.note-content-actions .evidence-toolbar::before { content:''; position:absolute; left:-6px; top:7px; width:1px; height:18px; background:var(--border); pointer-events:none; }
 .note-export { position:relative; display:flex; align-items:center; gap:8px; }
 .note-export-trigger .chevron { margin-left:-1px; opacity:.75; transition:transform .2s ease; }
 .note-export-trigger[aria-expanded="true"] .chevron { transform:rotate(180deg); }
@@ -710,7 +716,11 @@
 @media (prefers-reduced-motion: reduce) { .nav-busy { animation:none; } }
 
 /* AI viết: documents written from a note */
-.note-view-tabs button { display:inline-flex; align-items:center; gap:6px; min-height:30px; font-size:13px; }
+.note-view-tabs.segmented { align-self:stretch; gap:18px; padding:0; border:0; border-radius:0; background:transparent; }
+.note-view-tabs button { position:relative; display:inline-flex; align-items:center; gap:6px; min-height:38px; padding:0 2px; border-radius:0; font-size:13px; }
+.note-view-tabs button.selected { color:var(--ink); background:transparent; box-shadow:none; }
+.note-view-tabs button.selected::after { content:''; position:absolute; left:0; right:0; bottom:-9px; height:2px; border-radius:999px; background:var(--accent); }
+.note-view-tabs button:hover { color:var(--ink); }
 .note-view-tabs small { min-width:18px; padding:0 5px; border-radius:999px; background:rgba(var(--tint),.24); color:var(--accent); font-size:10px; font-weight:800; line-height:16px; }
 .note-documents { display:flex; flex-direction:column; gap:14px; margin-top:12px; }
 .document-tabs { display:flex; gap:6px; overflow-x:auto; padding-bottom:2px; scrollbar-width:none; }
