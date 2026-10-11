@@ -272,15 +272,15 @@
 .note-list-item:hover { background:rgba(var(--tint),.1); }
 .note-list-item.selected, .note-list-item.selected:hover { background:rgba(var(--tint-strong),.065); box-shadow:inset 2px 0 0 var(--accent); }
 .note-list-item>div { display:flex; gap:5px; align-items:flex-start; }
-.note-list-item strong { flex:1; font-size:13px; font-weight:600; line-height:1.4; }
+.note-list-item strong { flex:1; font-size:13.5px; font-weight:600; line-height:1.4; }
 .note-list-item>div small { font-size:8px; font-weight:600; color:color-mix(in srgb, var(--ink) 55%, var(--canvas)); }
 .note-list-item>div .note-saving-label { color:var(--accent); }
-.note-list-item time { display:block; margin:4px 0 0 25px; color:color-mix(in srgb, var(--ink) 55%, var(--canvas)); font-size:11px; }
+.note-list-item time { display:block; margin:4px 0 0 25px; color:color-mix(in srgb, var(--ink) 55%, var(--canvas)); font-size:11.5px; }
 .note-source { flex:none; display:grid; place-items:center; width:19px; height:19px; margin-top:-1px; color:color-mix(in srgb, var(--ink) 55%, var(--canvas)); }
 .note-list-item.selected .note-source { color:var(--accent); }
 .note-day { display:flex; flex-direction:column; gap:2px; }
 .note-day + .note-day { margin-top:14px; }
-.note-day h4 { margin:0; padding:3px 11px; font-size:10px; font-weight:600; letter-spacing:.02em; color:color-mix(in srgb, var(--ink) 55%, var(--canvas)); }
+.note-day h4 { margin:0; padding:3px 11px; font-size:10.5px; font-weight:600; letter-spacing:.02em; color:color-mix(in srgb, var(--ink) 55%, var(--canvas)); }
 .note-calendar { border:1px solid var(--border); border-radius:11px; padding:6px; background:var(--input-bg); }
 .note-calendar-bar { display:flex; align-items:center; gap:2px; }
 .note-calendar-bar button { border:0; background:transparent; color:var(--ink); padding:4px; border-radius:7px; display:flex; align-items:center; }
