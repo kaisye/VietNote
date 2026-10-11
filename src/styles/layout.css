@@ -182,7 +182,7 @@
 .live-summary-block + .live-summary-block { margin-top:18px; }
 .live-summary-block h4 { margin:0 0 6px; padding-left:9px; border-left:3px solid var(--accent); color:var(--accent); font-size:11px; font-weight:800; letter-spacing:1.1px; line-height:1.4; }
 .live-summary-block p, p.live-summary-block { margin:0; white-space:pre-wrap; font-size:15px; line-height:1.55; }
-.note-list-item:hover, .note-moment:hover { transform:translateY(-2px); box-shadow:0 7px 16px var(--shadow); }
+.note-moment:hover { transform:translateY(-2px); box-shadow:0 7px 16px var(--shadow); }
 .translator-controls, .transcript-list { margin-top:20px; padding:21px; }
 .select-row { gap:20px; }
 .translator-speech-panel { margin-top:16px; padding:14px; border:1px solid var(--border); border-radius:16px; background:rgba(126,129,181,.06); transition:background .18s ease, border-color .18s ease, box-shadow .18s ease; }
@@ -268,17 +268,19 @@
 .notes-list-heading button { border:0; color:var(--ink); background:transparent; padding:3px; }
 .note-search { min-height:34px; width:100%; padding:6px 9px; }
 .notes-list-scroll { display:flex; flex-direction:column; gap:9px; overflow:auto; min-height:0; flex:1; }
-.note-list-item { width:100%; display:block; padding:11px; text-align:left; color:var(--ink); background:var(--input-bg); border:1px solid var(--border); border-radius:11px; transition:transform .18s ease, box-shadow .18s ease, background .18s ease, border-color .18s ease; }
-.note-list-item.selected { background:rgba(var(--tint-strong),.09); border-color:rgba(var(--tint-strong),.48); box-shadow:inset 3px 0 0 var(--accent), 0 5px 14px var(--shadow); }
-.note-list-item.saving { border-color:var(--accent); }
+.note-list-item { width:100%; display:block; padding:11px; text-align:left; color:var(--ink); background:transparent; border:1px solid transparent; border-radius:8px; transition:background .18s ease; }
+.note-list-item:hover { background:rgba(var(--tint),.1); }
+.note-list-item.selected, .note-list-item.selected:hover { background:rgba(var(--tint-strong),.065); box-shadow:inset 2px 0 0 var(--accent); }
 .note-list-item>div { display:flex; gap:5px; align-items:flex-start; }
-.note-list-item strong { flex:1; font-size:13px; line-height:1.3; }
-.note-list-item>div small { font-size:9px; font-weight:800; color:var(--accent); }
-.note-list-item time { display:block; margin:4px 0 0 25px; color:var(--muted); font-size:11px; }
-.note-source { flex:none; display:grid; place-items:center; width:19px; height:19px; margin-top:-1px; border-radius:6px; color:var(--accent); background:rgba(var(--tint-strong),.1); }
-.note-day { display:flex; flex-direction:column; gap:6px; }
-.note-day + .note-day { margin-top:6px; }
-.note-day h4 { position:sticky; top:0; z-index:1; margin:0; padding:3px 2px; font-size:11px; font-weight:700; letter-spacing:.02em; color:var(--muted); background:var(--glass-strong); backdrop-filter:blur(8px); border-radius:6px; }
+.note-list-item strong { flex:1; font-size:13px; font-weight:600; line-height:1.4; }
+.note-list-item>div small { font-size:8px; font-weight:600; color:color-mix(in srgb, var(--ink) 55%, var(--canvas)); }
+.note-list-item>div .note-saving-label { color:var(--accent); }
+.note-list-item time { display:block; margin:4px 0 0 25px; color:color-mix(in srgb, var(--ink) 55%, var(--canvas)); font-size:11px; }
+.note-source { flex:none; display:grid; place-items:center; width:19px; height:19px; margin-top:-1px; color:color-mix(in srgb, var(--ink) 55%, var(--canvas)); }
+.note-list-item.selected .note-source { color:var(--accent); }
+.note-day { display:flex; flex-direction:column; gap:2px; }
+.note-day + .note-day { margin-top:14px; }
+.note-day h4 { margin:0; padding:3px 11px; font-size:10px; font-weight:600; letter-spacing:.02em; color:color-mix(in srgb, var(--ink) 55%, var(--canvas)); }
 .note-calendar { border:1px solid var(--border); border-radius:11px; padding:6px; background:var(--input-bg); }
 .note-calendar-bar { display:flex; align-items:center; gap:2px; }
 .note-calendar-bar button { border:0; background:transparent; color:var(--ink); padding:4px; border-radius:7px; display:flex; align-items:center; }
