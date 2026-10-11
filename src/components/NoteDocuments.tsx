@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { AlertCircle, ArrowUp, BookOpen, FilePen, Megaphone, NotebookPen, Presentation, Sparkles, Trash2, Users } from 'lucide-react'
 import type { AppModel } from '../hooks/useAppModel'
 import type { WriteOptions } from '../hooks/useNoteDocuments'
@@ -53,6 +53,13 @@ function Composer({ note, error, initial, onWrite }: { note: MeetingNote; error?
   const [kind, setKind] = useState<DocumentKind>(initial?.kind ?? 'workshop')
   const [length, setLength] = useState<DocumentLength>(initial?.length ?? 'medium')
   const [instruction, setInstruction] = useState(initial?.instruction ?? '')
+  const instructionRef = useRef<HTMLTextAreaElement>(null)
+  useLayoutEffect(() => {
+    const textarea = instructionRef.current
+    if (!textarea) return
+    textarea.style.height = '0px'
+    textarea.style.height = `${textarea.scrollHeight + 2}px`
+  }, [instruction])
   const lines = transcriptLines(note)
   const empty = !lines.length
   const needsInstruction = kind === 'custom' && !instruction.trim()
@@ -63,9 +70,9 @@ function Composer({ note, error, initial, onWrite }: { note: MeetingNote; error?
     <div className="document-kinds" role="radiogroup" aria-label="Loại tài liệu">
       {documentKinds.map(item => { const Icon = kindIcons[item.kind]; return <button type="button" key={item.kind} role="radio" aria-checked={kind === item.kind} className={kind === item.kind ? 'selected' : ''} onClick={() => setKind(item.kind)}><Icon size={17}/><strong>{item.label}</strong><small>{item.hint}</small></button> })}
     </div>
-    {kind !== 'post' && <div className="document-option"><span>ĐỘ DÀI</span><div className="segmented">{documentLengths.map(item => <button type="button" key={item.value} className={length === item.value ? 'selected' : ''} onClick={() => setLength(item.value)}>{item.label}</button>)}</div></div>}
-    <label className="field"><span>{kind === 'custom' ? 'YÊU CẦU CHO AI' : 'YÊU CẦU THÊM (KHÔNG BẮT BUỘC)'}</span>
-      <textarea className="document-instruction" rows={2} value={instruction} maxLength={2000} onChange={event => setInstruction(event.target.value)}
+    {kind !== 'post' && <div className="document-option"><span>Độ dài</span><div className="segmented">{documentLengths.map(item => <button type="button" key={item.value} className={length === item.value ? 'selected' : ''} onClick={() => setLength(item.value)}>{item.label}</button>)}</div></div>}
+    <label className="field"><span>{kind === 'custom' ? 'Yêu cầu cho AI' : 'Yêu cầu thêm (không bắt buộc)'}</span>
+      <textarea ref={instructionRef} className="document-instruction" rows={2} value={instruction} maxLength={2000} onChange={event => setInstruction(event.target.value)}
         placeholder={kind === 'custom' ? 'Ví dụ: Viết email gửi sếp tóm tắt 3 điểm chính và đề xuất bước tiếp theo' : 'Ví dụ: tập trung phần ứng dụng AI cho giáo viên, giọng văn trẻ trung'}/></label>
     {empty && <p className="file-error">Ghi chú này chưa có transcript để AI đọc.</p>}
     {error && <p className="file-error" role="alert"><AlertCircle size={14}/>{error}</p>}

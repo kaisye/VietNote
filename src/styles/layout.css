@@ -725,20 +725,26 @@
 .document-tabs button.selected { color:var(--bar-selected-text); background:var(--bar-selected); border-color:transparent; }
 .document-tabs .document-new:not(.selected) { color:var(--accent); border-style:dashed; }
 .document-tabs button:disabled { opacity:.5; cursor:default; }
-.document-composer { display:flex; flex-direction:column; gap:16px; padding:18px; border-radius:16px; border:1px solid var(--border); background:var(--glass); }
+.document-composer { display:flex; flex-direction:column; gap:14px; padding:16px; border-radius:14px; border:1px solid color-mix(in srgb, var(--border) 70%, transparent); background:var(--glass); }
 .document-intro { display:flex; gap:12px; align-items:flex-start; color:var(--accent); }
 .document-intro div { display:flex; flex-direction:column; gap:3px; }
-.document-intro strong { color:var(--ink); font-size:15px; }
-.document-intro small { color:var(--muted); font-size:12.5px; line-height:1.45; }
+.document-intro strong { color:var(--ink); font-size:15px; font-weight:600; }
+.document-intro small { color:color-mix(in srgb, var(--ink) 65%, var(--canvas)); font-size:12px; line-height:1.45; }
 .document-kinds { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:8px; }
 .document-kinds button { display:grid; grid-template-columns:auto 1fr; column-gap:9px; row-gap:3px; align-items:center; padding:11px 12px; text-align:left; border-radius:12px; border:1px solid var(--border); background:var(--input-bg); color:var(--accent); cursor:pointer; transition:border-color .15s ease, box-shadow .15s ease, background .15s ease; }
-.document-kinds button strong { color:var(--ink); font-size:13px; }
-.document-kinds button small { grid-column:1 / -1; color:var(--muted); font-size:11.5px; line-height:1.4; }
+.document-kinds button strong { color:var(--ink); font-size:13px; font-weight:600; }
+.document-kinds button small { grid-column:1 / -1; color:color-mix(in srgb, var(--ink) 65%, var(--canvas)); font-size:11.5px; line-height:1.4; }
 .document-kinds button:hover { border-color:var(--accent); }
-.document-kinds button.selected { border-color:var(--accent); background:rgba(var(--tint),.16); box-shadow:inset 0 0 0 1px var(--accent); }
+.document-kinds button.selected { border-color:var(--accent); background:rgba(var(--tint-strong),.06); }
 .document-option { display:flex; align-items:center; justify-content:space-between; gap:12px; }
-.document-option>span { font-size:10px; font-weight:800; letter-spacing:1px; color:var(--muted); }
-.document-instruction { width:100%; resize:vertical; min-height:58px; padding:10px 12px; font:inherit; font-size:13.5px; line-height:1.5; border-radius:11px; }
+.document-option>span, .document-composer .field>span { font-size:12px; font-weight:600; letter-spacing:0; color:color-mix(in srgb, var(--ink) 65%, var(--canvas)); }
+.document-option .segmented button.selected { box-shadow:none; }
+.document-instruction { width:100%; resize:none; overflow:hidden; min-height:62px; padding:10px 12px; font:inherit; font-size:13.5px; line-height:1.5; border:1px solid var(--border); border-radius:10px; color:var(--ink); background:var(--input-bg); }
+.document-instruction::placeholder { color:color-mix(in srgb, var(--ink) 45%, var(--canvas)); }
+.document-instruction:focus-visible { border-color:var(--accent); }
+.document-composer .action-row>small { color:color-mix(in srgb, var(--ink) 60%, var(--canvas)); font-size:11.5px; }
+.document-composer .pill-btn { box-shadow:none; }
+.document-composer .pill-btn:not(:disabled):hover { transform:none; box-shadow:none; }
 .document-composer .action-row { margin:0; align-items:center; }
 .document-composer .file-error, .document-view .file-error { display:flex; align-items:center; gap:6px; margin:0; }
 .document-progress { display:flex; align-items:center; gap:16px; padding:22px 20px; border-radius:16px; border:1px solid var(--border); background:var(--glass); }
