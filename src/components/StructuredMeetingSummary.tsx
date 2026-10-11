@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Check, CheckCheck, CircleHelp, Clock3, GitBranch, ListTodo, PauseCircle, Pencil, Plus, Sparkles, Text, Trash2, X } from 'lucide-react'
+import { useEffect, useLayoutEffect, useRef, useState, type TextareaHTMLAttributes } from 'react'
+import { CheckCheck, CircleHelp, Clock3, GitBranch, ListTodo, PauseCircle, Pencil, Sparkles, Text } from 'lucide-react'
 import type { ActionItem, DeferredItem, StructuredMeetingSummary, SummaryBullet, UnresolvedTopic } from '../services/types'
 
 type EvidenceHandler = (ids: string[]) => void
@@ -20,17 +20,40 @@ function EditButton({ onClick, label }: { onClick: () => void; label: string }) 
   return <button type="button" className="section-edit-button" onClick={onClick} aria-label={label} title={label}><Pencil size={13}/></button>
 }
 
-function EditorActions({ onAdd, onCancel, onSave }: { onAdd?: () => void; onCancel: () => void; onSave: () => void }) {
-  return <div className="inline-editor-actions">{onAdd && <button type="button" onClick={onAdd}><Plus size={13}/>Thêm dòng</button>}<span/><button type="button" onClick={onCancel}><X size={13}/>Hủy</button><button type="button" className="save" onClick={onSave}><Check size={13}/>Lưu</button></div>
+function AutoTextarea({ value, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  useLayoutEffect(() => {
+    const textarea = ref.current
+    if (!textarea) return
+    textarea.style.height = '0px'
+    textarea.style.height = `${textarea.scrollHeight}px`
+  }, [value])
+  return <textarea {...props} ref={ref} value={value} rows={1}/>
+}
+
+function useCommitOutside(active: boolean, commit: () => void) {
+  const root = useRef<HTMLDivElement>(null)
+  const commitRef = useRef(commit)
+  commitRef.current = commit
+  useEffect(() => {
+    if (!active) return
+    const onPointerDown = (event: PointerEvent) => {
+      if (root.current && !root.current.contains(event.target as Node)) commitRef.current()
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [active])
+  return root
 }
 
 function Tldr({ text, editable, onChange }: { text: string; editable?: boolean; onChange?: (text: string) => void }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(text)
   useEffect(() => { if (!editing) setDraft(text) }, [text, editing])
-  const cancel = () => { setDraft(text); setEditing(false) }
-  const save = () => { const value = draft.trim(); if (value) onChange?.(value); setEditing(false) }
-  return <section className={`structured-tldr tone-summary ${editing ? 'editing' : ''}`}><h4><Sparkles size={15}/>Tóm tắt nhanh{editable && !editing && <EditButton onClick={() => setEditing(true)} label="Chỉnh sửa tóm tắt nhanh"/>}</h4>{editing ? <div className="inline-section-editor"><textarea autoFocus value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') cancel(); if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') save() }} aria-label="Nội dung tóm tắt nhanh"/><EditorActions onCancel={cancel} onSave={save}/></div> : <p>{text}</p>}</section>
+  const commit = () => { onChange?.(draft.trim()); setEditing(false) }
+  const editor = useCommitOutside(editing, commit)
+  const begin = () => { setDraft(text); setEditing(true) }
+  return <section className={`structured-tldr tone-summary ${editing ? 'editing' : ''}`}><h4><Sparkles size={15}/>Tóm tắt nhanh{editable && !editing && <EditButton onClick={begin} label="Chỉnh sửa tóm tắt nhanh"/>}</h4>{editing ? <div className="inline-section-editor" ref={editor}><AutoTextarea autoFocus value={draft} onChange={event => setDraft(event.target.value)} aria-label="Nội dung tóm tắt nhanh"/></div> : <p>{text}</p>}</section>
 }
 
 type BulletDraft = { original: SummaryBullet | null; text: string }
@@ -38,10 +61,10 @@ function BulletSection({ title, tone, icon: Icon, items, editable, displayText =
   const [editing, setEditing] = useState(false)
   const [drafts, setDrafts] = useState<BulletDraft[]>([])
   const begin = () => { setDrafts(items.map(item => ({ original: item, text: item.text }))); setEditing(true) }
-  const cancel = () => { setDrafts([]); setEditing(false) }
-  const save = () => { onChange?.(drafts.map(({ original, text }) => ({ ...(original ?? { id: crypto.randomUUID(), evidenceIds: [] }), text: text.trim() })).filter(item => item.text)); setEditing(false) }
+  const commit = () => { onChange?.(drafts.map(({ original, text }) => ({ ...(original ?? { id: crypto.randomUUID(), evidenceIds: [] }), text: text.trim() })).filter(item => item.text)); setEditing(false) }
+  const editor = useCommitOutside(editing, commit)
   if (!items.length && !editing) return null
-  return <section className={`structured-section tone-${tone} ${editing ? 'editing' : ''}`}><h4><Icon size={15}/>{title}{editable && !editing && <EditButton onClick={begin} label={`Chỉnh sửa ${title.toLocaleLowerCase('vi-VN')}`}/>}</h4>{editing ? <div className="inline-section-editor">{drafts.map((draft, index) => <div className="inline-editor-row" key={draft.original?.id ?? `new-${index}`}><textarea autoFocus={index === 0} value={draft.text} onChange={event => setDrafts(values => values.map((value, itemIndex) => itemIndex === index ? { ...value, text: event.target.value } : value))} onKeyDown={event => { if (event.key === 'Escape') cancel(); if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') save() }} aria-label={`${title} ${index + 1}`}/><button type="button" onClick={() => setDrafts(values => values.filter((_, itemIndex) => itemIndex !== index))} aria-label={`Xóa dòng ${index + 1}`}><Trash2 size={14}/></button></div>)}<EditorActions onAdd={() => setDrafts(values => [...values, { original: null, text: '' }])} onCancel={cancel} onSave={save}/></div> : items.length ? <ul>{items.map((item, index) => <li key={item.id || `${title}-${index}`}><span>{displayText(item)}</span><Evidence ids={item.evidenceIds} onEvidence={onEvidence} evidenceLabel={evidenceLabel}/></li>)}</ul> : <p className="inline-empty">Chưa có nội dung.</p>}</section>
+  return <section className={`structured-section tone-${tone} ${editing ? 'editing' : ''}`}><h4><Icon size={15}/>{title}{editable && !editing && <EditButton onClick={begin} label={`Chỉnh sửa ${title.toLocaleLowerCase('vi-VN')}`}/>}</h4>{editing ? <div className="inline-section-editor" ref={editor}>{drafts.map((draft, index) => <div className="inline-editor-row" key={draft.original?.id ?? `new-${index}`}><AutoTextarea autoFocus={index === 0} value={draft.text} onChange={event => setDrafts(values => values.map((value, itemIndex) => itemIndex === index ? { ...value, text: event.target.value } : value))} aria-label={`${title} ${index + 1}`}/></div>)}</div> : items.length ? <ul>{items.map((item, index) => <li key={item.id || `${title}-${index}`}><span>{displayText(item)}</span><Evidence ids={item.evidenceIds} onEvidence={onEvidence} evidenceLabel={evidenceLabel}/></li>)}</ul> : <p className="inline-empty">Chưa có nội dung.</p>}</section>
 }
 
 type ActionDraft = { original: ActionItem | null; owner: string; task: string; deadline: string }
@@ -49,10 +72,10 @@ function Actions({ items, editable, onChange, onEvidence, evidenceLabel }: { ite
   const [editing, setEditing] = useState(false)
   const [drafts, setDrafts] = useState<ActionDraft[]>([])
   const begin = () => { setDrafts(items.map(item => ({ original: item, owner: item.owner ?? '', task: item.task, deadline: item.deadline ?? '' }))); setEditing(true) }
-  const cancel = () => { setDrafts([]); setEditing(false) }
-  const save = () => { onChange?.(drafts.map(({ original, owner, task, deadline }) => ({ ...(original ?? { id: crypto.randomUUID(), evidenceIds: [] }), owner: owner.trim() || null, task: task.trim(), deadline: deadline.trim() || null })).filter(item => item.task)); setEditing(false) }
+  const commit = () => { onChange?.(drafts.map(({ original, owner, task, deadline }) => ({ ...(original ?? { id: crypto.randomUUID(), evidenceIds: [] }), owner: owner.trim() || null, task: task.trim(), deadline: deadline.trim() || null })).filter(item => item.task)); setEditing(false) }
+  const editor = useCommitOutside(editing, commit)
   if (!items.length && !editing) return null
-  return <section className={`structured-section tone-action ${editing ? 'editing' : ''}`}><h4><ListTodo size={15}/>Việc cần làm{editable && !editing && <EditButton onClick={begin} label="Chỉnh sửa việc cần làm"/>}</h4>{editing ? <div className="inline-section-editor">{drafts.map((draft, index) => <div className="inline-editor-row action" key={draft.original?.id ?? `new-${index}`}><input value={draft.owner} onChange={event => setDrafts(values => values.map((value, itemIndex) => itemIndex === index ? { ...value, owner: event.target.value } : value))} placeholder="Người phụ trách" aria-label={`Người phụ trách ${index + 1}`}/><textarea autoFocus={index === 0} value={draft.task} onChange={event => setDrafts(values => values.map((value, itemIndex) => itemIndex === index ? { ...value, task: event.target.value } : value))} onKeyDown={event => { if (event.key === 'Escape') cancel(); if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') save() }} aria-label={`Việc cần làm ${index + 1}`}/><input value={draft.deadline} onChange={event => setDrafts(values => values.map((value, itemIndex) => itemIndex === index ? { ...value, deadline: event.target.value } : value))} placeholder="Hạn hoàn thành" aria-label={`Hạn hoàn thành ${index + 1}`}/><button type="button" onClick={() => setDrafts(values => values.filter((_, itemIndex) => itemIndex !== index))} aria-label={`Xóa việc ${index + 1}`}><Trash2 size={14}/></button></div>)}<EditorActions onAdd={() => setDrafts(values => [...values, { original: null, owner: '', task: '', deadline: '' }])} onCancel={cancel} onSave={save}/></div> : items.length ? <ul>{items.map((item, index) => <li key={item.id || `action-${index}`}><span>{[item.owner, item.task, item.deadline].filter(Boolean).join(' → ')}</span><Evidence ids={item.evidenceIds} onEvidence={onEvidence} evidenceLabel={evidenceLabel}/></li>)}</ul> : <p className="inline-empty">Chưa có nội dung.</p>}</section>
+  return <section className={`structured-section tone-action ${editing ? 'editing' : ''}`}><h4><ListTodo size={15}/>Việc cần làm{editable && !editing && <EditButton onClick={begin} label="Chỉnh sửa việc cần làm"/>}</h4>{editing ? <div className="inline-section-editor" ref={editor}>{drafts.map((draft, index) => <div className="inline-editor-row action" key={draft.original?.id ?? `new-${index}`}><input value={draft.owner} onChange={event => setDrafts(values => values.map((value, itemIndex) => itemIndex === index ? { ...value, owner: event.target.value } : value))} placeholder="Người phụ trách" aria-label={`Người phụ trách ${index + 1}`}/><AutoTextarea autoFocus={index === 0} value={draft.task} onChange={event => setDrafts(values => values.map((value, itemIndex) => itemIndex === index ? { ...value, task: event.target.value } : value))} aria-label={`Việc cần làm ${index + 1}`}/><input value={draft.deadline} onChange={event => setDrafts(values => values.map((value, itemIndex) => itemIndex === index ? { ...value, deadline: event.target.value } : value))} placeholder="Hạn hoàn thành" aria-label={`Hạn hoàn thành ${index + 1}`}/></div>)}</div> : items.length ? <ul>{items.map((item, index) => <li key={item.id || `action-${index}`}><span>{[item.owner, item.task, item.deadline].filter(Boolean).join(' → ')}</span><Evidence ids={item.evidenceIds} onEvidence={onEvidence} evidenceLabel={evidenceLabel}/></li>)}</ul> : <p className="inline-empty">Chưa có nội dung.</p>}</section>
 }
 
 type TopicDraft = { original: UnresolvedTopic; topic: string; options: string }
@@ -60,10 +83,10 @@ function Unresolved({ items, editable, onChange, onEvidence, evidenceLabel }: { 
   const [editing, setEditing] = useState(false)
   const [drafts, setDrafts] = useState<TopicDraft[]>([])
   const begin = () => { setDrafts(items.map(item => ({ original: item, topic: item.topic, options: item.options.join(', ') }))); setEditing(true) }
-  const cancel = () => { setDrafts([]); setEditing(false) }
-  const save = () => { onChange?.(drafts.map(({ original, topic, options }) => ({ ...original, topic: topic.trim(), text: topic.trim(), options: options.split(',').map(value => value.trim()).filter(Boolean) })).filter(item => item.topic)); setEditing(false) }
+  const commit = () => { onChange?.(drafts.map(({ original, topic, options }) => ({ ...original, topic: topic.trim(), text: topic.trim(), options: options.split(',').map(value => value.trim()).filter(Boolean) })).filter(item => item.topic)); setEditing(false) }
+  const editor = useCommitOutside(editing, commit)
   if (!items.length) return null
-  return <section className={`structured-section tone-unresolved ${editing ? 'editing' : ''}`}><h4><GitBranch size={15}/>Vấn đề chưa chốt{editable && !editing && <EditButton onClick={begin} label="Chỉnh sửa vấn đề chưa chốt"/>}</h4>{editing ? <div className="inline-section-editor">{drafts.map((draft, index) => <div className="inline-editor-row topic" key={draft.original.id}><textarea autoFocus={index === 0} value={draft.topic} onChange={event => setDrafts(values => values.map((value, itemIndex) => itemIndex === index ? { ...value, topic: event.target.value } : value))} onKeyDown={event => { if (event.key === 'Escape') cancel(); if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') save() }} aria-label={`Vấn đề chưa chốt ${index + 1}`}/><input value={draft.options} onChange={event => setDrafts(values => values.map((value, itemIndex) => itemIndex === index ? { ...value, options: event.target.value } : value))} placeholder="Các lựa chọn, cách nhau bằng dấu phẩy" aria-label={`Các lựa chọn ${index + 1}`}/><button type="button" onClick={() => setDrafts(values => values.filter((_, itemIndex) => itemIndex !== index))} aria-label={`Xóa vấn đề ${index + 1}`}><Trash2 size={14}/></button></div>)}<EditorActions onCancel={cancel} onSave={save}/></div> : <ul>{items.map((item, index) => <li key={item.id || `unresolved-${index}`}><strong>{item.topic}</strong>{item.options.length > 0 && <small>Lựa chọn: {item.options.join(', ')}</small>}<small>{item.status === 'No final decision' ? 'Chưa có quyết định cuối cùng' : item.status}</small><Evidence ids={item.evidenceIds} onEvidence={onEvidence} evidenceLabel={evidenceLabel}/></li>)}</ul>}</section>
+  return <section className={`structured-section tone-unresolved ${editing ? 'editing' : ''}`}><h4><GitBranch size={15}/>Vấn đề chưa chốt{editable && !editing && <EditButton onClick={begin} label="Chỉnh sửa vấn đề chưa chốt"/>}</h4>{editing ? <div className="inline-section-editor" ref={editor}>{drafts.map((draft, index) => <div className="inline-editor-row topic" key={draft.original.id}><AutoTextarea autoFocus={index === 0} value={draft.topic} onChange={event => setDrafts(values => values.map((value, itemIndex) => itemIndex === index ? { ...value, topic: event.target.value } : value))} aria-label={`Vấn đề chưa chốt ${index + 1}`}/><input value={draft.options} onChange={event => setDrafts(values => values.map((value, itemIndex) => itemIndex === index ? { ...value, options: event.target.value } : value))} placeholder="Các lựa chọn, cách nhau bằng dấu phẩy" aria-label={`Các lựa chọn ${index + 1}`}/></div>)}</div> : <ul>{items.map((item, index) => <li key={item.id || `unresolved-${index}`}><strong>{item.topic}</strong>{item.options.length > 0 && <small>Lựa chọn: {item.options.join(', ')}</small>}<small>{item.status === 'No final decision' ? 'Chưa có quyết định cuối cùng' : item.status}</small><Evidence ids={item.evidenceIds} onEvidence={onEvidence} evidenceLabel={evidenceLabel}/></li>)}</ul>}</section>
 }
 
 export function StructuredMeetingSummaryView({ summary, showEvidence = false, editable = false, onChange, onEvidence, evidenceLabel }: { summary: StructuredMeetingSummary; showEvidence?: boolean; editable?: boolean; onChange?: (summary: StructuredMeetingSummary) => void; onEvidence?: EvidenceHandler; evidenceLabel?: EvidenceLabel }) {
