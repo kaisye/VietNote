@@ -56,6 +56,7 @@ select { min-height:35px; padding:5px 28px 5px 11px; }
 :root[data-theme='paper'] .main-stage { background:radial-gradient(var(--paper-dot) 1px, transparent 1.3px) 0 0/22px 22px, var(--deep); }
 :root[data-theme='paper'] .glass-sidebar { backdrop-filter:none; -webkit-backdrop-filter:none; }
 :root[data-theme='paper'] .glass-card { border-color:var(--border); border-radius:16px; box-shadow:0 1px 0 rgba(55,50,42,.04), 0 10px 28px -14px var(--shadow); backdrop-filter:none; -webkit-backdrop-filter:none; }
+:root[data-theme='paper'] .structured-sheet { background:#f7f8f6; }
 :root[data-theme='paper'] ::selection { background:#fde68a; color:var(--ink); }
 :root[data-theme='paper'] h1, :root[data-theme='paper'] h2, :root[data-theme='paper'] .note-title-input { font-family:ui-serif, 'New York', 'Iowan Old Style', Georgia, serif; letter-spacing:-.01em; }
 :root[data-theme='paper'] .account-badge { background:rgba(var(--tint),.08); border-color:var(--border); }
