@@ -56,6 +56,7 @@ select { min-height:35px; padding:5px 28px 5px 11px; }
 :root[data-theme='light'] .note-list-item time { color:var(--muted); font-size:12px; }
 :root[data-theme='light'] .note-source { color:var(--accent); }
 :root[data-theme='light'] .note-day h4 { color:var(--muted); font-size:11px; }
+:root[data-theme='light'] .note-day > .note-row + .note-row::before { content:''; position:absolute; top:-1px; left:36px; right:12px; height:1px; background:rgba(var(--tint-strong),.1); pointer-events:none; }
 
 /* Paper: flat sheets instead of glass, a dotted desk instead of glowing orbs, printed-style headings. */
 :root[data-theme='paper'] .atmosphere { display:none; }
