@@ -447,7 +447,9 @@
 .transcript-disclosure p { color:var(--muted); font-size:13px; margin-top:10px; white-space:pre-wrap; }
 .structured-summary { display:flex; flex-direction:column; gap:11px; }
 .structured-sheet { border:1px solid var(--border); border-radius:14px; background:rgba(var(--tint),.06); }
-.structured-tldr, .structured-section { padding:16px 18px; }
+.structured-tldr, .structured-section { padding:10px 18px; }
+.structured-sheet > :first-child { padding-top:16px; }
+.structured-sheet > :last-child { padding-bottom:16px; }
 .structured-tldr h4, .structured-section h4 { display:flex; align-items:center; gap:7px; color:var(--accent); font-size:13px; }
 .structured-sheet .tone-summary h4 { color:var(--summary, var(--accent)); }
 .structured-sheet .tone-decision h4 { color:var(--decision, #6759a6); }
