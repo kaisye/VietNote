@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { emitTo } from '@tauri-apps/api/event'
 import { Palette, PanelTop } from 'lucide-react'
 import type { Theme } from '../services/types'
+import type { AppModel } from '../hooks/useAppModel'
+import { MeetingControls } from '../components/MeetingControls'
 import { islandEnabled, islandEvents, isMac, saveIslandEnabled, shortcutLabel } from '../services/island'
 
 
@@ -12,7 +14,7 @@ const themes: { key: Theme; label: string; hint: string }[] = [
   { key: 'ocean', label: 'Đại dương', hint: 'Nước biển ngọc, kính mờ và điểm nhấn san hô.' },
 ]
 
-export function SettingsPage({ theme, setTheme }: { theme: Theme; setTheme: (value: Theme) => void }) {
+export function SettingsPage({ model, theme, setTheme }: { model: AppModel; theme: Theme; setTheme: (value: Theme) => void }) {
   const [island, setIsland] = useState(islandEnabled)
   const toggleIsland = (enabled: boolean) => {
     setIsland(enabled)
@@ -24,6 +26,9 @@ export function SettingsPage({ theme, setTheme }: { theme: Theme; setTheme: (val
     <h1>Cài đặt & trạng thái</h1>
     <p className="page-subtitle">Tùy chỉnh VietNote theo cách bạn muốn sử dụng.</p>
 
+
+    {/* Recording options for meetings started from the main window. */}
+    <MeetingControls model={model}/>
 
     <section className="glass-card settings-card">
       <div className="settings-heading"><Palette size={19}/><h3>Giao diện</h3></div>
