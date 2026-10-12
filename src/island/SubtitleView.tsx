@@ -1,11 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { Languages, Mic, PanelTop, Square } from 'lucide-react'
 import { HoverMenu } from './HoverMenu'
 import { SpeechMenu } from './SpeechMenu'
 import type { SpeechVoice } from '../hooks/useSpeech'
 import type { AudioInput } from '../services/types'
-import { saveSubtitleOffset, screenAt, subtitleDocks, subtitleFor, subtitleOffsets, subtitleRect, displayOptions, sourceOptions, type Display, type IslandLine, type IslandScreen, type IslandState, type Rect } from '../services/island'
+import { clampSubtitleScale, subtitleSize, saveSubtitleScale, subtitleScale, SUBTITLE, saveSubtitleOffset, screenAt, subtitleDocks, subtitleFor, subtitleOffsets, subtitleRect, displayOptions, sourceOptions, type Display, type IslandLine, type IslandScreen, type IslandState, type Rect } from '../services/island'
 
 const setFrame = (rect: Rect) => invoke<void>('island_set_frame', { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }).catch(() => {})
 const ignoreCursor = (ignore: boolean) => void invoke('island_ignore_cursor', { ignore }).catch(() => {})
@@ -52,7 +52,10 @@ export function SubtitleView({ screen, screens, layout, lines, status, active, c
   onDock: (screen: IslandScreen) => void
   speech: IslandState['speech']; onSpeech: (enabled: boolean) => void; onVoice: (voice: SpeechVoice) => void
 }) {
-  const [frame, setFrameState] = useState(() => subtitleRect(screen, subtitleOffsets()[screen.key]))
+  const [scale, setScaleState] = useState(subtitleScale)
+  const scaleRef = useRef(scale)
+  const [frame, setFrameState] = useState(() => subtitleRect(screen, subtitleOffsets()[screen.key], scale))
+  const resize = useRef<Drag | null>(null)
   const [hover, setHover] = useState(false)
   const [menu, setMenu] = useState<string | null>(null)
   const menuProps = (name: string) => ({ name, open: menu === name, onOpen: (open: boolean) => setMenu(current => open ? name : current === name ? null : current) })
@@ -71,13 +74,13 @@ export function SubtitleView({ screen, screens, layout, lines, status, active, c
   }, [source, translated])
 
   const move = (rect: Rect) => { frameRef.current = rect; setFrameState(rect); void setFrame(rect) }
-  useEffect(() => { move(subtitleRect(screen, subtitleOffsets()[screen.key])) }, [screen.key, layout])
+  useEffect(() => { move(subtitleRect(screen, subtitleOffsets()[screen.key], scaleRef.current)) }, [screen.key, layout])
 
   // The window only takes the mouse while the pointer is over the caption.
   useEffect(() => {
     let busy = false, inside = true
     const poll = setInterval(async () => {
-      if (busy || drag.current || !box.current) return
+      if (busy || drag.current || resize.current || !box.current) return
       busy = true
       const point = await invoke<[number, number]>('island_cursor').catch(() => null)
       busy = false
@@ -127,13 +130,48 @@ export function SubtitleView({ screen, screens, layout, lines, status, active, c
     move(placed)
   }
 
+  /** Dragging the caption's corner scales the band and its text; its left and bottom edges stay put. */
+  const onResizeDown = (event: ReactPointerEvent<HTMLSpanElement>) => {
+    if (event.button !== 0) return
+    event.stopPropagation()
+    resize.current = { id: event.pointerId, screenX: event.screenX, screenY: event.screenY, from: frameRef.current }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+  const resizeTo = (next: number, anchor: Rect) => {
+    scaleRef.current = next; setScaleState(next)
+    const rect = subtitleRect(screen, { dx: anchor.x - screen.frame.x, dy: anchor.y + anchor.height - subtitleSize(next).height - screen.frame.y }, next)
+    move(rect)
+    return rect
+  }
+  const onResizeMove = (event: ReactPointerEvent<HTMLSpanElement>) => {
+    const active = resize.current
+    if (!active || active.id !== event.pointerId) return
+    event.stopPropagation()
+    const widest = Math.max(event.screenX - active.screenX + active.from.width, 1)
+    active.rect = resizeTo(clampSubtitleScale(widest / SUBTITLE.width), active.from)
+  }
+  const onResizeUp = (event: ReactPointerEvent<HTMLSpanElement>) => {
+    const active = resize.current
+    if (!active || active.id !== event.pointerId) return
+    event.stopPropagation()
+    resize.current = null
+    saveSubtitleScale(scaleRef.current)
+    if (active.rect) saveSubtitleOffset(screen.key, active.rect.x - screen.frame.x, active.rect.y - screen.frame.y)
+  }
+  const resetScale = (event: ReactMouseEvent) => {
+    event.stopPropagation()
+    const rect = resizeTo(1, frameRef.current)
+    saveSubtitleScale(1)
+    saveSubtitleOffset(screen.key, rect.x - screen.frame.x, rect.y - screen.frame.y)
+  }
+
   // Double-clicking the caption (not a control, and not the end of a drag) goes back to the island.
   const onDoubleClick = (event: ReactMouseEvent<HTMLDivElement>) => {
-    if (dragged.current || (event.target as Element).closest('button, [data-menu]')) return
+    if (dragged.current || (event.target as Element).closest('button, [data-menu], .subtitle-resize')) return
     onExit()
   }
 
-  return <div className="subtitle-root">
+  return <div className="subtitle-root" style={{ '--subtitle-scale': scale } as CSSProperties}>
     <div className={`subtitle-box ${hover ? 'hover' : ''}`} ref={box} onDoubleClick={onDoubleClick} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>
       <div className="subtitle-controls">
         <HoverMenu {...menuProps('source')} value={audioSource} options={sourceOptions.map(option => ({ ...option, disabled: !active && !canStart }))} onChange={onSource}
@@ -152,6 +190,8 @@ export function SubtitleView({ screen, screens, layout, lines, status, active, c
             <div className="subtitle-clip source" ref={sourceClip}><p className="subtitle-source">{source}</p></div>
             {display === 'both' && <div className="subtitle-clip translation" ref={translationClip}><p className={`subtitle-translation ${caption.translationLags ? 'lagging' : ''}`}>{translated}</p></div>}
           </>}
+      <span className="subtitle-resize" title="Kéo để phóng to hoặc thu nhỏ phụ đề · nhấp đúp để về cỡ mặc định"
+        onPointerDown={onResizeDown} onPointerMove={onResizeMove} onPointerUp={onResizeUp} onPointerCancel={onResizeUp} onDoubleClick={resetScale}/>
     </div>
   </div>
 }

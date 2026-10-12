@@ -21,6 +21,15 @@ export type Placement = { anchor: Anchor } | { anchor: null; dx: number; dy: num
 
 export const PILL: Size = { width: 196, height: 38 }
 export const LEVEL_SIZE: Record<Exclude<Level, 'collapsed'>, Size> = { expanded: { width: 520, height: 540 } }
+/** The opened panel can be dragged larger or smaller from its corner, within these bounds. */
+export const PANEL_MIN: Size = { width: 400, height: 340 }
+export function resizedPanel(screen: IslandScreen, size: Size): Size {
+  const { frame } = screen
+  return {
+    width: Math.round(clamp(size.width, PANEL_MIN.width, frame.width - 2 * MARGIN)),
+    height: Math.round(clamp(size.height, PANEL_MIN.height, frame.height - 2 * MARGIN)),
+  }
+}
 /** Room on each side of the camera housing for the logo and the wave. */
 const NOTCH_WING = 66
 const MARGIN = 12
@@ -121,6 +130,14 @@ export function startScreen(screens: IslandScreen[], last?: string) {
 export type IslandMode = 'island' | 'subtitle'
 // Taller than the caption so the language menu can open above it.
 export const SUBTITLE: Size = { width: 860, height: 190 }
+/** Room above the caption for its menus; the rest of the band grows with the text. */
+const SUBTITLE_MENU_ROOM = 64
+export const SUBTITLE_SCALE = { min: 0.7, max: 1.8 }
+export const clampSubtitleScale = (scale: number) => clamp(scale, SUBTITLE_SCALE.min, SUBTITLE_SCALE.max)
+/** Dragging the caption's corner scales the band and its text together. */
+export const subtitleSize = (scale = 1): Size => ({
+  width: Math.round(SUBTITLE.width * scale), height: Math.round(SUBTITLE_MENU_ROOM + (SUBTITLE.height - SUBTITLE_MENU_ROOM) * scale),
+})
 /** Room left under the band for a video player's own controls. */
 const SUBTITLE_LIFT = 96
 
@@ -133,9 +150,10 @@ export function subtitleDocks(screen: IslandScreen, rect: Rect): boolean {
 
 /** A dragged caption this close to the centre line or its usual height snaps onto it. */
 const SUBTITLE_SNAP = 56
-export function subtitleRect(screen: IslandScreen, offset?: { dx: number; dy: number }): Rect {
+export function subtitleRect(screen: IslandScreen, offset?: { dx: number; dy: number }, scale = 1): Rect {
   const { frame, visible } = screen
-  const width = Math.min(SUBTITLE.width, visible.width - 2 * MARGIN), height = SUBTITLE.height
+  const size = subtitleSize(scale)
+  const width = Math.min(size.width, visible.width - 2 * MARGIN), height = size.height
   const centreX = visible.x + (visible.width - width) / 2, homeY = visible.y + visible.height - height - SUBTITLE_LIFT
   let x = offset ? frame.x + offset.dx : centreX
   let y = offset ? frame.y + offset.dy : homeY
@@ -164,7 +182,10 @@ export function subtitleFor(lines: IslandLine[], showTranslation: boolean): Capt
 // ---- What the island shows -------------------------------------------------------------
 
 export interface IslandLine { id: string; text: string; translation?: string; speaker?: string | null; interim?: boolean }
-export interface IslandChat { question?: string; quote?: string; answer?: string; pending: boolean; error?: string }
+export interface IslandChat { question?: string; quote?: string; answer?: string; pending: boolean; error?: string
+  /** How many screenshots the question carried. */
+  images?: number
+}
 export interface IslandState {
   /** A meeting or translation is running. */
   active: boolean; capturing: boolean; status: string; canStart: boolean
@@ -194,14 +215,14 @@ export function islandLines(entries: Subtitle[], interim: InterimTranscript[], b
 /** The exchange in progress, or the latest finished one. */
 export function islandChat(messages: NoteChatMessage[], status: LiveChatStatus | null): IslandChat | null {
   if (status) return {
-    question: status.request.label ?? status.request.question, quote: status.request.quote,
+    question: status.request.label ?? status.request.question, quote: status.request.quote, images: status.request.images?.length,
     answer: status.answer?.answer, pending: status.pending, error: status.error,
   }
   let answer = messages.length - 1
   while (answer >= 0 && messages[answer].role !== 'assistant') answer--
   if (answer < 0) return null
   const question = messages[answer - 1]?.role === 'user' ? messages[answer - 1] : undefined
-  return { question: question?.content, quote: question?.quote, answer: messages[answer].content, pending: false }
+  return { question: question?.content, quote: question?.quote, images: question?.images?.length, answer: messages[answer].content, pending: false }
 }
 
 /** One-tap actions on a line picked in the island; the learner-oriented set. */
@@ -233,6 +254,14 @@ export const saveIslandMode = (mode: IslandMode) => write('islandMode', mode)
 type Offsets = Record<string, { dx: number; dy: number }>
 export const subtitleOffsets = (): Offsets => { try { return JSON.parse(read('islandSubtitle') ?? '{}') as Offsets } catch { return {} } }
 export const saveSubtitleOffset = (screenKey: string, dx: number, dy: number) => write('islandSubtitle', JSON.stringify({ ...subtitleOffsets(), [screenKey]: { dx, dy } }))
+const readNumber = (key: string) => { const value = Number(read(key)); return Number.isFinite(value) && value > 0 ? value : null }
+export const panelSize = (): Size => {
+  const width = readNumber('islandPanelWidth'), height = readNumber('islandPanelHeight')
+  return width && height ? { width, height } : LEVEL_SIZE.expanded
+}
+export const savePanelSize = (size: Size) => { write('islandPanelWidth', String(size.width)); write('islandPanelHeight', String(size.height)) }
+export const subtitleScale = () => clampSubtitleScale(readNumber('islandSubtitleScale') ?? 1)
+export const saveSubtitleScale = (scale: number) => write('islandSubtitleScale', scale.toFixed(3))
 export const islandPinned = () => read('islandPinned') === 'true'
 export const saveIslandPinned = (pinned: boolean) => write('islandPinned', String(pinned))
 /** What the island and subtitles show: the spoken language, the Vietnamese translation, or both. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { islandChat, islandLines, openFrame, PILL, pillForPanel, pillRect, screenAt, snapPlacement, startScreen, subtitleDocks, subtitleFor, subtitleRect, type IslandScreen } from './island'
+import { clampSubtitleScale, islandChat, islandLines, openFrame, PANEL_MIN, PILL, resizedPanel, subtitleSize, pillForPanel, pillRect, screenAt, snapPlacement, startScreen, subtitleDocks, subtitleFor, subtitleRect, type IslandScreen } from './island'
 import type { Subtitle, TranslationBlock } from './types'
 
 const laptop: IslandScreen = {
@@ -86,6 +86,19 @@ describe('island content', () => {
 })
 
 describe('subtitle mode', () => {
+  it('scales the band and its text from the corner, within bounds', () => {
+    expect(subtitleSize(1)).toEqual({ width: 860, height: 190 })
+    expect(subtitleSize(1.5)).toEqual({ width: 1290, height: 253 })
+    expect(clampSubtitleScale(5)).toBe(1.8)
+    expect(clampSubtitleScale(0.1)).toBe(0.7)
+    // Wider than the display, the band fits inside it.
+    expect(subtitleRect(laptop, undefined, 1.8).width).toBe(1512 - 24)
+  })
+  it('resizes the opened panel within the screen', () => {
+    expect(resizedPanel(laptop, { width: 100, height: 100 })).toEqual(PANEL_MIN)
+    expect(resizedPanel(laptop, { width: 5000, height: 5000 })).toEqual({ width: 1512 - 24, height: 982 - 24 })
+    expect(openFrame(laptop, pillRect(laptop, { anchor: 'notch' }), { width: 700, height: 600 }).frame.width).toBe(700)
+  })
   it('sits bottom-center above the player controls, or where it was dragged', () => {
     expect(subtitleRect(laptop)).toEqual({ x: 326, y: 912 - 190 - 96, width: 860, height: 190 })
     expect(subtitleRect(laptop, { dx: 5000, dy: 100 })).toEqual({ x: 1512 - 860, y: 100, width: 860, height: 190 })

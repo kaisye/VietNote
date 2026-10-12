@@ -2,9 +2,11 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 import { invoke } from '@tauri-apps/api/core'
 import { emitTo, listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { AppWindow, ArrowDown, BookA, Captions, ChevronDown, ChevronUp, CircleAlert, Languages, Lightbulb, Mic, Pin, Send, Square, X } from 'lucide-react'
+import { AppWindow, ArrowDown, BookA, Captions, ChevronDown, ChevronUp, CircleAlert, ImageIcon, Languages, Lightbulb, Mic, Pin, Send, Square, X } from 'lucide-react'
 import { BrandIcon } from '../components/BrandIcon'
 import { ChatMarkdown } from '../components/ChatMarkdown'
+import { ChatImageTray, useChatImages } from '../components/ChatImages'
+import { IMAGE_QUESTION } from '../services/chatImages'
 import { SubtitleView } from './SubtitleView'
 import { HoverMenu } from './HoverMenu'
 import { AppList } from './AppList'
@@ -12,7 +14,7 @@ import { appChoiceAvailable, useAudioApps } from '../services/audioApps'
 import { SpeechMenu } from './SpeechMenu'
 import { useStickToBottom } from '../hooks/useStickToBottom'
 import {
-  atNotch, displayOptions, shortcutLabel, islandActions, sourceOptions, islandEnabled, islandEvents, islandMode, saveIslandMode, islandPinned, islandDisplay, LEVEL_SIZE, loadPlacements, openFrame, PILL, pillForPanel, pillRect,
+  atNotch, displayOptions, shortcutLabel, islandActions, sourceOptions, islandEnabled, islandEvents, islandMode, saveIslandMode, islandPinned, islandDisplay, loadPlacements, openFrame, panelSize, resizedPanel, savePanelSize, LEVEL_SIZE, PILL, pillForPanel, pillRect,
   saveIslandPinned, saveIslandDisplay, savePlacement, shownDisplay, screenAt, snapPlacement, startScreen,
   type Display, type IslandAsk, type IslandLine, type IslandMode, type IslandScreen, type IslandState, type Level, type Placement, type Rect,
 } from '../services/island'
@@ -69,6 +71,7 @@ export function IslandApp() {
   const menuClosing = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const [selected, setSelected] = useState<IslandLine | null>(null)
   const [draft, setDraft] = useState('')
+  const pics = useChatImages()
   const [mode, setModeState] = useState<IslandMode>(islandMode)
   const modeRef = useRef(mode)
   const subtitleMode = () => modeRef.current === 'subtitle'
@@ -85,6 +88,9 @@ export function IslandApp() {
   const placementRef = useRef<Placement>({ anchor: 'notch' })
   const pinnedRef = useRef(pinned)
   const drag = useRef<Drag | null>(null)
+  /** The opened panel's size, set by dragging its corner. */
+  const panelSizeRef = useRef(panelSize())
+  const resize = useRef<{ id: number; screenX: number; screenY: number; from: { width: number; height: number } } | null>(null)
   const pressed = useRef<Element | null>(null)
   const received = useRef(false)
   const timers = useRef<Record<'shrink' | 'click' | 'hover' | 'leave', ReturnType<typeof setTimeout> | undefined>>({ shrink: undefined, click: undefined, hover: undefined, leave: undefined })
@@ -92,7 +98,7 @@ export function IslandApp() {
   /** At its home spot (the notch, or top centre) an opened island closes once the pointer leaves; moved elsewhere it stays open. */
   const atHome = () => placementRef.current.anchor === 'notch'
   /** Typing a question keeps it open even if the pointer wanders off. */
-  const typing = () => document.activeElement === input.current && Boolean(input.current?.value.trim())
+  const typing = () => document.activeElement === input.current && Boolean(input.current?.value.trim() || pics.images.length)
   const input = useRef<HTMLInputElement>(null)
   const answer = useRef<HTMLDivElement>(null)
   const lines = state?.lines ?? []
@@ -110,7 +116,7 @@ export function IslandApp() {
   const geometry = (target: Level) => {
     const pill = pillRect(screenRef.current!, placementRef.current)
     if (target === 'collapsed') return { frame: pill, growsUp: viewRef.current?.growsUp ?? false }
-    return openFrame(screenRef.current!, pill, LEVEL_SIZE[target])
+    return openFrame(screenRef.current!, pill, resizedPanel(screenRef.current!, panelSizeRef.current))
   }
 
   /** Snaps straight to `target` with no animation, e.g. after a drag or a display change. */
@@ -276,13 +282,46 @@ export function IslandApp() {
       } else {
         clear('hover')
         if (levelRef.current === 'expanded' && atHome() && !pinnedRef.current) timers.current.leave = setTimeout(() => {
-          if (levelRef.current === 'expanded' && atHome() && !pinnedRef.current && !hovering.current && !drag.current && !typing()) collapse()
-        }, 380)
+          if (levelRef.current === 'expanded' && atHome() && !pinnedRef.current && !hovering.current && !drag.current && !resize.current && !typing()) collapse()
+        }, 40)
       }
-    }, 90)
+    }, 50)
     return () => clearInterval(poll)
   }, [])
 
+
+  /** Dragging the panel's left corner: it grows on both sides of the pill, and away from it vertically. */
+  const onResizeDown = (event: ReactPointerEvent<HTMLSpanElement>) => {
+    const current = viewRef.current
+    if (event.button !== 0 || !current) return
+    event.stopPropagation()
+    clear('shrink', 'click', 'hover', 'leave')
+    resize.current = { id: event.pointerId, screenX: event.screenX, screenY: event.screenY, from: { width: current.frame.width, height: current.frame.height } }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+  const onResizeMove = (event: ReactPointerEvent<HTMLSpanElement>) => {
+    const active = resize.current, current = viewRef.current
+    if (!active || active.id !== event.pointerId || !current || !screenRef.current) return
+    event.stopPropagation()
+    const dx = event.screenX - active.screenX, dy = event.screenY - active.screenY
+    panelSizeRef.current = resizedPanel(screenRef.current, { width: active.from.width - 2 * dx, height: active.from.height + (current.growsUp ? -dy : dy) })
+    const { frame, growsUp } = geometry('expanded')
+    void setFrame(frame)
+    update({ ...current, frame, shape: frame, animate: false, growsUp })
+  }
+  const onResizeUp = (event: ReactPointerEvent<HTMLSpanElement>) => {
+    if (resize.current?.id !== event.pointerId) return
+    event.stopPropagation()
+    resize.current = null
+    savePanelSize(panelSizeRef.current)
+  }
+  /** Double-clicking the corner returns the panel to its usual size. */
+  const resetPanelSize = (event: ReactMouseEvent) => {
+    event.stopPropagation()
+    panelSizeRef.current = LEVEL_SIZE.expanded
+    savePanelSize(panelSizeRef.current)
+    settle('expanded')
+  }
 
   /** Where an opened panel can be grabbed: its header bar, or the strip above it at the notch. */
   const panelGrip = (target: Element) => Boolean(target.closest('.island-header')) || !target.closest('.island-panel')
@@ -372,13 +411,17 @@ export function IslandApp() {
   const canAsk = lines.some(line => !line.interim) && !chat?.pending
   const ask = (question: string, label?: string) => {
     if (!canAsk || !question.trim()) return
+    const images = pics.images.length ? pics.images : undefined
     const request: IslandAsk = selected
-      ? { question, label, quote: [selected.text, selected.translation].filter(Boolean).join('\n'), focusIds: [selected.id] }
-      : { question, label }
+      ? { question, label, quote: [selected.text, selected.translation].filter(Boolean).join('\n'), focusIds: [selected.id], images }
+      : { question, label, images }
     toMain(islandEvents.ask, request)
     setDraft('')
     setSelected(null)
+    pics.clear()
   }
+  /** A screenshot with no question asks what it shows. */
+  const submit = () => draft.trim() ? ask(draft) : pics.images.length ? ask(IMAGE_QUESTION, 'Ảnh này nói gì?') : undefined
 
   if (!view) return null
   if (mode === 'subtitle' && screen) return <SubtitleView screen={screen} screens={screensRef.current} layout={layout} lines={lines} status={state?.active ? 'Đang chờ lời nói…' : 'VietNote chưa nghe · rê chuột vào đây và bấm nút ghi để nghe âm thanh máy'}
@@ -444,7 +487,7 @@ export function IslandApp() {
 
         {chat && answerMode !== 'hidden' && <div className={`island-answer ${answerMode === 'collapsed' ? 'collapsed' : ''}`}>
           <div className="island-answer-head" onClick={() => setAnswerMode(answerMode === 'collapsed' ? 'open' : 'collapsed')} title={answerMode === 'collapsed' ? 'Mở câu trả lời' : 'Thu gọn câu trả lời'}>
-            <p className="island-question">{chat.question ?? 'Câu trả lời'}</p>
+            <p className="island-question">{Boolean(chat.images) && <ImageIcon size={13} aria-label={`${chat.images} ảnh`}/>}{chat.question ?? 'Câu trả lời'}</p>
             {chat.pending && answerMode === 'collapsed' && <Wave/>}
             <button className="island-icon" aria-label={answerMode === 'collapsed' ? 'Mở câu trả lời' : 'Thu gọn câu trả lời'}>{answerMode === 'collapsed' ? <ChevronDown size={14}/> : <ChevronUp size={14}/>}</button>
             <button className="island-icon" aria-label="Ẩn câu trả lời" title="Ẩn câu trả lời"
@@ -462,12 +505,15 @@ export function IslandApp() {
           const Icon = actionIcons[action.id]
           return <button key={action.id} className="island-button" disabled={!canAsk} onClick={() => ask(action.question, action.label)}><Icon size={14}/>{action.label}</button>
         })}</div>}
-        <form className="island-composer" onSubmit={event => { event.preventDefault(); ask(draft) }}>
-          <input ref={input} value={draft} onChange={event => setDraft(event.target.value)} disabled={!lines.length}
+        <ChatImageTray state={pics}/>
+        <form className="island-composer" onSubmit={event => { event.preventDefault(); submit() }} onDragOver={pics.onDragOver} onDrop={pics.onDrop}>
+          <input ref={input} value={draft} onChange={event => setDraft(event.target.value)} onPaste={pics.onPaste} disabled={!lines.length}
             onFocus={() => { if (!document.hasFocus()) void invoke('island_focus').catch(() => {}) }}
-            placeholder={lines.length ? (selected ? 'Hỏi về câu đã chọn…' : `Hỏi về nội dung đang nghe… (${shortcutLabel})`) : 'Chưa có lời nói để hỏi'}/>
-          <button className="island-send" type="submit" disabled={!canAsk || !draft.trim()} aria-label="Gửi câu hỏi"><Send size={15}/></button>
+            placeholder={!lines.length ? 'Chưa có lời nói để hỏi' : pics.images.length ? 'Hỏi về ảnh này…' : selected ? 'Hỏi về câu đã chọn…' : `Hỏi, hoặc dán ảnh chụp màn hình… (${shortcutLabel})`}/>
+          <button className="island-send" type="submit" disabled={!canAsk || (!draft.trim() && !pics.images.length)} aria-label="Gửi câu hỏi"><Send size={15}/></button>
         </form>
+        <span className={`island-resize ${view.growsUp ? 'top' : 'bottom'}`} title="Kéo để phóng to hoặc thu nhỏ · nhấp đúp để về cỡ mặc định"
+          onPointerDown={onResizeDown} onPointerMove={onResizeMove} onPointerUp={onResizeUp} onPointerCancel={onResizeUp} onDoubleClick={resetPanelSize}/>
       </div>}
     </div>
   </div>

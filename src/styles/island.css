@@ -78,6 +78,13 @@ html.island-host body { font-size:13px; user-select:none; -webkit-user-select:no
 .island-quote .island-icon { width:22px; height:22px; }
 .island-actions { display:flex; flex-wrap:wrap; gap:6px; }
 
+/* Screenshots pasted into the island's question box. */
+.island-panel .chat-image-tray { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex:none; padding:4px 2px 0; }
+.island-panel .chat-image-tray figure { position:relative; margin:0; }
+.island-panel .chat-image-tray img { display:block; height:44px; max-width:90px; object-fit:cover; border:1px solid rgba(173,168,255,.3); border-radius:8px; }
+.island-panel .chat-image-tray figure button { position:absolute; top:-6px; right:-6px; display:grid; place-items:center; width:18px; height:18px; padding:0; border:0; border-radius:50%; background:#f6f6ff; color:#17142a; cursor:pointer; }
+.island-panel .chat-image-tray small { color:#ff9db0; font-size:12px; }
+.island-question svg { flex:none; margin-right:5px; vertical-align:-2px; }
 .island-composer { display:flex; align-items:center; gap:6px; flex:none; padding:4px 4px 4px 13px; border-radius:100px; background:rgba(255,255,255,.07); border:1px solid rgba(173,168,255,.22); }
 .island-composer:focus-within { border-color:rgba(173,168,255,.55); }
 .island-composer input { flex:1; min-width:0; height:30px; border:0; outline:0; color:var(--island-ink); background:transparent; font-size:13px; }
@@ -91,14 +98,26 @@ html.island-host body { font-size:13px; user-select:none; -webkit-user-select:no
 .subtitle-box.hover { background:rgba(8,7,18,.84); box-shadow:0 0 0 1px rgba(173,168,255,.32); }
 /* Two lines at most; a long sentence keeps its newest words in view. */
 .subtitle-clip { overflow:hidden; line-height:1.36; }
-.subtitle-clip.source { font-size:20px; height:calc(2 * 1.36em); }
-.subtitle-clip.translation { font-size:17px; height:calc(2 * 1.36em); margin-top:3px; }
+.subtitle-clip.source { font-size:calc(20px * var(--subtitle-scale, 1)); height:calc(2 * 1.36em); }
+.subtitle-clip.translation { font-size:calc(17px * var(--subtitle-scale, 1)); height:calc(2 * 1.36em); margin-top:3px; }
 .subtitle-source { font-weight:600; text-shadow:0 1px 2px rgba(0,0,0,.5); }
 .subtitle-translation { color:#d4cefa; transition:opacity .25s ease; }
 .subtitle-translation.lagging { opacity:.55; }
 .subtitle-hint { color:#aca8e5; font-size:14px; }
 .subtitle-controls { position:absolute; top:5px; right:6px; display:flex; gap:2px; opacity:0; transition:opacity .15s ease; }
 .subtitle-box.hover .subtitle-controls { opacity:1; }
+/* Corner grips: drag to make the panel or the caption larger or smaller. */
+.island-resize, .subtitle-resize { position:absolute; width:18px; height:18px; z-index:3; opacity:.45; transition:opacity .15s ease;
+  background:linear-gradient(135deg, transparent 0 46%, currentColor 46% 54%, transparent 54% 66%, currentColor 66% 74%, transparent 74%); color:#aca8e5; }
+.island-resize:hover, .subtitle-resize:hover { opacity:1; }
+.subtitle-resize { right:2px; bottom:2px; cursor:nwse-resize; }
+/* The panel's grip sits at its left corner, clear of the send button. */
+.island-resize { left:2px; }
+.island-resize.bottom { bottom:2px; cursor:nesw-resize; transform:scaleX(-1); }
+.island-resize.top { top:2px; cursor:nwse-resize; transform:scale(-1, -1); }
+.subtitle-resize { opacity:0; }
+.subtitle-box.hover .subtitle-resize { opacity:.6; }
+.subtitle-box.hover .subtitle-resize:hover { opacity:1; }
 
 /* Language and audio-source menus: above the button in subtitles, below it in the island. */
 .hover-menu { position:relative; display:inline-flex; }
