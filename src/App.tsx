@@ -10,13 +10,13 @@ import { FilePage } from './pages/FilePage'
 import { UpdateBanner } from './components/UpdateBanner'
 import type { Page, Theme } from './services/types'
 
-const savedTheme = (): Theme => { try { const value = localStorage.getItem('theme'); return value === 'paper' || value === 'dark-gradient' ? value : 'light' } catch { return 'light' } }
+const savedTheme = (): Theme => { try { const value = localStorage.getItem('theme'); return value === 'paper' || value === 'dark-gradient' || value === 'ocean' ? value : 'light' } catch { return 'light' } }
 
 export default function App() {
   const model = useAppModel()
   const [page, setPage] = useState<Page>('home')
   const [theme, setTheme] = useState<Theme>(savedTheme)
-  const toggleTheme = () => setTheme(value => value === 'light' ? 'dark-gradient' : value === 'dark-gradient' ? 'paper' : 'light')
+  const toggleTheme = () => setTheme(value => value === 'light' ? 'dark-gradient' : value === 'dark-gradient' ? 'paper' : value === 'paper' ? 'ocean' : 'light')
   useEffect(() => { document.documentElement.dataset.theme = theme; try { localStorage.setItem('theme', theme) } catch { /* private window */ } }, [theme])
   useEffect(() => { if (model.savingNoteID) setPage('notes') }, [model.savingNoteID])
   useIslandBridge(model, () => setPage('home'))

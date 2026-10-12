@@ -2,9 +2,12 @@
 :root[data-theme='light'] { color-scheme: light; --deep:#fffcfe; --canvas:#fffcfe; --ink:#131a2e; --muted:#646fbb; --accent:#4d5ebe; --steel:#74c6ff; --lavender:#ada8ff; --blush:#ff9fcb; --border:rgba(77,94,190,.22); --glass:rgba(255,255,255,.72); --glass-strong:rgba(255,255,255,.84); --sidebar:rgba(255,255,255,.7); --bar:rgba(255,255,255,.94); --bar-text:#4d5ebe; --bar-selected:#4d5ebe; --bar-selected-text:#fff; --input-bg:rgba(255,255,255,.92); --shadow:rgba(19,26,46,.2); --button-primary:#131a2e; --button-primary-text:#fffcfe; --tint:173,168,255; --tint-strong:77,94,190; --orb-opacity:.68; --stage-glow:.16; }
 /* Paper notebook: off-white sheets on a dotted desk, ink-dark text, fountain-pen blue for accents. */
 :root[data-theme='paper'] { color-scheme: light; --deep:#fefefc; --canvas:#fff; --ink:#292722; --muted:#70716d; --accent:#315b96; --summary:#315b96; --decision:#6759a6; --action:#327565; --unresolved:#a56a2b; --danger:#b94f5a; --steel:#8a9bc4; --lavender:#ecece8; --blush:#d9897f; --border:#e5e6e1; --glass:#fff; --glass-strong:#fff; --sidebar:#f8f8f5; --bar:#fff; --bar-text:#292722; --bar-selected:#292722; --bar-selected-text:#fff; --input-bg:#fff; --shadow:rgba(55,50,42,.085); --button-primary:#292722; --button-primary-text:#fff; --tint:120,120,114; --tint-strong:49,91,150; --paper-dot:rgba(49,85,143,.05); }
+/* Ocean: sea-glass panels in sunlit teal water over sand; deep kelp ink, sea-green accents, coral for the main action. */
+:root[data-theme='ocean'] { color-scheme: light; --deep:#cfe8e1; --canvas:#eef7f4; --ink:#123029; --muted:#4f6d65; --accent:#2f9078; --summary:#2f9078; --decision:#2f6f8f; --action:#c25a35; --unresolved:#a8742f; --danger:#c4513d; --steel:#8fd0c3; --lavender:#e6d3a0; --blush:#f1a383; --border:rgba(18,48,41,.13); --glass:rgba(240,249,246,.7); --glass-strong:rgba(244,251,248,.86); --sidebar:rgba(232,246,241,.62); --bar:rgba(241,250,247,.78); --bar-text:#123029; --bar-selected:#123029; --bar-selected-text:#f2faf7; --input-bg:rgba(255,255,255,.72); --shadow:rgba(18,48,41,.14); --button-primary:#e0714a; --button-primary-text:#fff; --tint:47,144,120; --tint-strong:18,48,41; --orb-opacity:.5; --stage-glow:0; }
 /* Island uses its own dark palette. */
 :root[data-theme='dark'] { color-scheme: dark; --deep:#17142a; --canvas:#17142a; --ink:#f6f6ff; --muted:#aca8e5; --accent:#ada8ff; --steel:#4d5ebe; --lavender:#342f58; --blush:#ff9fcb; --border:rgba(173,168,255,.24); --glass:rgba(52,47,88,.43); --glass-strong:rgba(23,20,42,.78); --sidebar:rgba(23,20,42,.74); --bar:rgba(52,47,88,.92); --bar-text:#f6f6ff; --bar-selected:#ada8ff; --bar-selected-text:#131a2e; --input-bg:rgba(31,29,51,.8); --shadow:rgba(7,8,27,.36); --button-primary:#f6f6ff; --button-primary-text:#17142a; --tint:173,168,255; --tint-strong:77,94,190; }
-:root[data-theme='dark-gradient'] { color-scheme:dark; --deep:#111626; --canvas:#111626; --ink:#edf1fa; --muted:#a5b1ce; --accent:#a1b3ff; --summary:#a1b3ff; --decision:#c3b0ee; --action:#8bd3b8; --unresolved:#e3bb82; --danger:#f08d9a; --steel:#315ba8; --lavender:#69579e; --blush:#845b9c; --border:rgba(161,179,255,.19); --glass:rgba(27,35,57,.75); --glass-strong:rgba(24,31,51,.9); --sidebar:rgba(18,24,40,.92); --bar:rgba(27,35,57,.96); --bar-text:#c0ccf4; --bar-selected:#a1b3ff; --bar-selected-text:#111626; --input-bg:rgba(17,24,42,.85); --shadow:rgba(3,7,18,.32); --button-primary:#a1b3ff; --button-primary-text:#111626; --tint:135,155,224; --tint-strong:161,179,255; --orb-opacity:.28; --stage-glow:.08; }
+/* Deep space: nebula clouds, stars and passing meteors behind frosted night-glass panels; cool starlight accents, a violet-to-blue glow for the main action. */
+:root[data-theme='dark-gradient'] { color-scheme:dark; --deep:#05071a; --canvas:#0a0f2a; --ink:#eef1ff; --muted:#9ba4c9; --accent:#a9bcff; --summary:#a9bcff; --decision:#c9b8f5; --action:#8fd6c0; --unresolved:#c4bdf0; --danger:#f39aa6; --steel:#22306e; --lavender:#3a2f6e; --blush:#2b2560; --border:rgba(200,210,255,.13); --glass:rgba(22,28,62,.55); --glass-strong:rgba(16,21,48,.82); --sidebar:rgba(8,12,30,.62); --bar:rgba(22,28,62,.62); --bar-text:#dfe5ff; --bar-selected:#eef1ff; --bar-selected-text:#0b1230; --input-bg:rgba(10,14,36,.7); --shadow:rgba(0,0,0,.45); --button-primary:#8f86ff; --button-primary-text:#fff; --tint:150,165,235; --tint-strong:190,202,255; --orb-opacity:.35; --stage-glow:0; }
 * { box-sizing: border-box; }
 html, body, #root { width:100%; height:100%; margin:0; overflow:hidden; }
 body { color:var(--ink); background:var(--deep); font-size:14px; }
@@ -48,7 +51,7 @@ select { min-height:35px; padding:5px 28px 5px 11px; }
 @keyframes status-pulse { 0%,100% { transform:scale(.82); opacity:.58; box-shadow:0 0 3px var(--accent); } 50% { transform:scale(1.28); opacity:1; box-shadow:0 0 12px var(--accent); } }
 @media (prefers-reduced-motion:reduce) {
   .animate-in { animation:none; }
-  .orb, .outer-ring, .middle-ring, .inner-ring, .orbit-track, .start-button, .animated-waveform span, .status-dot.ready { animation-duration:4s!important; }
+  .atmosphere::after, .orb, .outer-ring, .middle-ring, .inner-ring, .orbit-track, .start-button, .animated-waveform span, .status-dot.ready { animation-duration:4s!important; }
   * { scroll-behavior:auto!important; }
 }
 
@@ -59,19 +62,6 @@ select { min-height:35px; padding:5px 28px 5px 11px; }
 :root[data-theme='light'] .note-day > .note-row + .note-row::before { content:''; position:absolute; top:-1px; left:36px; right:12px; height:1px; background:rgba(var(--tint-strong),.1); pointer-events:none; }
 
 /* Dark gradient: subdued glass edges and blue note accents. */
-:root[data-theme='dark-gradient'] { --unresolved:#b9b5e8; }
-:root[data-theme='dark-gradient'] .glass-card { border-color:var(--border); }
-:root[data-theme='dark-gradient'] .atmosphere::after { background:linear-gradient(180deg,rgba(109,136,213,.035),transparent 65%,rgba(132,91,156,.04)); }
-:root[data-theme='dark-gradient'] .orb-lilac { opacity:.2; }
-:root[data-theme='dark-gradient'] .note-source { color:var(--accent); }
-:root[data-theme='dark-gradient'] .note-list-item time, :root[data-theme='dark-gradient'] .note-day h4 { color:var(--muted); }
-:root[data-theme='dark-gradient'] .note-day > .note-row + .note-row::before { content:''; position:absolute; top:-1px; left:36px; right:12px; height:1px; background:rgba(var(--tint-strong),.1); pointer-events:none; }
-:root[data-theme='dark-gradient'] .account-badge, :root[data-theme='dark-gradient'] .credit-offer.highlight { background:linear-gradient(135deg,rgba(83,114,189,.16),rgba(132,91,156,.14)); border-color:var(--border); }
-:root[data-theme='dark-gradient'] .account-badge:hover { background:linear-gradient(135deg,rgba(83,114,189,.24),rgba(132,91,156,.22)); }
-:root[data-theme='dark-gradient'] .account-badge svg { color:var(--accent); }
-:root[data-theme='dark-gradient'] .note-chat.island:not(.open):has(.island-pill:not(:disabled)) { background:linear-gradient(135deg,#354b80,#4a548c); border-color:rgba(var(--tint-strong),.32); box-shadow:0 8px 22px var(--shadow); }
-:root[data-theme='dark-gradient'] .note-chat.island:not(.open) .island-pill:not(:disabled) { color:#f3f5ff; }
-:root[data-theme='dark-gradient'] .start-button { background:linear-gradient(145deg,#253453,#465f9c); color:var(--ink); border-color:rgba(var(--tint-strong),.4); }
 
 /* Paper: flat sheets instead of glass, a dotted desk instead of glowing orbs, printed-style headings. */
 :root[data-theme='paper'] .atmosphere { display:none; }
@@ -84,3 +74,62 @@ select { min-height:35px; padding:5px 28px 5px 11px; }
 :root[data-theme='paper'] .account-badge { background:rgba(var(--tint),.08); border-color:var(--border); }
 :root[data-theme='paper'] .account-badge:hover { background:rgba(var(--tint),.14); border-color:rgba(var(--tint),.35); }
 :root[data-theme='paper'] .account-badge svg { color:var(--accent); }
+
+/* Ocean: light falls from the surface and fades into deeper water, with a strip of sand at the floor. */
+:root[data-theme='ocean'] .main-stage { background:linear-gradient(180deg,#d6ece6 0%,#b4ddd3 34%,#86c3b7 66%,#5fa79c 86%,#cdbb86 100%); }
+:root[data-theme='ocean'] .atmosphere::after { background:repeating-linear-gradient(112deg,transparent 0 120px,rgba(255,255,255,.08) 160px,transparent 220px 340px), linear-gradient(180deg,rgba(255,255,255,.35),transparent 45%); mix-blend-mode:soft-light; }
+:root[data-theme='ocean'] .orb-blue { background:#9fd8cc; } :root[data-theme='ocean'] .orb-pink { background:#f4fbf8; } :root[data-theme='ocean'] .orb-lilac { background:#e6d3a0; opacity:.45; }
+:root[data-theme='ocean'] .glass-card { border-color:rgba(255,255,255,.7); box-shadow:0 14px 30px -12px var(--shadow), inset 0 1px 0 rgba(255,255,255,.6); }
+:root[data-theme='ocean'] .glass-sidebar { border-right-color:rgba(255,255,255,.55); }
+:root[data-theme='ocean'] .eyebrow, :root[data-theme='ocean'] .sidebar-caption, :root[data-theme='ocean'] .brand-copy small, :root[data-theme='ocean'] .field>span { font-family:ui-monospace, 'SF Mono', Menlo, monospace; letter-spacing:.22em; font-weight:500; }
+:root[data-theme='ocean'] .eyebrow { color:var(--ink); opacity:.72; }
+:root[data-theme='ocean'] .pill-btn.primary, :root[data-theme='ocean'] .start-button { background:linear-gradient(180deg,#ee8a63,#d9653d); color:#fff; border-color:rgba(255,255,255,.55); box-shadow:0 10px 22px -8px rgba(201,90,52,.55); }
+:root[data-theme='ocean'] .note-source { color:var(--accent); }
+:root[data-theme='ocean'] .note-list-item time, :root[data-theme='ocean'] .note-day h4 { color:var(--muted); }
+:root[data-theme='ocean'] .account-badge { background:rgba(255,255,255,.45); border-color:rgba(255,255,255,.7); }
+:root[data-theme='ocean'] .account-badge:hover { background:rgba(255,255,255,.62); }
+:root[data-theme='ocean'] .account-badge svg { color:#d9653d; }
+:root[data-theme='ocean'] ::selection { background:rgba(224,113,74,.28); color:var(--ink); }
+/* Ocean notes: a light touch of coral marks where you are (selected note, day, open tab, today) and the quick summary. */
+:root[data-theme='ocean'] .note-list-item.selected, :root[data-theme='ocean'] .note-list-item.selected:hover { background:linear-gradient(90deg,rgba(224,113,74,.11),rgba(224,113,74,.03)); box-shadow:inset 2px 0 0 #e0714a; }
+:root[data-theme='ocean'] .note-list-item.selected .note-source { color:#d9653d; }
+:root[data-theme='ocean'] .note-day h4 { color:#bf5f3c; }
+:root[data-theme='ocean'] .note-view-tabs button.selected::after { background:#e0714a; }
+:root[data-theme='ocean'] .note-calendar-grid button.today { box-shadow:inset 0 0 0 1px #e0714a; }
+:root[data-theme='ocean'] .structured-tldr { background:linear-gradient(180deg,rgba(224,113,74,.07),rgba(224,113,74,.015)); }
+:root[data-theme='ocean'] .structured-tldr h4 { color:#c25a35; }
+
+/* Deep space: nebula clouds over black, two star layers (the brighter one twinkles), meteors from the orbs. */
+:root[data-theme='dark-gradient'] .main-stage { background:radial-gradient(45% 38% at 78% 18%,rgba(124,92,230,.32),transparent 70%), radial-gradient(38% 34% at 16% 78%,rgba(46,110,210,.28),transparent 72%), radial-gradient(30% 26% at 58% 62%,rgba(40,170,190,.12),transparent 70%), radial-gradient(26% 22% at 34% 24%,rgba(190,90,200,.10),transparent 70%), linear-gradient(160deg,#04061a 0%,#070b24 50%,#0a0a26 100%); }
+:root[data-theme='dark-gradient'] .atmosphere::before { content:''; position:absolute; inset:0; opacity:.9; background-image:radial-gradient(1px 1px at 7% 12%,#fff,transparent),radial-gradient(1px 1px at 23% 38%,#dfe6ff,transparent),radial-gradient(1px 1px at 41% 9%,#fff,transparent),radial-gradient(1px 1px at 57% 63%,#cfd8ff,transparent),radial-gradient(1px 1px at 72% 27%,#fff,transparent),radial-gradient(1px 1px at 88% 71%,#e6eaff,transparent),radial-gradient(1px 1px at 14% 83%,#fff,transparent),radial-gradient(1px 1px at 34% 57%,#d8e0ff,transparent),radial-gradient(1px 1px at 63% 92%,#fff,transparent),radial-gradient(1px 1px at 95% 44%,#fff,transparent),radial-gradient(1px 1px at 49% 31%,#eef1ff,transparent),radial-gradient(1px 1px at 79% 6%,#fff,transparent),radial-gradient(1px 1px at 3% 47%,#fff,transparent),radial-gradient(1px 1px at 28% 4%,#cfe9ff,transparent),radial-gradient(1px 1px at 67% 41%,#fff,transparent),radial-gradient(1px 1px at 92% 92%,#e2e7ff,transparent); background-size:300px 300px; }
+:root[data-theme='dark-gradient'] .atmosphere::after { background:radial-gradient(1.6px 1.6px at 18% 22%,#fff,transparent),radial-gradient(1.4px 1.4px at 66% 14%,#e9f3ff,transparent),radial-gradient(1.8px 1.8px at 84% 58%,#fff,transparent),radial-gradient(1.4px 1.4px at 38% 76%,#e9edff,transparent),radial-gradient(1.6px 1.6px at 52% 44%,#fff,transparent),radial-gradient(1.2px 1.2px at 9% 61%,#dff6ff,transparent); background-size:560px 560px; animation:star-twinkle 5s ease-in-out infinite alternate; }
+@keyframes star-twinkle { from { opacity:.4; } to { opacity:1; } }
+/* The orbs become meteors: a bright head trailing a fading tail, crossing at intervals. */
+:root[data-theme='dark-gradient'] .orb { width:190px; height:1.6px; border-radius:2px; filter:drop-shadow(0 0 4px rgba(190,215,255,.8)); background:linear-gradient(90deg,#fff,rgba(190,215,255,.55) 18%,transparent); opacity:0; transform-origin:left center; }
+:root[data-theme='dark-gradient'] .orb-blue { left:72%; top:6%; bottom:auto; animation:meteor 11s linear infinite 1.5s; }
+:root[data-theme='dark-gradient'] .orb-pink { left:94%; right:auto; top:28%; animation:meteor 14s linear infinite 6s; }
+:root[data-theme='dark-gradient'] .orb-lilac { left:52%; right:auto; top:-2%; bottom:auto; width:130px; animation:meteor 17s linear infinite 10s; }
+@keyframes meteor { 0% { opacity:0; transform:rotate(-34deg) translateX(0); } 2% { opacity:1; } 9% { opacity:0; transform:rotate(-34deg) translateX(-760px); } 100% { opacity:0; transform:rotate(-34deg) translateX(-760px); } }
+@media (prefers-reduced-motion:reduce) { :root[data-theme='dark-gradient'] .orb { display:none; } }
+:root[data-theme='dark-gradient'] .glass-card { border-color:rgba(200,210,255,.13); box-shadow:0 18px 36px -16px var(--shadow), inset 0 1px 0 rgba(255,255,255,.07); }
+:root[data-theme='dark-gradient'] .glass-sidebar { border-right-color:rgba(200,210,255,.1); }
+:root[data-theme='dark-gradient'] .eyebrow, :root[data-theme='dark-gradient'] .sidebar-caption, :root[data-theme='dark-gradient'] .brand-copy small, :root[data-theme='dark-gradient'] .field>span { font-family:ui-monospace, 'SF Mono', Menlo, monospace; letter-spacing:.22em; font-weight:500; }
+:root[data-theme='dark-gradient'] .eyebrow { color:var(--ink); opacity:.7; }
+:root[data-theme='dark-gradient'] .pill-btn.primary, :root[data-theme='dark-gradient'] .start-button { background:linear-gradient(160deg,#a58bff,#5f8dff); color:#fff; border-color:rgba(210,220,255,.45); box-shadow:0 10px 28px -8px rgba(120,120,255,.6); }
+:root[data-theme='dark-gradient'] .note-source { color:var(--accent); }
+:root[data-theme='dark-gradient'] .note-list-item time { color:var(--muted); }
+:root[data-theme='dark-gradient'] .account-badge { background:rgba(255,255,255,.05); border-color:rgba(200,210,255,.16); }
+:root[data-theme='dark-gradient'] .account-badge:hover { background:rgba(255,255,255,.09); }
+:root[data-theme='dark-gradient'] .account-badge svg { color:#8fdcff; }
+:root[data-theme='dark-gradient'] .note-chat.island:not(.open):has(.island-pill:not(:disabled)) { background:rgba(30,38,82,.85); border-color:rgba(200,210,255,.22); box-shadow:0 8px 22px var(--shadow); }
+:root[data-theme='dark-gradient'] .note-chat.island:not(.open) .island-pill:not(:disabled) { color:#eef1ff; }
+:root[data-theme='dark-gradient'] ::selection { background:rgba(143,160,255,.35); color:#fff; }
+/* Ice-blue starlight marks where you are in the notes, like the ocean theme's coral. */
+:root[data-theme='dark-gradient'] .note-list-item.selected, :root[data-theme='dark-gradient'] .note-list-item.selected:hover { background:linear-gradient(90deg,rgba(143,220,255,.12),rgba(143,220,255,.02)); box-shadow:inset 2px 0 0 #8fdcff; }
+:root[data-theme='dark-gradient'] .note-list-item.selected .note-source { color:#8fdcff; }
+:root[data-theme='dark-gradient'] .note-day h4 { color:#8fdcff; }
+:root[data-theme='dark-gradient'] .note-view-tabs button.selected::after { background:linear-gradient(90deg,#a58bff,#8fdcff); }
+:root[data-theme='dark-gradient'] .note-calendar-grid button.today { box-shadow:inset 0 0 0 1px #8fdcff; }
+:root[data-theme='dark-gradient'] .structured-tldr { background:linear-gradient(180deg,rgba(165,139,255,.09),rgba(143,220,255,.015)); }
+:root[data-theme='dark-gradient'] .structured-tldr h4 { color:#c3b4ff; }
+

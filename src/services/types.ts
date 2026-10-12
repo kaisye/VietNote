@@ -1,5 +1,5 @@
 /** The app's look: notebook paper or the original light glass. */
-export type Theme = 'paper' | 'light' | 'dark-gradient'
+export type Theme = 'paper' | 'light' | 'dark-gradient' | 'ocean'
 export type Page = 'home' | 'notes' | 'translate' | 'file' | 'settings'
 /** Meeting setting; 'auto' lets the streaming ASR (Soniox) detect the spoken language. */
 export type Language = 'auto' | 'zh' | 'en' | 'vi'
