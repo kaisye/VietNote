@@ -10,6 +10,7 @@ mod playback;
 mod stretch;
 mod voice_pack;
 mod writer;
+mod han;
 use base64::Engine;
 use clipclip::{start_with_tap, Config, Recording, Source};
 use serde::{Deserialize, Serialize};
@@ -754,7 +755,8 @@ async fn summarize_segments(segments: Vec<TranscriptSegment>, previous_summary: 
         format!("{context}TRANSCRIPT CÓ ID:\n{transcript}")
     };
     let raw = ai_completion( &system, user, 1800, true).await?;
-    let value = parse_json_object(&raw)?;
+    let mut value = parse_json_object(&raw)?;
+    han::repair_json(&mut value).await;
     let mut summary: MeetingSummary = serde_json::from_value(value).map_err(|error| format!("Summary không đúng schema: {error}"))?;
     map_evidence(&mut summary, &real_of);
     Ok(validate_summary_with(summary, &allowed))
@@ -772,7 +774,7 @@ async fn suggest_title(transcript: String) -> Result<String, String> {
         40,
         false,
     ).await?;
-    Ok(clean_title(raw.lines().next().unwrap_or_default()))
+    Ok(clean_title(&han::repair(raw.lines().next().unwrap_or_default().to_string()).await))
 }
 
 #[tauri::command]
@@ -787,12 +789,14 @@ async fn translate_text(text: String, source_language: String, previous_context:
     } else {
         format!("Đoạn ngay trước đó (chỉ dùng làm ngữ cảnh, không dịch lại):\n{previous_context}")
     };
-    ai_completion(
+    let translated = ai_completion(
         &format!("Bạn là biên tập viên bản ghi và phiên dịch viên từ {source} sang tiếng Việt. Đầu vào là một đoạn ghép từ nhiều kết quả ASR liên tiếp. Hãy dùng toàn bộ ngữ cảnh để sửa các lỗi nhận diện rõ ràng, nối lại câu bị ngắt, thêm dấu câu, rồi dịch cả đoạn sang tiếng Việt tự nhiên. Giữ nguyên tên riêng, số liệu và thuật ngữ chuyên môn. Không bịa nội dung. Chỉ trả về bản dịch tiếng Việt hoàn chỉnh của ĐOẠN CẦN DỊCH; không dịch lại ngữ cảnh và không giải thích."),
         format!("{context}\n\nĐOẠN CẦN DỊCH:\n{text}"),
         300,
         false,
-    ).await
+    ).await?;
+    // A Chinese source is where stray Hán tự come from most.
+    Ok(han::repair(translated).await)
 }
 
 #[tauri::command]

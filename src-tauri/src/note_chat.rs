@@ -316,6 +316,15 @@ async fn ask_note_stream(
         }
     })
     .await?;
+    let mut result = result;
+    if !crate::han::wants_han(&request.question) {
+        let mut texts = vec![result.answer.clone()];
+        texts.extend(result.follow_ups.iter().cloned());
+        crate::han::repair_all(&mut texts).await;
+        let mut texts = texts.into_iter();
+        result.answer = texts.next().unwrap_or_default();
+        result.follow_ups = texts.collect();
+    }
     if let Some(channel) = on_progress {
         let _ = channel.send(ChatAnswer {
             answer: result.answer.clone(),

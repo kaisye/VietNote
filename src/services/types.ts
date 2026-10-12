@@ -1,5 +1,5 @@
 /** The app's look: notebook paper or the original light glass. */
-export type Theme = 'paper' | 'light' | 'dark-gradient' | 'ocean'
+export type Theme = 'paper' | 'light' | 'night' | 'dark-gradient' | 'ocean'
 export type Page = 'home' | 'notes' | 'translate' | 'file' | 'settings'
 /** Meeting setting; 'auto' lets the streaming ASR (Soniox) detect the spoken language. */
 export type Language = 'auto' | 'zh' | 'en' | 'vi'
@@ -31,6 +31,9 @@ export interface MeetingNote {
   source?: NoteSource
   /** The user named the note themselves. */
   titleEdited?: boolean
+  /** The summary as the user edits it (Markdown). Until it is first saved, it is drawn from
+   * `structuredSummary` or `summary`. */
+  summaryMarkdown?: string
 }
 export type NoteSource = 'meeting' | 'translate' | 'file' | 'link' | 'manual'
 export interface TimedTranslation { entryIds: string[]; text: string }

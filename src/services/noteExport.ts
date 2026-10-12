@@ -1,5 +1,6 @@
 import type { MeetingNote, NoteDocument, StructuredMeetingSummary } from './types'
 import { formatTime } from './notes'
+import { withoutEvidence } from './summaryMarkdown'
 import { documentTitle, kindLabel } from './noteDocument'
 
 /** One export, described once and rendered to HTML (copy, PDF) and Word. Text may hold **bold** runs. */
@@ -93,7 +94,8 @@ export function markdownSections(markdown: string): ReportSection[] {
       continue
     }
     const bullet = line.match(/^[-•*+]\s+(.+)$/)
-    if (bullet) { add('bullets', bullet[1]); continue }
+    // A to-do keeps its box as a character, so it survives in Docs, mail and print.
+    if (bullet) { add('bullets', bullet[1].replace(/^\[ \]\s+/, '☐ ').replace(/^\[[xX]\]\s+/, '☑ ')); continue }
     const numbered = line.match(/^\d+[.)]\s+(.+)$/)
     if (numbered) { add('numbered', numbered[1]); continue }
     current.blocks.push({ kind: 'paragraph', text: line })
@@ -119,7 +121,8 @@ export function documentReport(note: MeetingNote, document: NoteDocument, option
 
 export function buildReport(note: MeetingNote, options: { groupName?: string | null; transcript?: boolean } = {}): Report {
   const meta = reportMeta(note, options.groupName)
-  const sections = note.structuredSummary ? structuredSections(note.structuredSummary) : textSections(note.summary)
+  const sections = note.summaryMarkdown !== undefined ? markdownSections(withoutEvidence(note.summaryMarkdown))
+    : note.structuredSummary ? structuredSections(note.structuredSummary) : textSections(note.summary)
   const transcript = reportTranscript(note, options.transcript)
   return { title: note.title.trim() || 'Chưa có tiêu đề', meta, sections, transcript }
 }

@@ -9,7 +9,7 @@ import { audioOptions, languageOptions } from './MeetingControls'
 type Guide = { steps: string[]; action: { label: string; run: () => void; disabled?: boolean } }
 type Feature = { Icon: typeof Sparkles; title: string; text: string; page?: Page; guide?: Guide }
 
-/** What VietNote does, shown on the start screen. A card opens its page, or a short how-to. */
+/** What VietNote does, as a quiet row on the start screen: hovering a feature tells what it does, clicking opens its page or a short how-to. */
 export function FeatureTour({ model, setPage }: { model: AppModel; setPage: (page: Page) => void }) {
   const [open, setOpen] = useState<Feature | null>(null)
   useEffect(() => {
@@ -57,11 +57,9 @@ export function FeatureTour({ model, setPage }: { model: AppModel; setPage: (pag
   return <section className="feature-tour" aria-label="Tính năng chính">
     <div className="feature-grid">{features.map(feature => {
       const { Icon, title, text, page } = feature
-      return <button type="button" key={title} className="glass-card feature-card" onClick={() => page ? setPage(page) : setOpen(feature)} aria-haspopup={page ? undefined : 'dialog'}>
-        <span className="feature-icon"><Icon size={18}/></span>
-        <strong>{title}<ArrowRight size={14} className="feature-go"/></strong>
-        <p>{text}</p>
-        <small className="feature-hint">{page ? 'Mở trang' : 'Xem cách dùng'}</small>
+      return <button type="button" key={title} className="glass-card feature-card" onClick={() => page ? setPage(page) : setOpen(feature)} aria-haspopup={page ? undefined : 'dialog'} aria-label={title} aria-description={text}>
+        <span className="feature-icon"><Icon size={18}/></span><strong>{title}</strong>
+        <span className="feature-pop" aria-hidden><span>{text}</span><small>{page ? 'Mở trang' : 'Xem cách dùng'}<ArrowRight size={12}/></small></span>
       </button>
     })}</div>
     <p className="feature-defaults">Ghi {source.toLowerCase()} · {language}{model.sourceLanguage !== 'vi' && !model.translateForeign ? ' · không dịch' : ''}<button type="button" onClick={() => setPage('settings')}>Thay đổi</button></p>

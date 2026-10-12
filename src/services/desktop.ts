@@ -15,7 +15,7 @@ export interface NoteChatAnswer { answer: string; evidenceIds: string[]; followU
 export interface AudioFile { path: string; name: string; size: number; durationSeconds: number | null; modifiedMs: number | null; /** The page it was fetched from, for audio from a link. */ sourceUrl?: string }
 export interface LinkProgress { stage: 'preparing' | 'downloading'; percent: number }
 export interface FileJobStatus { status: 'uploading' | 'processing' | 'completed' | 'failed'; tokens?: FileToken[]; audio_seconds?: number; charged_seconds?: number; error?: string }
-export interface WriteRequest { title: string; lines: string[]; digest: string[]; current: string; kind: DocumentKind; length: DocumentLength; instruction: string }
+export interface WriteRequest { title: string; lines: string[]; digest: string[]; current: string; kind: DocumentKind | 'summary' | 'selection'; length: DocumentLength; instruction: string }
 export interface WriteProgress { stage: 'reading' | 'writing'; done: number; total: number; text: string }
 export interface WrittenDocument { markdown: string; digest: string[]; incomplete: boolean }
 export interface StoredNotes { notes: MeetingNote[]; groups: NoteGroup[] }

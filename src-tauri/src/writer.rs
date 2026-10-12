@@ -44,12 +44,16 @@ fn kind_prompt(kind: &str) -> &'static str {
         "workshop" => "KIỂU TÀI LIỆU: tóm tắt workshop, hội thảo hoặc buổi chia sẻ. Dòng đầu là tiêu đề # cụ thể, nêu thông điệp chính. Mở đầu 2–3 câu về bối cảnh và thông điệp lớn nhất. Các phần ## mỗi phần là một ý lớn (tiêu đề nêu thẳng ý, không chung chung), giải thích bằng đoạn văn ngắn kèm ví dụ, số liệu, công cụ được nhắc. Dùng > cho câu trích dẫn đắt giá. Kết bằng ## Áp dụng ngay với 3–6 gạch đầu dòng hành động cụ thể.",
         "article" => "KIỂU TÀI LIỆU: bài viết chia sẻ (blog, newsletter) đủ hay để người đọc muốn chia sẻ lại. Dòng đầu là tiêu đề # hấp dẫn, cụ thể, không giật tít. Đoạn mở đầu 2–4 câu cho thấy vì sao bài đáng đọc. Thân bài 3–6 phần ##, tiêu đề nêu thẳng ý chính, viết thành đoạn văn liền mạch có dẫn dắt, in đậm cụm từ then chốt, dùng > cho câu trích dẫn đắt giá. Kết bằng ## Những điều đáng mang về gồm 3–6 gạch đầu dòng và một câu kết đọng lại.",
         "post" => "KIỂU TÀI LIỆU: bài đăng mạng xã hội (LinkedIn, Facebook). Không dùng tiêu đề #. Câu đầu là một hook ngắn gây tò mò. Đoạn văn ngắn 1–3 câu. Phần chính là 5–7 ý đáng giá nhất, mỗi ý một dòng bắt đầu bằng emoji phù hợp (dùng tiết chế). Kết bằng một câu suy ngẫm hoặc câu hỏi mời thảo luận, tối đa 3 hashtag ở cuối.",
+        "summary" => "KIỂU TÀI LIỆU: bản tóm tắt ghi chú mà người dùng đang tự soạn, có thể có ghi chú riêng của họ. Sửa currentDocument theo instruction; nội dung người dùng tự viết là chủ ý của họ: làm rõ, sửa lỗi, sắp xếp lại nhưng không bỏ ý. Dùng transcript để kiểm tra và bổ sung khi được yêu cầu, không bịa. Không thêm tiêu đề #; dùng ## cho các phần, gạch đầu dòng cho ý, - [ ] cho việc cần làm (giữ - [x] cho việc đã xong). Giữ nguyên mọi liên kết mốc thời gian dạng [09:41](#t=...) ở cuối ý mà nó chứng minh; ý mới không có liên kết.",
+        "selection" => "KIỂU TÀI LIỆU: currentDocument là một đoạn người dùng bôi đen trong ghi chú của họ. Chỉ viết lại đúng đoạn đó theo instruction và trả về duy nhất đoạn đã viết lại để thay vào chỗ cũ: không viết lại phần khác, không thêm tiêu đề hay lời dẫn. Giữ dạng của đoạn: một câu thì trả một câu, gạch đầu dòng thì trả gạch đầu dòng, - [ ] thì giữ - [ ]. Giữ nguyên các liên kết mốc thời gian dạng [09:41](#t=...). Nếu có transcript, chỉ dùng để thêm chi tiết đúng với đoạn này.",
         _ => "KIỂU TÀI LIỆU: theo đúng yêu cầu trong instruction. Nếu phù hợp, dòng đầu là tiêu đề #, dùng ## cho các phần.",
     }
 }
 
 fn length_prompt(kind: &str, length: &str) -> &'static str {
     if kind == "post" { return "ĐỘ DÀI: khoảng 250–400 từ."; }
+    if kind == "selection" { return "ĐỘ DÀI: theo instruction; mặc định gần bằng đoạn gốc."; }
+    if kind == "summary" { return "ĐỘ DÀI: giữ gần độ dài hiện tại, trừ khi instruction yêu cầu khác."; }
     match length {
         "short" => "ĐỘ DÀI: ngắn, đọc trong 2 phút. Thân bài tối đa 3 phần ##, mỗi phần 1 đoạn ngắn hoặc 3–4 gạch đầu dòng.",
         "long" => "ĐỘ DÀI: chi tiết, đầy đủ. Thân bài 6–8 phần ##, mỗi phần 2–4 đoạn có ví dụ cụ thể.",
@@ -181,7 +185,10 @@ pub(crate) async fn write_document(request: WriteRequest, on_progress: Channel<W
 }
 
 async fn write(request: WriteRequest, send: impl Fn(WriteProgress)) -> Result<WrittenDocument, String> {
-    if request.lines.iter().all(|line| line.trim().is_empty()) && request.digest.is_empty() {
+    let no_transcript = request.lines.iter().all(|line| line.trim().is_empty()) && request.digest.is_empty();
+    // A summary the user wrote themselves can be improved without a recording behind it.
+    let rewrites_text = matches!(request.kind.as_str(), "summary" | "selection") && !request.current.trim().is_empty();
+    if no_transcript && !rewrites_text {
         return Err("Ghi chú này chưa có transcript để AI đọc.".into());
     }
     if request.kind == "custom" && request.instruction.trim().is_empty() {
@@ -194,7 +201,9 @@ async fn write(request: WriteRequest, send: impl Fn(WriteProgress)) -> Result<Wr
 
     let transcript_size: usize = request.lines.iter().map(|line| line.chars().count() + 1).sum();
     let mut digest = request.digest.clone();
-    let (source, content) = if digest.is_empty() && transcript_size <= PART_CHARS {
+    let (source, content) = if no_transcript {
+        ("none", String::new())
+    } else if digest.is_empty() && transcript_size <= PART_CHARS {
         ("transcript", request.lines.join("\n"))
     } else {
         if digest.is_empty() {
@@ -239,7 +248,8 @@ async fn write(request: WriteRequest, send: impl Fn(WriteProgress)) -> Result<Wr
             Err(_) => break,
         }
     }
-    let markdown = clean_markdown(&written);
+    let mut markdown = clean_markdown(&written);
+    if !crate::han::wants_han(&request.instruction) { markdown = crate::han::repair(markdown).await; }
     progress("writing", 0, 0, markdown.clone());
     Ok(WrittenDocument { markdown, digest: if source == "notes" { digest } else { Vec::new() }, incomplete })
 }
@@ -282,7 +292,7 @@ mod tests {
 
     #[test]
     fn every_kind_has_a_prompt_and_posts_ignore_length() {
-        for kind in ["meeting", "lecture", "workshop", "article", "post"] { assert!(kind_prompt(kind).contains("KIỂU TÀI LIỆU")); }
+        for kind in ["meeting", "lecture", "workshop", "article", "post", "summary", "selection"] { assert!(kind_prompt(kind).contains("KIỂU TÀI LIỆU")); }
         assert!(kind_prompt("custom").contains("instruction"));
         assert!(length_prompt("post", "long").contains("250"));
         assert!(length_prompt("article", "long").contains("6–8"));

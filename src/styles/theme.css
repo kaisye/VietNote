@@ -4,6 +4,9 @@
 :root[data-theme='paper'] { color-scheme: light; --deep:#fefefc; --canvas:#fff; --ink:#292722; --muted:#70716d; --accent:#315b96; --summary:#315b96; --decision:#6759a6; --action:#327565; --unresolved:#a56a2b; --danger:#b94f5a; --steel:#8a9bc4; --lavender:#ecece8; --blush:#d9897f; --border:#e5e6e1; --glass:#fff; --glass-strong:#fff; --sidebar:#f8f8f5; --bar:#fff; --bar-text:#292722; --bar-selected:#292722; --bar-selected-text:#fff; --input-bg:#fff; --shadow:rgba(55,50,42,.085); --button-primary:#292722; --button-primary-text:#fff; --tint:120,120,114; --tint-strong:49,91,150; --paper-dot:rgba(49,85,143,.05); }
 /* Ocean: sea-glass panels in sunlit teal water over sand; deep kelp ink, sea-green accents, coral for the main action. */
 :root[data-theme='ocean'] { color-scheme: light; --deep:#cfe8e1; --canvas:#eef7f4; --ink:#123029; --muted:#4f6d65; --accent:#2f9078; --summary:#2f9078; --decision:#2f6f8f; --action:#c25a35; --unresolved:#a8742f; --danger:#c4513d; --steel:#8fd0c3; --lavender:#e6d3a0; --blush:#f1a383; --border:rgba(18,48,41,.13); --glass:rgba(240,249,246,.7); --glass-strong:rgba(244,251,248,.86); --sidebar:rgba(232,246,241,.62); --bar:rgba(241,250,247,.78); --bar-text:#123029; --bar-selected:#123029; --bar-selected-text:#f2faf7; --input-bg:rgba(255,255,255,.72); --shadow:rgba(18,48,41,.14); --button-primary:#e0714a; --button-primary-text:#fff; --tint:47,144,120; --tint-strong:18,48,41; --orb-opacity:.5; --stage-glow:0; }
+/* Night: the light theme after dark. Deep indigo-black lit by a blue-violet glow and a pink one,
+   indigo glass panels, a pearl start button; blue is the design colour. */
+:root[data-theme='night'] { color-scheme:dark; --deep:#0b0a1a; --canvas:#100e24; --ink:#f3f2ff; --muted:#a9acd6; --accent:#a7b6ff; --pink:#8fa6ff; --pink-fill:#4f63f0; --summary:#a7b6ff; --decision:#cdb8ff; --action:#8fd6c0; --unresolved:#f0bf7a; --danger:#ff8a9b; --steel:#4b4ff0; --lavender:#7a5cff; --blush:#ff6fb5; --border:rgba(167,182,255,.16); --glass:rgba(28,25,70,.5); --glass-strong:rgba(20,18,52,.78); --sidebar:rgba(12,11,34,.82); --bar:rgba(34,31,82,.94); --bar-text:#ecebff; --bar-selected:#4f63f0; --bar-selected-text:#fff; --input-bg:rgba(14,12,38,.7); --shadow:rgba(0,0,0,.5); --button-primary:#4f63f0; --button-primary-text:#fff; --tint:150,160,255; --tint-strong:167,182,255; --orb-opacity:.55; --stage-glow:.08; }
 /* Island uses its own dark palette. */
 :root[data-theme='dark'] { color-scheme: dark; --deep:#17142a; --canvas:#17142a; --ink:#f6f6ff; --muted:#aca8e5; --accent:#ada8ff; --steel:#4d5ebe; --lavender:#342f58; --blush:#ff9fcb; --border:rgba(173,168,255,.24); --glass:rgba(52,47,88,.43); --glass-strong:rgba(23,20,42,.78); --sidebar:rgba(23,20,42,.74); --bar:rgba(52,47,88,.92); --bar-text:#f6f6ff; --bar-selected:#ada8ff; --bar-selected-text:#131a2e; --input-bg:rgba(31,29,51,.8); --shadow:rgba(7,8,27,.36); --button-primary:#f6f6ff; --button-primary-text:#17142a; --tint:173,168,255; --tint-strong:77,94,190; }
 /* Deep space: nebula clouds, stars and passing meteors behind frosted night-glass panels; cool starlight accents, a violet-to-blue glow for the main action. */
@@ -135,3 +138,28 @@ select { min-height:35px; padding:5px 28px 5px 11px; }
 :root[data-theme='dark-gradient'] .inner-ring { background:radial-gradient(circle,rgba(225,232,255,.2) 55%,rgba(225,232,255,0) 72%); }
 :root[data-theme='dark-gradient'] .middle-ring { border-color:rgba(225,232,255,.18); }
 :root[data-theme='dark-gradient'] .outer-ring { border-color:rgba(225,232,255,.24); }
+
+/* Night: glass and glows as in the light theme, tuned for the dark. */
+:root[data-theme='night'] .main-stage { background:linear-gradient(150deg,#0b0a1a 0%,#151137 45%,#0d0b22 100%); }
+:root[data-theme='night'] .atmosphere::after { background:linear-gradient(180deg,rgba(255,255,255,.03),transparent 55%,rgba(255,111,181,.05)); }
+:root[data-theme='night'] .orb-blue { opacity:.6; }
+:root[data-theme='night'] .orb-lilac { opacity:.3; }
+:root[data-theme='night'] .glass-card { border-color:rgba(167,182,255,.14); box-shadow:0 18px 40px -18px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.06); }
+:root[data-theme='night'] .glass-sidebar { border-right-color:rgba(167,182,255,.1); }
+:root[data-theme='night'] ::selection { background:rgba(120,140,255,.4); color:#fff; }
+:root[data-theme='night'] .account-badge { background:rgba(255,255,255,.05); border-color:rgba(167,182,255,.16); }
+:root[data-theme='night'] .account-badge:hover { background:rgba(255,255,255,.09); }
+/* A pearl start button in a blue glow, as in the light theme's spirit. */
+:root[data-theme='night'] .start-button { background:radial-gradient(circle at 36% 30%,#ffffff 0%,#f1efff 34%,#d6d3ff 70%,#aeb0f2 100%); color:#25205a; border-color:rgba(230,228,255,.75); text-shadow:none; box-shadow:0 0 60px rgba(110,120,255,.45), inset -12px -14px 28px rgba(60,60,160,.25); }
+:root[data-theme='night'] .inner-ring { background:radial-gradient(circle,rgba(120,130,255,.32) 55%,rgba(120,130,255,0) 72%); }
+:root[data-theme='night'] .middle-ring { border-color:rgba(167,182,255,.22); }
+:root[data-theme='night'] .outer-ring { border-color:rgba(167,182,255,.16); }
+/* Blue where the eye should land. */
+:root[data-theme='night'] .pill-btn.primary { background:var(--pink-fill); border-color:var(--pink-fill); color:#fff; box-shadow:0 10px 26px -10px rgba(79,99,240,.75); }
+:root[data-theme='night'] .note-chat.island:not(.open):has(.island-pill:not(:disabled)) { background:var(--pink-fill); border-color:rgba(170,185,255,.4); box-shadow:0 12px 30px -8px rgba(79,99,240,.65); }
+:root[data-theme='night'] .note-view-tabs button.selected::after { background:var(--pink); }
+:root[data-theme='night'] .note-list-item.selected, :root[data-theme='night'] .note-list-item.selected:hover { box-shadow:inset 2px 0 0 var(--pink); }
+:root[data-theme='night'] .note-list-item.selected .note-source { color:var(--pink); }
+:root[data-theme='night'] .nav-busy, :root[data-theme='night'] .chat-stream-caret { background:var(--pink); }
+:root[data-theme='night'] .nav-item.active { background:rgba(110,120,255,.2); border-color:rgba(167,182,255,.22); }
+:root[data-theme='night'] .summary-editor .tiptap a:not([href^='#t=']), :root[data-theme='night'] .chat-markdown a { color:var(--pink); }
