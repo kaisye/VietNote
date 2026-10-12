@@ -53,7 +53,8 @@ export const desktop = {
   startCapture: (source: AudioInput) => invoke<void>('start_capture', { source }),
   stopCapture: () => invoke<void>('stop_capture'),
   /** Returns the seconds of speech still queued. */
-  playAudio: (chunks: AudioChunk[], rate: number) => invoke<number>('play_audio', { chunks, rate }),
+  /** `end`: the line is complete, so the last of it plays out too. */
+  playAudio: (chunks: AudioChunk[], rate: number, end = false) => invoke<number>('play_audio', { chunks, rate, end }),
   stopAudio: () => invoke<void>('stop_audio'),
   setMicrophone: (enabled: boolean) => invoke<void>('set_microphone', { enabled }),
   setSystemAudio: (enabled: boolean) => invoke<void>('set_system_audio', { enabled }),

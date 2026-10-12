@@ -20,7 +20,7 @@ DEFAULT_VOICE = 'baotrang'
 # 'auto' reads each speaker in a voice matching theirs; several speakers of one gender
 # get different voices so a conversation stays easy to follow.
 AUTO = 'auto'
-VOICES = {'male': ('quangminh', 'giahuy', 'tiendat'), 'female': ('baotrang', 'maichi', 'kimoanh')}
+VOICES = {'male': ('quangminh', 'tiendat', 'huuduc'), 'female': ('baotrang', 'maichi', 'kimoanh')}
 # One core keeps up in real time; two halve the latency without starving the recognizer.
 THREADS = 2
 # A backlog this deep means speech has fallen behind the video; newer phrases replace it.

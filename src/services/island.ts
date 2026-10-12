@@ -2,7 +2,7 @@ import { liveActions, type LiveQuestion } from './liveChat'
 import { visibleTranslation } from './translationView'
 import type { AudioInput, InterimTranscript, NoteChatMessage, Subtitle, TranslationBlock } from './types'
 import type { LiveChatStatus } from '../hooks/useLiveChat'
-import type { SpeechVoice } from '../hooks/useSpeech'
+import type { SpeechVoice, Voiced } from '../hooks/useSpeech'
 
 /**
  * VietNote Island: the floating pill that shows the live transcript over other apps.
@@ -179,6 +179,12 @@ export function subtitleFor(lines: IslandLine[], showTranslation: boolean): Capt
   }
 }
 
+/** While translations are read aloud, the caption follows the voice instead of running ahead of it. */
+export function voicedCaption(lines: IslandLine[], voiced: Voiced, showTranslation: boolean): Caption {
+  const line = lines.filter(item => item.id === voiced.id).at(-1)
+  return { id: voiced.id, source: line?.text ?? '', translation: showTranslation ? voiced.text : undefined, translationLags: false }
+}
+
 // ---- What the island shows -------------------------------------------------------------
 
 export interface IslandLine { id: string; text: string; translation?: string; speaker?: string | null; interim?: boolean }
@@ -195,6 +201,8 @@ export interface IslandState {
   source: AudioInput | null
   /** Reading translations aloud; null where there is no translation to read. */
   speech: { enabled: boolean; loading: boolean; voice: SpeechVoice } | null
+  /** What the voice is reading now, while reading aloud. */
+  voiced?: Voiced | null
   lines: IslandLine[]; chat: IslandChat | null
 }
 

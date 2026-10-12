@@ -5,7 +5,7 @@ import { HoverMenu } from './HoverMenu'
 import { SpeechMenu } from './SpeechMenu'
 import type { SpeechVoice } from '../hooks/useSpeech'
 import type { AudioInput } from '../services/types'
-import { clampSubtitleScale, subtitleSize, saveSubtitleScale, subtitleScale, SUBTITLE, saveSubtitleOffset, screenAt, subtitleDocks, subtitleFor, subtitleOffsets, subtitleRect, displayOptions, sourceOptions, type Display, type IslandLine, type IslandScreen, type IslandState, type Rect } from '../services/island'
+import { clampSubtitleScale, subtitleSize, saveSubtitleScale, subtitleScale, SUBTITLE, saveSubtitleOffset, screenAt, subtitleDocks, subtitleFor, subtitleOffsets, subtitleRect, voicedCaption, displayOptions, sourceOptions, type Display, type IslandLine, type IslandScreen, type IslandState, type Rect } from '../services/island'
 
 const setFrame = (rect: Rect) => invoke<void>('island_set_frame', { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }).catch(() => {})
 const ignoreCursor = (ignore: boolean) => void invoke('island_ignore_cursor', { ignore }).catch(() => {})
@@ -44,13 +44,13 @@ interface Drag { id: number; screenX: number; screenY: number; from: Rect; rect?
  * translation. Clicks pass through to the video except over the caption, which can be dragged
  * and shows its controls on hover.
  */
-export function SubtitleView({ screen, screens, layout, lines, status, active, canStart, onStart, onStop, audioSource, onSource, display, translationAvailable, onDisplay, onExit, onDock, speech, onSpeech, onVoice }: {
+export function SubtitleView({ screen, screens, layout, lines, status, active, canStart, onStart, onStop, audioSource, onSource, display, translationAvailable, onDisplay, onExit, onDock, speech, voiced, onSpeech, onVoice }: {
   screen: IslandScreen; screens: IslandScreen[]; layout: number; lines: IslandLine[]; status: string
   active: boolean; canStart: boolean; onStart: () => void; onStop: () => void; audioSource: AudioInput | null; onSource: (source: AudioInput) => void
   display: Display; translationAvailable: boolean; onDisplay: (display: Display) => void; onExit: () => void
   /** Dropped at the top centre of `screen`: become the island there. */
   onDock: (screen: IslandScreen) => void
-  speech: IslandState['speech']; onSpeech: (enabled: boolean) => void; onVoice: (voice: SpeechVoice) => void
+  speech: IslandState['speech']; voiced?: IslandState['voiced']; onSpeech: (enabled: boolean) => void; onVoice: (voice: SpeechVoice) => void
 }) {
   const [scale, setScaleState] = useState(subtitleScale)
   const scaleRef = useRef(scale)
@@ -63,7 +63,10 @@ export function SubtitleView({ screen, screens, layout, lines, status, active, c
   const box = useRef<HTMLDivElement>(null)
   const drag = useRef<Drag | null>(null)
   const dragged = useRef(false)
-  const caption = subtitleFor(lines.filter(line => line.text || line.translation), display !== 'source')
+  // With the voice on, the caption waits for it: the line shows as it is read, not as it is translated.
+  const dubbed = Boolean(speech?.enabled && !speech.loading)
+  const caption = dubbed ? voiced ? voicedCaption(lines, voiced, display !== 'source') : null
+    : subtitleFor(lines.filter(line => line.text || line.translation), display !== 'source')
   const source = useSmoothText(caption?.source ?? '')
   const translated = useSmoothText(caption?.translation ?? '')
   // Short text sits at the top of its two lines; longer text keeps its newest line in view.
@@ -165,10 +168,10 @@ export function SubtitleView({ screen, screens, layout, lines, status, active, c
     saveSubtitleOffset(screen.key, rect.x - screen.frame.x, rect.y - screen.frame.y)
   }
 
-  // Double-clicking the caption (not a control, and not the end of a drag) goes back to the island.
+  // Double-clicking the caption (not a control, and not the end of a drag) docks it as the island at the top centre.
   const onDoubleClick = (event: ReactMouseEvent<HTMLDivElement>) => {
     if (dragged.current || (event.target as Element).closest('button, [data-menu], .subtitle-resize')) return
-    onExit()
+    onDock(screen)
   }
 
   return <div className="subtitle-root" style={{ '--subtitle-scale': scale } as CSSProperties}>
@@ -179,7 +182,7 @@ export function SubtitleView({ screen, screens, layout, lines, status, active, c
         <HoverMenu {...menuProps('display')} value={display} options={displayOptions.map(option => ({ ...option, disabled: option.value !== 'source' && !translationAvailable }))} onChange={onDisplay}
           icon={<Languages size={14}/>} title="Hiển thị: tiếng gốc, tiếng Việt hoặc song ngữ" on={display !== 'source'}/>
         {speech && <SpeechMenu {...menuProps('speech')} size={14} speech={speech} onToggle={onSpeech} onVoice={onVoice}/>}
-        <button className="island-icon" onClick={onExit} title="Quay lại island · hoặc nhấp đúp vào phụ đề"><PanelTop size={14}/></button>
+        <button className="island-icon" onClick={onExit} title={`Quay lại island · nhấp đúp vào phụ đề để về ${screen.notch ? 'notch' : 'giữa cạnh trên'}`}><PanelTop size={14}/></button>
       </div>
       {/* Both rows always keep their height, so the band never changes size while text streams in. */}
       {!caption ? <div className="subtitle-clip source"><p className="subtitle-hint">{status}</p></div>

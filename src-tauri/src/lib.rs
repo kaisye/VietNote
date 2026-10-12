@@ -7,6 +7,7 @@ mod diarization_model;
 mod file_job;
 mod island;
 mod playback;
+mod stretch;
 mod voice_pack;
 mod writer;
 use base64::Engine;

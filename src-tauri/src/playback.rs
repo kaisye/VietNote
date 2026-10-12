@@ -4,6 +4,7 @@
 //! system-audio tap cannot attribute to VietNote, so translated speech played by
 //! the page was captured and recognized again. Playing from this process lets the
 //! vendored cpal tap exclude it by PID.
+use crate::stretch::Stretcher;
 use base64::Engine;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use serde::Deserialize;
@@ -28,6 +29,8 @@ struct Output {
 }
 
 static OUTPUT: OnceLock<Mutex<Option<Output>>> = OnceLock::new();
+/// Speeds the voice up without raising it; carries over between the chunks of a line.
+static STRETCH: Mutex<Option<Stretcher>> = Mutex::new(None);
 
 fn open_output() -> Result<Output, String> {
     let (tx, rx) = mpsc::channel();
@@ -74,10 +77,10 @@ fn decode(chunk: &AudioChunk) -> Result<Vec<f32>, String> {
     })
 }
 
-/// Linear resampling; `speed` > 1 plays faster (and higher), like WebAudio playbackRate.
-fn resample(samples: &[f32], from: u32, to: u32, speed: f32) -> Vec<f32> {
+/// Linear resampling to the speaker's rate.
+fn resample(samples: &[f32], from: u32, to: u32) -> Vec<f32> {
     if samples.is_empty() { return Vec::new(); }
-    let step = from as f64 * speed.clamp(0.5, 2.0) as f64 / to as f64;
+    let step = from as f64 / to as f64;
     let count = (samples.len() as f64 / step) as usize;
     (0..count).map(|i| {
         let position = i as f64 * step;
@@ -87,15 +90,30 @@ fn resample(samples: &[f32], from: u32, to: u32, speed: f32) -> Vec<f32> {
     }).collect()
 }
 
-/// Queues the chunks and returns how many seconds of speech are now waiting to play.
+/// Queues the chunks, `rate` times faster at the same pitch, and returns how many seconds of
+/// speech are now waiting to play. `end` marks the end of a line: what was held back to join
+/// it smoothly to the next chunk plays out.
 #[tauri::command]
-pub fn play_audio(chunks: Vec<AudioChunk>, rate: f32) -> Result<f32, String> {
+pub fn play_audio(chunks: Vec<AudioChunk>, rate: f32, end: Option<bool>) -> Result<f32, String> {
     let mut slot = OUTPUT.get_or_init(|| Mutex::new(None)).lock().map_err(|e| e.to_string())?;
     if !slot.as_ref().is_some_and(|output| output.alive.load(Ordering::SeqCst)) { *slot = Some(open_output()?); }
     let output = slot.as_ref().expect("output opened above");
+    let mut stretch = STRETCH.lock().map_err(|e| e.to_string())?;
+    let play = |samples: Vec<f32>, from: u32| -> Result<(), String> {
+        output.queue.lock().map_err(|e| e.to_string())?.extend(resample(&samples, from, output.rate));
+        Ok(())
+    };
     for chunk in &chunks {
-        let samples = resample(&decode(chunk)?, chunk.sample_rate, output.rate, rate);
-        output.queue.lock().map_err(|e| e.to_string())?.extend(samples);
+        let samples = decode(chunk)?;
+        if stretch.as_ref().is_some_and(|s| s.rate() != chunk.sample_rate) {
+            let mut previous = stretch.take().expect("checked above");
+            play(previous.finish(rate), previous.rate())?;
+        }
+        let stretcher = stretch.get_or_insert_with(|| Stretcher::new(chunk.sample_rate));
+        play(stretcher.push(&samples, rate), chunk.sample_rate)?;
+    }
+    if end == Some(true) {
+        if let Some(stretcher) = stretch.as_mut() { let from = stretcher.rate(); play(stretcher.finish(rate), from)?; }
     }
     let queued = output.queue.lock().map_err(|e| e.to_string())?.len();
     Ok(queued as f32 / output.rate as f32)
@@ -106,5 +124,6 @@ pub fn stop_audio() -> Result<(), String> {
     let Some(slot) = OUTPUT.get() else { return Ok(()) };
     let slot = slot.lock().map_err(|e| e.to_string())?;
     if let Some(output) = slot.as_ref() { output.queue.lock().map_err(|e| e.to_string())?.clear(); }
+    *STRETCH.lock().map_err(|e| e.to_string())? = None;
     Ok(())
 }

@@ -19,6 +19,23 @@ const MAX_BACKLOG_SECONDS = 5
 /** Buffered before the first chunk plays, so a slow chunk does not stutter. */
 const PREBUFFER_SECONDS = 0.25
 
+/** What the voice is saying now: its line, and that line's translation read out so far. */
+export interface Voiced { id: string; text: string }
+const chunkSeconds = (chunk: AudioChunk) => chunk.pcm.length * 3 / 4 / 4 / chunk.sampleRate
+/**
+ * When each request in a batch starts to sound, in seconds from now: the batch was just queued
+ * behind whatever is still playing, and `queued` is everything left to play, at `rate`.
+ */
+export function firstSounds(batch: { key: string; chunk: AudioChunk }[], queued: number, rate: number): Map<string, number> {
+  const starts = new Map<string, number>()
+  let at = queued - batch.reduce((total, item) => total + chunkSeconds(item.chunk), 0) / rate
+  for (const item of batch) {
+    if (!starts.has(item.key)) starts.set(item.key, Math.max(0, at))
+    at += chunkSeconds(item.chunk) / rate
+  }
+  return starts
+}
+
 const savedRate = () => {
   try {
     const value = Number(localStorage.getItem('ttsPlaybackRate'))
@@ -59,19 +76,49 @@ export function useSpeech(currentGeneration: () => number) {
   const enabledRef = useRef(enabled)
   const stateRef = useRef<SpeechState>('off')
   const rateRef = useRef(rate)
-  const staged = useRef<AudioChunk[]>([])
+  const staged = useRef<{ key: string; chunk: AudioChunk }[]>([])
   const stagedSeconds = useRef(0)
   const playing = useRef(false)
+  // Text sent to the voice, by request, until its first sound plays.
+  const requests = useRef(new Map<string, { line: string; part: number; text: string; timed?: boolean }>())
+  const readSoFar = useRef(new Map<string, string>())
+  const cues = useRef<ReturnType<typeof setTimeout>[]>([])
+  const [voiced, setVoiced] = useState<Voiced | null>(null)
 
+  /** Queued sound was dropped: so are the captions waiting for it. */
+  const dropCues = () => {
+    cues.current.forEach(clearTimeout); cues.current = []
+    for (const [key, request] of requests.current) if (request.timed) requests.current.delete(key)
+  }
   const clear = () => {
     staged.current = []; stagedSeconds.current = 0; playing.current = false; phrases.current.clear()
+    dropCues(); requests.current.clear(); readSoFar.current.clear(); setVoiced(null)
     void desktop.stopAudio().catch(() => {})
   }
-  const flush = async () => {
-    if (!staged.current.length) return
-    const chunks = staged.current
+  /** Shows a request's text as its first sound plays. */
+  const cue = (key: string) => {
+    const request = requests.current.get(key)
+    requests.current.delete(key)
+    if (!request) return
+    const before = request.part > 0 ? readSoFar.current.get(request.line) : undefined
+    const text = before ? `${before} ${request.text}` : request.text
+    readSoFar.current.set(request.line, text)
+    if (readSoFar.current.size > 50) readSoFar.current.delete(readSoFar.current.keys().next().value!)
+    setVoiced({ id: request.line, text })
+  }
+  const flush = async (end = false) => {
+    if (!staged.current.length && !end) return
+    const batch = staged.current
     staged.current = []; stagedSeconds.current = 0; playing.current = true
-    await desktop.playAudio(chunks, rateRef.current).catch(error => { setMessage(`Không phát được âm thanh: ${error}`); return 0 })
+    const queued = await desktop.playAudio(batch.map(item => item.chunk), rateRef.current, end).catch(error => { setMessage(`Không phát được âm thanh: ${error}`); return null })
+    if (queued === null) return
+    // Each request's caption waits for its first sound.
+    for (const [key, seconds] of firstSounds(batch, queued, rateRef.current)) {
+      const request = requests.current.get(key)
+      if (!request || request.timed) continue
+      request.timed = true
+      cues.current.push(setTimeout(() => cue(key), seconds * 1000))
+    }
   }
 
   const load = () => {
@@ -145,6 +192,9 @@ export function useSpeech(currentGeneration: () => number) {
 
   const speak = (id: string, generation: number, text: string, speaker?: string) => {
     if (!installed() || !enabledRef.current || stateRef.current !== 'ready' || !text.trim()) return
+    // Phrase keys are `line#offset`; a whole sentence or paragraph is keyed by its own id.
+    const [, line = id, offset] = /^(.*)#(\d+)$/.exec(id) ?? []
+    requests.current.set(id, { line, part: Number(offset ?? 0), text: text.trim() })
     void desktop.sendWorker({ type: 'synthesize', id, generation, text, speaker: speaker ?? null }).catch(() => {})
   }
   const setMode = (value: SpeechMode) => {
@@ -174,7 +224,7 @@ export function useSpeech(currentGeneration: () => number) {
         // After silence, buffer a little again before the first chunk plays.
         if (message.generation === currentGeneration() && enabledRef.current && playing.current) {
           void desktop.playAudio([], rateRef.current).then(queued => {
-            if (queued > MAX_BACKLOG_SECONDS) void desktop.stopAudio()
+            if (queued > MAX_BACKLOG_SECONDS) { dropCues(); void desktop.stopAudio() }
             else if (queued === 0 && !staged.current.length) playing.current = false
           }).catch(() => {})
         }
@@ -182,15 +232,15 @@ export function useSpeech(currentGeneration: () => number) {
       case 'tts_audio': {
         if (!enabledRef.current || message.generation !== currentGeneration() || !message.pcm) return true
         const chunk: AudioChunk = { pcm: message.pcm, format: 'f32', sampleRate: message.sample_rate ?? 48000 }
-        staged.current.push(chunk)
-        stagedSeconds.current += message.pcm.length * 3 / 4 / 4 / chunk.sampleRate
+        staged.current.push({ key: message.id ?? '', chunk })
+        stagedSeconds.current += chunkSeconds(chunk)
         if (playing.current || stagedSeconds.current >= PREBUFFER_SECONDS) void flush()
         return true
       }
       case 'tts_end':
-        if (message.generation === currentGeneration()) void flush()
+        if (message.generation === currentGeneration()) void flush(true)
         return true
-      case 'tts_skipped': return true
+      case 'tts_skipped': if (message.id) requests.current.delete(message.id); return true
       case 'tts_error': setMessage('Giọng đọc tạm thời lỗi, đang tiếp tục với câu sau'); return true
     }
     return false
@@ -198,6 +248,6 @@ export function useSpeech(currentGeneration: () => number) {
 
   const ready = runtime && Boolean(pack?.path)
   return { available: runtime && Boolean(pack?.available), installed: ready, sizeBytes: pack?.sizeBytes ?? 0, progress, packError, download, cancelDownload,
-    enabled: enabled && ready, setEnabled, state, message, rate, setRate, voice, setVoice, mode, setMode, translation, speak, handle, clear, onConnected }
+    enabled: enabled && ready, setEnabled, state, message, rate, setRate, voice, setVoice, mode, setMode, translation, speak, handle, clear, onConnected, voiced }
 }
 export type Speech = ReturnType<typeof useSpeech>

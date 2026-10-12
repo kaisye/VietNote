@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clampSubtitleScale, islandChat, islandLines, openFrame, PANEL_MIN, PILL, resizedPanel, subtitleSize, pillForPanel, pillRect, screenAt, snapPlacement, startScreen, subtitleDocks, subtitleFor, subtitleRect, type IslandScreen } from './island'
+import { clampSubtitleScale, islandChat, islandLines, openFrame, PANEL_MIN, PILL, resizedPanel, subtitleSize, pillForPanel, pillRect, screenAt, snapPlacement, startScreen, subtitleDocks, subtitleFor, subtitleRect, voicedCaption, type IslandScreen } from './island'
 import type { Subtitle, TranslationBlock } from './types'
 
 const laptop: IslandScreen = {
@@ -119,5 +119,12 @@ describe('subtitle mode', () => {
     expect(subtitleFor([done, { ...speaking, translation: 'Bạn' }], true)).toEqual({ id: 'b', source: 'How are', translation: 'Bạn', translationLags: false })
     expect(subtitleFor([done, speaking], false)).toEqual({ id: 'b', source: 'How are', translation: undefined, translationLags: false })
     expect(subtitleFor([], true)).toBeNull()
+  })
+
+  it('follows the voice while reading aloud, not the newest line', () => {
+    const lines = [{ id: 'a', text: 'Hello there.', translation: 'Xin chào.' }, { id: 'b', text: 'How are you?', translation: 'Bạn khỏe không?' }]
+    expect(voicedCaption(lines, { id: 'a', text: 'Xin chào.' }, true)).toEqual({ id: 'a', source: 'Hello there.', translation: 'Xin chào.', translationLags: false })
+    expect(voicedCaption(lines, { id: 'a', text: 'Xin chào.' }, false).translation).toBeUndefined()
+    expect(voicedCaption(lines, { id: 'gone', text: 'Đoạn cũ.' }, true).source).toBe('')
   })
 })
