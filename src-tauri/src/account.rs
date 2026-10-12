@@ -180,12 +180,18 @@ pub async fn ai_complete_with_metadata(system: &str, user: String, max_tokens: u
 /// Stream real provider output from the authenticated proxy to a per-request Tauri channel.
 pub async fn ai_complete_stream<F>(system: &str, user: String, max_tokens: u32, progress: F) -> Result<AiCompletion, String>
 where F: FnMut(&str) {
+    ai_complete_stream_with_images(system, user, &[], max_tokens, progress).await
+}
+
+/// As `ai_complete_stream`, with screenshots (`data:image/…;base64,` URLs) the model reads alongside the text.
+pub async fn ai_complete_stream_with_images<F>(system: &str, user: String, images: &[String], max_tokens: u32, progress: F) -> Result<AiCompletion, String>
+where F: FnMut(&str) {
     let (url, anon) = config().ok_or("Bản build chưa cấu hình máy chủ VietNote")?;
     let token = access_token().await.map_err(|error| if error == "signed_out" { "Hãy đăng nhập tài khoản VietNote ở góc trái dưới".into() } else { error })?;
     let response = client()?.post(format!("{url}/functions/v1/ai-complete"))
         .timeout(Duration::from_secs(90))
         .header("apikey", anon).bearer_auth(token)
-        .json(&json!({"system": system, "user": user, "max_tokens": max_tokens, "json": false, "stream": true}))
+        .json(&json!({"system": system, "user": user, "images": images, "max_tokens": max_tokens, "json": false, "stream": true}))
         .send().await.map_err(unreachable)?;
     match response.status().as_u16() {
         200..=299 => {},

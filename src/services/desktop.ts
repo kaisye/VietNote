@@ -7,6 +7,8 @@ export interface NoteChatRequest {
   title: string; summary: string; transcript: string; segments: TranscriptSegment[];
   history: { role: 'user' | 'assistant'; content: string }[]; question: string
   quote?: string; live?: boolean
+  /** Screenshots as data:image/…;base64 URLs. */
+  images?: string[]
 }
 export interface NoteChatAnswer { answer: string; evidenceIds: string[]; followUps?: string[]; incomplete?: boolean }
 /** A recording picked for transcription; `durationSeconds` is null when its container does not say. */

@@ -1,4 +1,5 @@
 import { desktop, type NoteChatAnswer } from './desktop'
+import type { ChatImage } from './chatImages'
 import { noteChatHistory } from './noteChat'
 import { toTranscriptSegment } from './notes'
 import type { NoteChatMessage, Subtitle, TranscriptSegment } from './types'
@@ -36,7 +37,7 @@ export function liveSegments(entries: Subtitle[], focusIds: string[] = []): Tran
   return [...keep].sort((a, b) => a - b).map(index => toTranscriptSegment(entries[index]))
 }
 
-export interface LiveQuestion { question: string; label?: string; quote?: string; focusIds?: string[] }
+export interface LiveQuestion { question: string; label?: string; quote?: string; focusIds?: string[]; images?: ChatImage[] }
 
 export function askLiveQuestion(
   context: { title: string; summary: string; entries: Subtitle[] }, messages: NoteChatMessage[], request: LiveQuestion,
@@ -51,5 +52,6 @@ export function askLiveQuestion(
     question: request.question.trim(),
     quote: request.quote?.trim() || undefined,
     live: true,
+    images: request.images?.length ? request.images.map(image => image.url) : undefined,
   }, onProgress)
 }

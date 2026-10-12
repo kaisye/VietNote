@@ -1,5 +1,6 @@
 import { desktop, type NoteChatAnswer } from './desktop'
 import { formatStructuredSummary } from './notes'
+import type { ChatImage } from './chatImages'
 import type { MeetingNote, NoteChatMessage } from './types'
 
 export const noteChatPrompts = [
@@ -14,7 +15,9 @@ export function noteChatHistory(messages: NoteChatMessage[]) {
   const history: { role: 'user' | 'assistant'; content: string }[] = []
   let size = 0
   for (const message of messages.slice(-10).reverse()) {
-    const content = message.quote ? `Đoạn trích: "${message.quote}"\n${message.content}` : message.content
+    // The pictures themselves are not resent; the AI's earlier answer describes them.
+    const attached = message.images?.length ? `[Kèm ${message.images.length} ảnh chụp màn hình]\n` : ''
+    const content = attached + (message.quote ? `Đoạn trích: "${message.quote}"\n${message.content}` : message.content)
     if (size + content.length > 20_000) break
     history.unshift({ role: message.role, content })
     size += content.length
@@ -24,7 +27,7 @@ export function noteChatHistory(messages: NoteChatMessage[]) {
   return history
 }
 
-export function askNoteQuestion(note: MeetingNote, question: string, onProgress?: (answer: NoteChatAnswer) => void) {
+export function askNoteQuestion(note: MeetingNote, question: string, onProgress?: (answer: NoteChatAnswer) => void, images: ChatImage[] = []) {
   return desktop.askNote({
     title: note.title,
     summary: note.structuredSummary ? formatStructuredSummary(note.structuredSummary) : note.summary,
@@ -32,6 +35,7 @@ export function askNoteQuestion(note: MeetingNote, question: string, onProgress?
     segments: note.transcriptSegments ?? [],
     history: noteChatHistory(note.chatMessages ?? []),
     question: question.trim(),
+    images: images.length ? images.map(image => image.url) : undefined,
   }, onProgress)
 }
 

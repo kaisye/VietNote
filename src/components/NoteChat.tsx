@@ -4,6 +4,8 @@ import type { AppModel } from '../hooks/useAppModel'
 import type { MeetingNote } from '../services/types'
 import { noteChatPrompts } from '../services/noteChat'
 import { ChatMarkdown } from './ChatMarkdown'
+import { AttachImageButton, ChatImageTray, MessageImages, useChatImages } from './ChatImages'
+import { IMAGE_QUESTION, type ChatImage } from '../services/chatImages'
 import { formatTime } from '../services/notes'
 
 interface Size { width: number; height: number }
@@ -24,6 +26,7 @@ export function NoteChat({ note, chat, onEvidence }: {
   note: MeetingNote; chat: AppModel['noteChat']; onEvidence: (ids: string[]) => void
 }) {
   const [draft, setDraft] = useState('')
+  const pics = useChatImages()
   const [open, setOpen] = useState(false)
   const [full, setFull] = useState(false)
   const [confirmClear, setConfirmClear] = useState(false)
@@ -61,7 +64,7 @@ export function NoteChat({ note, chat, onEvidence }: {
   const onPointerLeave = (event: ReactPointerEvent) => {
     if (event.pointerType !== 'mouse') return
     clearTimeout(hoverTimer.current)
-    if (open && peek.current && !draft && !full && !confirmClear && shell.current?.ownerDocument.activeElement !== input.current) hoverTimer.current = setTimeout(collapse, 380)
+    if (open && peek.current && !draft && !pics.images.length && !full && !confirmClear && shell.current?.ownerDocument.activeElement !== input.current) hoverTimer.current = setTimeout(collapse, 380)
   }
   useEffect(() => () => clearTimeout(hoverTimer.current), [])
 
@@ -116,15 +119,19 @@ export function NoteChat({ note, chat, onEvidence }: {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [open, full, confirmClear])
 
-  const send = (question: string) => {
+  const send = (question: string, images: ChatImage[] = []) => {
     if (disabled || !question.trim()) return
     followOutput.current = true
     autoOpen.current = true
     setConfirmClear(false)
     setDraft('')
+    pics.clear()
     if (!full) setOpen(false)
-    void chat.ask(note.id, question)
+    void chat.ask(note.id, question, images)
   }
+
+  /** A screenshot with no question asks what it shows. */
+  const submit = () => send(draft.trim() || (pics.images.length ? IMAGE_QUESTION : ''), pics.images)
 
   const pillLabel = pending ? (streamed ? 'Đang viết câu trả lời…' : 'Đang đọc transcript…')
     : status?.error ? 'Chưa trả lời được · mở để thử lại'
@@ -157,13 +164,14 @@ export function NoteChat({ note, chat, onEvidence }: {
       </header>
       {confirmClear && <div id={`chat-clear-${note.id}`} className="chat-clear-confirm" role="group" aria-label="Xác nhận xóa lịch sử chat"><span>Xóa toàn bộ lịch sử chat của ghi chú này?</span><button type="button" className="copy-btn" onClick={() => setConfirmClear(false)}>Hủy</button><button type="button" className="copy-btn danger" disabled={pending} onClick={() => { chat.clear(note.id); setConfirmClear(false); followOutput.current = true }}>Xóa lịch sử</button></div>}
       {(messages.length > 0 || pending || status?.error) && <div className="note-chat-messages" ref={scroll} onScroll={event => { const element = event.currentTarget; followOutput.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80 }} role="log" aria-label="Lịch sử hỏi đáp" aria-live="polite" aria-relevant="additions text" aria-busy={pending}>
-        {messages.map(message => <article key={message.id} className={`chat-message ${message.role}`}>{message.role === 'assistant' ? <ChatMarkdown content={message.content} streaming={message.incomplete}/> : <>{message.quote && <blockquote className="chat-quote">{message.quote}</blockquote>}<p>{message.content}</p></>}{message.role === 'assistant' && Boolean(message.evidenceIds?.length) && <details className="chat-evidence"><summary>Căn cứ · {message.evidenceIds!.length}</summary><div>{message.evidenceIds?.map(id => { const segment = note.transcriptSegments?.find(item => item.id === id); return segment && <button key={id} onClick={() => { collapse(); onEvidence([id]) }} title={segment.cleanText}>{formatTime(segment.timestamp, false)}{segment.speaker ? ` · ${segment.speaker}` : ''}</button> })}</div></details>}{message.incomplete && <div className="chat-incomplete"><small>Câu trả lời chưa hoàn tất. Bạn có thể yêu cầu AI viết tiếp.</small>{message.id === messages.at(-1)?.id && <button className="copy-btn" disabled={disabled} onClick={() => send('Tiếp tục câu trả lời vừa bị ngắt, hoàn thành phần còn lại của yêu cầu trước đó. Không lặp lại những nội dung đã trả lời.')}>Viết tiếp</button>}</div>}</article>)}
-        {pending && <><article className="chat-message user"><p>{status.question}</p></article>{streamed && <article className="chat-message assistant streaming"><ChatMarkdown content={status.answer!.answer} streaming/><span className="chat-stream-caret" aria-hidden="true"/></article>}<div className="chat-thinking" role="status"><Wave/>{streamed ? 'AI đang viết…' : 'Đang đọc nội dung và trả lời…'}</div></>}
-        {status?.error && <div className="chat-error" role="alert"><p><strong>Chưa trả lời được:</strong> {status.question}</p><p>{status.error}</p><button className="copy-btn" disabled={disabled} onClick={() => send(status.question)}><RotateCcw size={14}/>Thử lại</button><button className="copy-btn" disabled={disabled} onClick={() => { setDraft(status.question); input.current?.focus() }}>Sửa câu hỏi</button></div>}
+        {messages.map(message => <article key={message.id} className={`chat-message ${message.role}`}>{message.role === 'assistant' ? <ChatMarkdown content={message.content} streaming={message.incomplete}/> : <>{message.quote && <blockquote className="chat-quote">{message.quote}</blockquote>}<MessageImages images={message.images}/><p>{message.content}</p></>}{message.role === 'assistant' && Boolean(message.evidenceIds?.length) && <details className="chat-evidence"><summary>Căn cứ · {message.evidenceIds!.length}</summary><div>{message.evidenceIds?.map(id => { const segment = note.transcriptSegments?.find(item => item.id === id); return segment && <button key={id} onClick={() => { collapse(); onEvidence([id]) }} title={segment.cleanText}>{formatTime(segment.timestamp, false)}{segment.speaker ? ` · ${segment.speaker}` : ''}</button> })}</div></details>}{message.incomplete && <div className="chat-incomplete"><small>Câu trả lời chưa hoàn tất. Bạn có thể yêu cầu AI viết tiếp.</small>{message.id === messages.at(-1)?.id && <button className="copy-btn" disabled={disabled} onClick={() => send('Tiếp tục câu trả lời vừa bị ngắt, hoàn thành phần còn lại của yêu cầu trước đó. Không lặp lại những nội dung đã trả lời.')}>Viết tiếp</button>}</div>}</article>)}
+        {pending && <><article className="chat-message user"><MessageImages images={status.images?.map(image => image.thumb)}/><p>{status.question}</p></article>{streamed && <article className="chat-message assistant streaming"><ChatMarkdown content={status.answer!.answer} streaming/><span className="chat-stream-caret" aria-hidden="true"/></article>}<div className="chat-thinking" role="status"><Wave/>{streamed ? 'AI đang viết…' : 'Đang đọc nội dung và trả lời…'}</div></>}
+        {status?.error && <div className="chat-error" role="alert"><p><strong>Chưa trả lời được:</strong> {status.question}</p><p>{status.error}</p><button className="copy-btn" disabled={disabled} onClick={() => send(status.question, status.images)}><RotateCcw size={14}/>Thử lại</button><button className="copy-btn" disabled={disabled} onClick={() => { setDraft(status.question); input.current?.focus() }}>Sửa câu hỏi</button></div>}
       </div>}
       {!pending && followUps.length > 0 && <div className="note-chat-prompts follow-ups" aria-label="Câu hỏi gợi ý">{followUps.map((question, index) => <button key={question} type="button" style={{ '--i': index } as CSSProperties} disabled={disabled} onClick={() => send(question)}><Sparkles size={13}/>{question}</button>)}</div>}
       {!pending && !followUps.length && <div className="note-chat-prompts">{noteChatPrompts.map((prompt, index) => <button key={prompt.label} type="button" style={{ '--i': index } as CSSProperties} disabled={disabled} onClick={() => send(prompt.question)}><Sparkles size={13}/>{prompt.label}</button>)}</div>}
-      <form className="note-chat-form" onSubmit={event => { event.preventDefault(); send(draft) }}><MessageCircle size={18} className="chat-input-icon" aria-hidden="true"/><textarea ref={input} aria-label="Câu hỏi về cuộc họp" placeholder="Hỏi bất cứ điều gì về cuộc họp…" rows={1} maxLength={4000} value={draft} disabled={disabled} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(draft) } }}/><button className="pill-btn primary" type="submit" disabled={disabled || !draft.trim()} aria-label="Gửi câu hỏi"><Send size={16}/></button></form>
+      <ChatImageTray state={pics}/>
+      <form className="note-chat-form" onSubmit={event => { event.preventDefault(); submit() }} onDragOver={pics.onDragOver} onDrop={pics.onDrop}><MessageCircle size={18} className="chat-input-icon" aria-hidden="true"/><textarea ref={input} aria-label="Câu hỏi về cuộc họp" placeholder={pics.images.length ? 'Hỏi về ảnh này…' : 'Hỏi bất cứ điều gì, hoặc dán ảnh chụp màn hình…'} rows={1} maxLength={4000} value={draft} disabled={disabled} onChange={event => setDraft(event.target.value)} onPaste={pics.onPaste} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); submit() } }}/><AttachImageButton state={pics} disabled={disabled}/><button className="pill-btn primary" type="submit" disabled={disabled || (!draft.trim() && !pics.images.length)} aria-label="Gửi câu hỏi"><Send size={16}/></button></form>
     </div>
   </section>
 }

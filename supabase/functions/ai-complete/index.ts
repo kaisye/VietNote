@@ -1,5 +1,6 @@
 // LLM proxy for summaries, paragraph translation and meeting titles.
-//   POST {system, user, max_tokens, json} -> {content, finish_reason}
+//   POST {system, user, images?, max_tokens, json} -> {content, finish_reason}
+// `images` are screenshots pasted with a question, as data:image/…;base64 URLs.
 // The model and the OpenRouter key stay on the server; callers must be signed
 // in with a positive balance and are rate limited per minute.
 import { admin, availableSeconds, json } from '../_shared/credits.ts'
@@ -9,6 +10,9 @@ const OPENROUTER_API = 'https://openrouter.ai/api/v1/chat/completions'
 const MAX_OUTPUT_TOKENS = 2000
 const MAX_INPUT_CHARS = 200_000
 const REQUESTS_PER_MINUTE = 30
+const MAX_IMAGES = 3
+const MAX_IMAGE_CHARS = 4_000_000
+const IMAGE_URL = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/
 
 Deno.serve(async request => {
   if (request.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
@@ -18,9 +22,12 @@ Deno.serve(async request => {
   if (authError || !auth.user) return json({ error: 'unauthorized' }, 401)
   const userId = auth.user.id
 
-  const body = await request.json().catch(() => ({})) as { system?: unknown; user?: unknown; max_tokens?: unknown; json?: unknown; stream?: unknown }
+  const body = await request.json().catch(() => ({})) as { system?: unknown; user?: unknown; images?: unknown; max_tokens?: unknown; json?: unknown; stream?: unknown }
   if (typeof body.system !== 'string' || typeof body.user !== 'string' || !body.user.trim()) return json({ error: 'invalid_request' }, 400)
   if (body.system.length + body.user.length > MAX_INPUT_CHARS) return json({ error: 'input_too_long' }, 413)
+  const images = body.images ?? []
+  if (!Array.isArray(images) || images.length > MAX_IMAGES
+    || !images.every(image => typeof image === 'string' && image.length <= MAX_IMAGE_CHARS && IMAGE_URL.test(image))) return json({ error: 'invalid_images' }, 400)
   const maxTokens = Math.min(MAX_OUTPUT_TOKENS, Math.max(1, Math.floor(Number(body.max_tokens) || 500)))
 
   // Open streams hold up to 30 minutes each; that reserved time still counts.
@@ -36,7 +43,9 @@ Deno.serve(async request => {
   // Qwen Flash thinks by default and bills it as output; these tasks don't need it.
   const payload: Record<string, unknown> = {
     model,
-    messages: [{ role: 'system', content: body.system }, { role: 'user', content: body.user }],
+    messages: [{ role: 'system', content: body.system }, { role: 'user', content: images.length
+      ? [{ type: 'text', text: body.user }, ...images.map(url => ({ type: 'image_url', image_url: { url } }))]
+      : body.user }],
     max_tokens: maxTokens,
     reasoning: { effort: 'none' },
   }

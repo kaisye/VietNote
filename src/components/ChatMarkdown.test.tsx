@@ -12,6 +12,14 @@ describe('chat Markdown preview', () => {
     expect(html).toContain('<table>')
     expect(html).not.toContain('**Lan**')
   })
+  it('renders formulas instead of their LaTeX source, in either delimiter style', () => {
+    const html = preview('- **$J(\\theta)$**: tổng các hàm mất mát $\\mathcal{L}$ trên $N$ mẫu.\n- **$\\theta^*$**: tham số tối ưu.\n\n$$\nJ(\\theta) = \\frac{1}{N}\\sum_{i=1}^{N} \\mathcal{L}(f_\\theta(x^{(i)}), y^{(i)})\n$$\n\nHoặc \\(x^2\\) và \\[a+b\\]')
+    expect(html).toContain('class="katex"')
+    expect(html).toContain('katex-display')
+    // KaTeX keeps the source only in a hidden annotation for screen readers.
+    expect(html.replace(/<annotation[\s\S]*?<\/annotation>/g, '')).not.toMatch(/\$\\theta|\\mathcal|\\\(/)
+    expect(preview('Dùng `$HOME` và\n\n```sh\necho \\(x\\)\n```')).toContain('echo \\(x\\)')
+  })
   it('formats partial emphasis and incomplete links as a stream arrives', () => {
     expect(preview('Người phụ trách: **Lan', true)).toContain('<strong>Lan</strong>')
     const html = preview('Xem [báo cáo](https://exam', true)

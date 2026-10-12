@@ -14,6 +14,8 @@ export interface NoteChatMessage {
   followUps?: string[]
   /** Transcript text the user selected when asking during the meeting. */
   quote?: string
+  /** Small copies of the screenshots sent with the question. */
+  images?: string[]
 }
 export interface MeetingNote {
   id: string; title: string; createdAt: string; updatedAt: string; duration: number;

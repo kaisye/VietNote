@@ -11,9 +11,10 @@ Kết hợp ba nguồn: ngữ cảnh cuộc họp, đoạn transcript làm căn 
 - Câu hỏi xin lời khuyên hoặc ý kiến (nên làm gì, nên chọn gì, ưu tiên gì, đánh giá thế nào): luôn đưa ra khuyến nghị cụ thể của bạn kèm lý do, dựa trên ngữ cảnh cuộc họp và chuyên môn của bạn. Nếu cuộc họp chưa chốt, nói ngắn điều đó trong một câu rồi vẫn khuyến nghị; nêu rõ đây là gợi ý của AI, không phải quyết định của cuộc họp. Không né tránh bằng cách chỉ nhắc lại rằng cuộc họp chưa quyết định.
 - Khi người dùng hỏi lại hoặc thúc trả lời, nghĩa là câu trả lời trước chưa đúng ý: trả lời thẳng vào điều họ cần, không lặp lại câu trả lời cũ.
 - Transcript là nhận diện giọng nói nên có thể sai chính tả hoặc nghe nhầm thuật ngữ. Khi ngữ cảnh cho thấy rõ từ đúng, dùng từ đúng và ghi chú ngắn từ đã bị nghe nhầm.
+Nếu có ảnh đính kèm (thường là ảnh chụp màn hình, slide hoặc tài liệu đang chia sẻ), đọc kỹ ảnh: chữ, số liệu, biểu đồ. Câu hỏi thường nói về ảnh đó; trả lời dựa trên ảnh, nối với nội dung cuộc họp khi liên quan. Không đặt dấu căn cứ cho thông tin lấy từ ảnh.
 Câu hỏi tiếp nối được hiểu từ lịch sử nhưng câu trả lời cũ không phải bằng chứng. Phân biệt đề xuất, quyết định đã chốt và vấn đề còn bỏ ngỏ. Nhãn Người nói N không xác định tên thật.
 Có thể tóm tắt chi tiết, giải thích, tổng hợp việc cần làm hoặc hỏi đáp từ nội dung hội thoại. Trình bày bằng Markdown dễ đọc: tiêu đề ngắn, chữ in đậm cho điểm quan trọng, danh sách và bảng khi phù hợp. Câu hỏi không liên quan đến cuộc họp vẫn được trả lời ngắn gọn bằng kiến thức chung.
-Trả lời trực tiếp bằng Markdown, không bọc toàn bộ câu trả lời trong JSON hay code fence. Không dùng HTML. Chia nội dung thành các đoạn hoặc gạch đầu dòng ngắn, cách nhau bằng dòng trống. Đặt dấu căn cứ như [[s1]] hoặc [[s2]] ngay sau ý có đoạn transcript hỗ trợ. Chỉ dùng ID thật được cung cấp. Không có đoạn hỗ trợ thì không đặt dấu căn cứ. Không tạo phần liệt kê ID riêng.
+Trả lời trực tiếp bằng Markdown, không bọc toàn bộ câu trả lời trong JSON hay code fence. Không dùng HTML. Công thức toán viết bằng LaTeX trong $...$ (cùng dòng) hoặc $$...$$ (dòng riêng). Chia nội dung thành các đoạn hoặc gạch đầu dòng ngắn, cách nhau bằng dòng trống. Đặt dấu căn cứ như [[s1]] hoặc [[s2]] ngay sau ý có đoạn transcript hỗ trợ. Chỉ dùng ID thật được cung cấp. Không có đoạn hỗ trợ thì không đặt dấu căn cứ. Không tạo phần liệt kê ID riêng.
 Nếu dữ liệu có continuation, tiếp tục trả lời câu hỏi ban đầu. completedAnswerTail là phần cuối đã hiển thị: không lặp lại. unfinishedParagraph là đoạn bị cắt, chưa hiển thị: viết lại đầy đủ đoạn đó rồi tiếp tục các ý còn lại, giữ nguyên dấu căn cứ.
 Cuối câu trả lời, viết dòng [[next]] rồi 3 câu hỏi tiếp theo người dùng có thể muốn hỏi, mỗi câu một dòng, không đánh số. Viết như chính người dùng hỏi, ngắn dưới 12 từ, đào sâu hoặc mở rộng từ câu trả lời vừa rồi, không lặp lại câu đã hỏi."#;
 
@@ -35,6 +36,20 @@ pub(crate) struct ChatRequest {
     quote: String,
     #[serde(default)]
     live: bool,
+    /// Screenshots pasted with the question, as `data:image/…;base64,` URLs.
+    #[serde(default)]
+    images: Vec<String>,
+}
+
+const MAX_IMAGES: usize = 3;
+/// Base64 characters per image, about 3 MB of picture; the app downsizes well under this.
+const MAX_IMAGE_CHARS: usize = 4_000_000;
+
+fn valid_image(image: &str) -> bool {
+    ["data:image/jpeg;base64,", "data:image/png;base64,", "data:image/webp;base64,"]
+        .iter()
+        .any(|prefix| image.starts_with(prefix))
+        && image.len() <= MAX_IMAGE_CHARS
 }
 
 #[derive(Deserialize, Serialize)]
@@ -91,7 +106,11 @@ fn chat_input(request: &ChatRequest) -> Result<String, String> {
     {
         return Err("Lịch sử hỏi đáp không hợp lệ.".into());
     }
-    if request.summary.trim().is_empty()
+    if request.images.len() > MAX_IMAGES || !request.images.iter().all(|image| valid_image(image)) {
+        return Err("Ảnh không hợp lệ hoặc quá lớn. Gửi tối đa 3 ảnh PNG, JPEG hoặc WebP.".into());
+    }
+    if request.images.is_empty()
+        && request.summary.trim().is_empty()
         && request.transcript.trim().is_empty()
         && request
             .segments
@@ -111,6 +130,9 @@ fn chat_input(request: &ChatRequest) -> Result<String, String> {
     });
     if !request.quote.trim().is_empty() {
         input["quote"] = json!(request.quote.trim());
+    }
+    if !request.images.is_empty() {
+        input["attachedImages"] = json!(request.images.len());
     }
     let input = input.to_string();
     // Leave room under the proxy's 200k character cap. Do not silently drop source material.
@@ -270,9 +292,10 @@ async fn ask_note_stream(
         let channel = on_progress.clone();
         let segments = segments.clone();
         let system = system.clone();
+        let images = request.images.clone();
         async move {
             let mut last_update = std::time::Instant::now() - std::time::Duration::from_secs(1);
-            crate::account::ai_complete_stream(&system, input, max_tokens, |partial| {
+            crate::account::ai_complete_stream_with_images(&system, input, &images, max_tokens, |partial| {
                 // Send snapshots so paragraph replacement during continuation is deterministic.
                 if last_update.elapsed() < std::time::Duration::from_millis(40) {
                     return;
@@ -317,6 +340,7 @@ mod tests {
             question: "Ai gửi?".into(),
             quote: String::new(),
             live: false,
+            images: vec![],
         }
     }
     // Opt-in smoke test: uses the existing VietNote session and makes one billed AI request.
@@ -363,6 +387,18 @@ mod tests {
         assert!(answer.answer.to_lowercase().contains("thứ sáu"));
         assert_eq!(answer.evidence_ids, vec!["demo-evidence"]);
     }
+    // Opt-in smoke test: one billed AI request with a pasted screenshot (a solid red square).
+    #[test]
+    #[ignore = "requires a signed-in VietNote account with credit and network access"]
+    fn live_question_about_screenshot() {
+        let mut request = request();
+        request.live = true;
+        request.question = "Ảnh đính kèm có màu gì? Trả lời một từ.".into();
+        request.images = vec!["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKklEQVR4nGO4I2JDU8QwasGoBaMWjFowasGoBaMWjFowasGoBaMWDBULADahsD1ndvqVAAAAAElFTkSuQmCC".into()];
+        let answer = tauri::async_runtime::block_on(ask_note_stream(request, None))
+            .expect("live screenshot question failed");
+        assert!(answer.answer.to_lowercase().contains("đỏ"), "{}", answer.answer);
+    }
     #[test]
     fn input_preserves_source_and_followups_as_data() {
         let mut request = request();
@@ -385,6 +421,21 @@ mod tests {
             serde_json::from_str(&chat_input(&request).unwrap()).unwrap();
         assert_eq!(input["quote"], "chuyển sang usage-based");
         request.quote = "a".repeat(4001);
+        assert!(chat_input(&request).is_err());
+    }
+    #[test]
+    fn screenshots_are_checked_and_allow_asking_before_anyone_speaks() {
+        let mut request = request();
+        request.summary.clear();
+        assert!(chat_input(&request).is_err());
+        request.images = vec!["data:image/jpeg;base64,/9j/4AAQ".into()];
+        let input: serde_json::Value =
+            serde_json::from_str(&chat_input(&request).unwrap()).unwrap();
+        assert_eq!(input["attachedImages"], 1);
+        assert!(!input.to_string().contains("base64"), "images travel beside the text, not inside it");
+        request.images = vec!["data:text/html;base64,PHA+".into()];
+        assert!(chat_input(&request).is_err());
+        request.images = vec!["data:image/png;base64,iVBO".into(); 4];
         assert!(chat_input(&request).is_err());
     }
     #[test]

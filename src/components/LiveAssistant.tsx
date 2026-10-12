@@ -6,6 +6,8 @@ import type { Subtitle } from '../services/types'
 import { liveActions, type LiveQuestion } from '../services/liveChat'
 import { formatTime } from '../services/notes'
 import { ChatMarkdown } from './ChatMarkdown'
+import { AttachImageButton, ChatImageTray, MessageImages, useChatImages } from './ChatImages'
+import { IMAGE_QUESTION } from '../services/chatImages'
 
 interface Pick { text: string; ids: string[]; x: number; top: number; bottom: number }
 const actionIcons = { explain: Lightbulb, translate: Languages, reply: MessageSquareReply }
@@ -67,6 +69,7 @@ export function LiveAssistant({ chat, entries, transcript, summary, onHold }: {
   const [open, setOpen] = useState(false)
   const [quote, setQuote] = useState<{ text: string; ids: string[] } | null>(null)
   const [draft, setDraft] = useState('')
+  const pics = useChatImages()
   const [unseen, setUnseen] = useState(false)
   const [stage, setStage] = useState<HTMLElement | null>(null)
   const [size, setSize] = useState<Size | null>(null)
@@ -109,7 +112,7 @@ export function LiveAssistant({ chat, entries, transcript, summary, onHold }: {
   const onPointerLeave = (event: ReactPointerEvent) => {
     if (event.pointerType !== 'mouse') return
     clearTimeout(hoverTimer.current)
-    if (open && peek.current && !draft && !quote && shell.current?.ownerDocument.activeElement !== input.current) hoverTimer.current = setTimeout(collapse, 380)
+    if (open && peek.current && !draft && !quote && !pics.images.length && shell.current?.ownerDocument.activeElement !== input.current) hoverTimer.current = setTimeout(collapse, 380)
   }
   useEffect(() => () => clearTimeout(hoverTimer.current), [])
 
@@ -202,9 +205,11 @@ export function LiveAssistant({ chat, entries, transcript, summary, onHold }: {
     void chat.ask(request)
   }
   const submit = () => {
-    if (!draft.trim()) return
-    send({ question: draft, quote: quote?.text, focusIds: quote?.ids })
-    setDraft(''); setQuote(null)
+    const images = pics.images
+    if (!draft.trim() && !images.length) return
+    // A screenshot with no question asks what it shows.
+    send({ question: draft.trim() || IMAGE_QUESTION, label: draft.trim() ? undefined : 'Ảnh này nói gì?', quote: quote?.text, focusIds: quote?.ids, images: images.length ? images : undefined })
+    setDraft(''); setQuote(null); pics.clear()
   }
   const runAction = (id: typeof liveActions[number]['id']) => {
     if (!pick) return
@@ -258,23 +263,25 @@ export function LiveAssistant({ chat, entries, transcript, summary, onHold }: {
       {(messages.length > 0 || pending || status?.error) ? <div className="note-chat-messages" ref={scroll} role="log" aria-label="Lịch sử hỏi đáp" aria-live="polite" aria-busy={pending}
         onScroll={event => { const element = event.currentTarget; follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < 60 }}>
         {messages.map(message => <article key={message.id} className={`chat-message ${message.role}`}>
-          {message.role === 'user' ? <>{message.quote && <blockquote className="chat-quote">{message.quote}</blockquote>}<p>{message.content}</p></>
+          {message.role === 'user' ? <>{message.quote && <blockquote className="chat-quote">{message.quote}</blockquote>}<MessageImages images={message.images}/><p>{message.content}</p></>
             : <><ChatMarkdown content={message.content}/>{Boolean(message.evidenceIds?.length) && <details className="chat-evidence"><summary>Căn cứ · {message.evidenceIds!.length}</summary><div>{message.evidenceIds!.map(id => { const entry = entries.find(item => item.id === id); return entry && <button key={id} type="button" onClick={() => showEvidence(id)} title={entry.sourceText}>{formatTime(entry.timestamp, false)}{entry.speaker ? ` · ${entry.speaker}` : ''}</button> })}</div></details>}</>}
         </article>)}
-        {status && (pending || status.error) && <article className="chat-message user">{status.request.quote && <blockquote className="chat-quote">{status.request.quote}</blockquote>}<p>{status.request.label ?? status.request.question}</p></article>}
+        {status && (pending || status.error) && <article className="chat-message user">{status.request.quote && <blockquote className="chat-quote">{status.request.quote}</blockquote>}<MessageImages images={status.request.images?.map(image => image.thumb)}/><p>{status.request.label ?? status.request.question}</p></article>}
         {pending && streamed && <article className="chat-message assistant streaming"><ChatMarkdown content={status!.answer!.answer} streaming/><span className="chat-stream-caret" aria-hidden="true"/></article>}
         {pending && <div className="chat-thinking" role="status"><Wave/>{streamed ? 'AI đang viết…' : 'Đang đọc transcript và trả lời…'}</div>}
         {status?.error && <div className="chat-error" role="alert"><p>{status.error}</p><button type="button" className="copy-btn" onClick={() => send(status.request)}><RotateCcw size={14}/>Thử lại</button><button type="button" className="copy-btn" onClick={chat.dismissError}>Bỏ qua</button></div>}
-      </div> : !quote && <p className="live-ask-hint">Bôi đen một đoạn transcript hoặc tóm tắt để <strong>Hỏi</strong>, <strong>Giải thích</strong>, <strong>Dịch</strong> hoặc <strong>Gợi ý trả lời</strong>, hoặc gõ câu hỏi bên dưới.</p>}
+      </div> : !quote && <p className="live-ask-hint">Bôi đen một đoạn transcript hoặc tóm tắt để <strong>Hỏi</strong>, <strong>Giải thích</strong>, <strong>Dịch</strong> hoặc <strong>Gợi ý trả lời</strong>, hoặc gõ câu hỏi bên dưới. Dán ảnh chụp màn hình (slide, tài liệu) để hỏi về ảnh.</p>}
       {!pending && !quote && followUps.length > 0 && <div className="note-chat-prompts follow-ups" aria-label="Câu hỏi gợi ý">{followUps.map((question, index) => <button key={question} type="button" style={{ '--i': index } as CSSProperties} onClick={() => send({ question })}><Sparkles size={13}/>{question}</button>)}</div>}
       {quote && <div className="live-ask-quote"><span>“{quote.text}”</span><button type="button" onClick={() => { setQuote(null); focusInput() }} aria-label="Bỏ đoạn trích"><X size={13}/></button></div>}
-      <form className="note-chat-form" onSubmit={event => { event.preventDefault(); submit() }}>
+      <ChatImageTray state={pics}/>
+      <form className="note-chat-form" onSubmit={event => { event.preventDefault(); submit() }} onDragOver={pics.onDragOver} onDrop={pics.onDrop}>
         <MessageCircle size={18} className="chat-input-icon" aria-hidden="true"/>
         <textarea ref={input} rows={1} maxLength={4000} value={draft} aria-label="Câu hỏi" disabled={!canAsk || pending}
-          placeholder={quote ? 'Hỏi về đoạn này…' : canAsk ? 'Hỏi về những gì đang được nói…' : 'Chờ có lời nói để hỏi…'}
-          onChange={event => setDraft(event.target.value)}
+          placeholder={quote ? 'Hỏi về đoạn này…' : pics.images.length ? 'Hỏi về ảnh này…' : canAsk ? 'Hỏi, hoặc dán ảnh chụp màn hình…' : 'Chờ có lời nói để hỏi…'}
+          onChange={event => setDraft(event.target.value)} onPaste={pics.onPaste}
           onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); submit() } }}/>
-        <button className="pill-btn primary" type="submit" disabled={pending || !canAsk || !draft.trim()} aria-label="Gửi câu hỏi"><Send size={16}/></button>
+        <AttachImageButton state={pics} disabled={!canAsk || pending}/>
+        <button className="pill-btn primary" type="submit" disabled={pending || !canAsk || (!draft.trim() && !pics.images.length)} aria-label="Gửi câu hỏi"><Send size={16}/></button>
       </form>
     </div>
   </section>
