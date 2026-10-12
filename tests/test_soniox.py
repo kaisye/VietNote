@@ -85,6 +85,24 @@ class SonioxStreamTest(unittest.TestCase):
         self.assertTrue(final["text"].endswith("word25."))
         self.assertEqual(server.token_text(self.stream.tokens).split(), ["word26", "word27", "word28", "word29"])
 
+    def test_long_speech_without_sentence_end_is_cut_at_a_clause(self):
+        words = [token(f" word{i}", True, ms=i * 300) for i in range(70)]
+        words.insert(50, token(",", True, ms=50 * 300))
+        self.stream.handle({"tokens": words})
+        final = self.of_type("transcript")[0]
+        self.assertTrue(final["text"].endswith("word49,"))
+        self.assertEqual(server.token_text(self.stream.tokens).split()[0], "word50")
+
+    def test_long_speech_without_any_mark_is_cut_at_the_longest_pause(self):
+        words = [token(f" word{i}", True, ms=i * 300 + (900 if i >= 55 else 0)) for i in range(70)]
+        self.stream.handle({"tokens": words})
+        self.assertTrue(self.of_type("transcript")[0]["text"].endswith("word54"))
+        self.assertEqual(server.token_text(self.stream.tokens).split()[0], "word55")
+
+    def test_short_speech_without_sentence_end_stays_open(self):
+        self.stream.handle({"tokens": [token(f" word{i}", True, ms=i * 300) for i in range(40)]})
+        self.assertFalse(self.of_type("transcript"))
+
     def test_detects_spoken_language_from_transcript(self):
         self.assertEqual(detect_language("Nobody has air superiority right now."), "en")
         self.assertEqual(detect_language("Hôm nay chúng ta họp về kế hoạch quý ba."), "vi")

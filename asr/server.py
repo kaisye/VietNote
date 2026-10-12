@@ -42,6 +42,11 @@ GROQ_ASR_MODEL = 'whisper-large-v3'
 # monologues) would otherwise become one endless interim spanning every speaker.
 LIVE_SEGMENT_WORDS = 25
 LIVE_SEGMENT_SECONDS = 10.0
+# A line still open past this is cut even without a sentence end, so it stops changing
+# and can be selected: at the last clause mark, else at the longest pause.
+LIVE_SEGMENT_MAX_WORDS = 60
+LIVE_SEGMENT_MAX_SECONDS = 25.0
+CLAUSE_END = (',', ';', ':', '，', '、', '；', '：')
 PITCH_HISTORY_SECONDS = 20
 
 def log(message):
@@ -132,6 +137,20 @@ def sentence_boundaries(text):
     """Offsets just after each complete sentence (terminator followed by a space, or CJK)."""
     import re
     return [m.end() for m in re.finditer(r'[.!?]+["\')\]]*(?=\s)|[。！？]+', text)]
+
+
+def soft_split(tokens):
+    """Where to cut a long turn that has no sentence end: after its last clause mark, else at
+    the longest pause in its second half, else after everything already final."""
+    for index in range(len(tokens) - 1, 0, -1):
+        if (tokens[index - 1].get('text') or '').rstrip().endswith(CLAUSE_END):
+            return index
+    best, gap = len(tokens), 0
+    for index in range(max(1, len(tokens) // 2), len(tokens)):
+        start, end = tokens[index].get('start_ms'), tokens[index - 1].get('end_ms')
+        if isinstance(start, (int, float)) and isinstance(end, (int, float)) and start - end > gap:
+            best, gap = index, start - end
+    return best
 
 
 def segment_size(text):
@@ -446,17 +465,21 @@ class SonioxStream:
         text = token_text(self.tokens)
         started = self.clock(self.tokens, 'start_ms', 0)
         ended = self.clock(self.tokens, 'end_ms', 0)
-        if segment_size(text) < LIVE_SEGMENT_WORDS and ended - started < LIVE_SEGMENT_SECONDS:
+        size, duration = segment_size(text), ended - started
+        if size < LIVE_SEGMENT_WORDS and duration < LIVE_SEGMENT_SECONDS:
             return
         boundaries = sentence_boundaries(text)
-        if not boundaries:
+        if boundaries:
+            cut, length, split = boundaries[-1], 0, len(self.tokens)
+            for index, token in enumerate(self.tokens):
+                length += len(token.get('text') or '')
+                if length >= cut:
+                    split = index + 1
+                    break
+        elif size >= LIVE_SEGMENT_MAX_WORDS or duration >= LIVE_SEGMENT_MAX_SECONDS:
+            split = soft_split(self.tokens)
+        else:
             return
-        cut, length, split = boundaries[-1], 0, len(self.tokens)
-        for index, token in enumerate(self.tokens):
-            length += len(token.get('text') or '')
-            if length >= cut:
-                split = index + 1
-                break
         head, tail = self.tokens[:split], self.tokens[split:]
         self.tokens = head
         self.finish_utterance()
