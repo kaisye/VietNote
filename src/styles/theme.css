@@ -90,13 +90,10 @@ select { min-height:35px; padding:5px 28px 5px 11px; }
 :root[data-theme='ocean'] .account-badge:hover { background:rgba(255,255,255,.62); }
 :root[data-theme='ocean'] .account-badge svg { color:#d9653d; }
 :root[data-theme='ocean'] ::selection { background:rgba(224,113,74,.28); color:var(--ink); }
-/* Ocean notes: a light touch of coral marks where you are (selected note, day, open tab, today) and the quick summary. */
-:root[data-theme='ocean'] .note-list-item.selected, :root[data-theme='ocean'] .note-list-item.selected:hover { background:linear-gradient(90deg,rgba(224,113,74,.11),rgba(224,113,74,.03)); box-shadow:inset 2px 0 0 #e0714a; }
-:root[data-theme='ocean'] .note-list-item.selected .note-source { color:#d9653d; }
+/* Ocean notes: a light touch of coral on the day labels, the open tab, today and the quick summary heading. */
 :root[data-theme='ocean'] .note-day h4 { color:#bf5f3c; }
 :root[data-theme='ocean'] .note-view-tabs button.selected::after { background:#e0714a; }
 :root[data-theme='ocean'] .note-calendar-grid button.today { box-shadow:inset 0 0 0 1px #e0714a; }
-:root[data-theme='ocean'] .structured-tldr { background:linear-gradient(180deg,rgba(224,113,74,.07),rgba(224,113,74,.015)); }
 :root[data-theme='ocean'] .structured-tldr h4 { color:#c25a35; }
 
 /* Deep space: nebula clouds over black, two star layers (the brighter one twinkles), meteors from the orbs. */
@@ -133,3 +130,8 @@ select { min-height:35px; padding:5px 28px 5px 11px; }
 :root[data-theme='dark-gradient'] .structured-tldr { background:linear-gradient(180deg,rgba(165,139,255,.09),rgba(143,220,255,.015)); }
 :root[data-theme='dark-gradient'] .structured-tldr h4 { color:#c3b4ff; }
 
+/* Space start button: a full moon, grey-white, in a pale moonlight halo. */
+:root[data-theme='dark-gradient'] .start-button { background:radial-gradient(circle at 36% 30%,#ffffff 0%,#eceef4 30%,#c9ccd8 66%,#9a9eb0 100%); color:#1b1e2e; border-color:rgba(235,238,248,.7); text-shadow:0 1px 2px rgba(255,255,255,.5); box-shadow:0 0 46px rgba(225,232,255,.32), inset -14px -16px 30px rgba(70,74,96,.35); }
+:root[data-theme='dark-gradient'] .inner-ring { background:radial-gradient(circle,rgba(225,232,255,.2) 55%,rgba(225,232,255,0) 72%); }
+:root[data-theme='dark-gradient'] .middle-ring { border-color:rgba(225,232,255,.18); }
+:root[data-theme='dark-gradient'] .outer-ring { border-color:rgba(225,232,255,.24); }
