@@ -364,6 +364,8 @@ export function IslandApp() {
     if (!active || active.id !== event.pointerId) return
     drag.current = null
     if (!active.moved || !active.rect) {
+      // The second click of a double-click must not leave the first one's timer running.
+      clear('click')
       // Moved off its home spot, the open panel closes on a click on its header, as it opened.
       // Wait for a possible double-click, which switches to subtitles instead.
       if (active.panel) { if (!atHome() && !pinnedRef.current) timers.current.click = setTimeout(collapse, 220); return }
@@ -431,7 +433,7 @@ export function IslandApp() {
     audioSource={state?.source ?? null} onSource={value => toMain(islandEvents.source, value)}
     display={shown} translationAvailable={translationAvailable} onDisplay={chooseDisplay} onExit={() => setMode('island')}
     onDock={target => { const home: Placement = { anchor: 'notch' }; savePlacement(target.key, home); place(target, home); setMode('island') }}
-    speech={state?.speech ?? null} onSpeech={enabled => toMain(islandEvents.speech, enabled)} onVoice={voice => toMain(islandEvents.voice, voice)}/>
+    speech={state?.speech ?? null} voiced={state?.voiced} onSpeech={enabled => toMain(islandEvents.speech, enabled)} onVoice={voice => toMain(islandEvents.voice, voice)}/>
   const shapeStyle: CSSProperties = {
     left: view.shape.x - view.frame.x, top: view.shape.y - view.frame.y, width: view.shape.width, height: view.shape.height,
     ['--notch-height' as string]: `${screen?.notch?.height ?? 0}px`,
