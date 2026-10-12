@@ -19,12 +19,13 @@ export function useIslandBridge(model: AppModel, onStart: () => void) {
     capturing: model.capturing,
     status: model.status,
     canStart: model.canStartMeeting && !model.busy && !model.meetingActive && !model.capturing,
-    source: model.capturing ? activeSource(model.microphoneOn, model.systemAudioOn) : model.audioInput,
+    // Before recording, the island shows the source its own start uses: the computer's audio.
+    source: model.capturing ? activeSource(model.microphoneOn, model.systemAudioOn) : 'system',
     translation: model.sourceLanguage === 'vi' ? 'unavailable' : model.translateForeign ? 'on' : 'off',
     speech: model.sourceLanguage === 'vi' || !model.speech.installed ? null : { enabled: model.speech.enabled, loading: model.speech.enabled && model.speech.state === 'loading', voice: model.speech.voice },
     lines: islandLines(model.entries, model.interimTranscripts, model.translationBlocks),
     chat: islandChat(model.liveChat.messages, model.liveChat.status),
-  }), [model.meetingActive, model.capturing, model.status, model.canStartMeeting, model.busy, model.sourceLanguage, model.translateForeign, model.audioInput, model.speech.installed, model.speech.enabled, model.speech.state, model.speech.voice, model.microphoneOn, model.systemAudioOn, model.entries, model.interimTranscripts, model.translationBlocks, model.liveChat.messages, model.liveChat.status])
+  }), [model.meetingActive, model.capturing, model.status, model.canStartMeeting, model.busy, model.sourceLanguage, model.translateForeign, model.speech.installed, model.speech.enabled, model.speech.state, model.speech.voice, model.microphoneOn, model.systemAudioOn, model.entries, model.interimTranscripts, model.translationBlocks, model.liveChat.messages, model.liveChat.status])
   const latest = useRef(state)
   latest.current = state
   const modelRef = useRef(model)
@@ -64,14 +65,13 @@ export function useIslandBridge(model: AppModel, onStart: () => void) {
         const model = modelRef.current
         if (model.capturing) { void model.setSources(event.payload); return }
         if (!latest.current.canStart) return
-        model.setAudioInput(event.payload)
         onStartRef.current()
-        void model.startMeeting()
+        void model.startMeeting(event.payload)
       }),
       listen(islandEvents.start, () => {
         if (!latest.current.canStart) return
         onStartRef.current()
-        void modelRef.current.startMeeting()
+        void modelRef.current.startMeeting('system')
       }),
     ]
     return () => {

@@ -45,7 +45,8 @@ export function useAppModel() {
   // The idle screen hides `status` once the worker is ready, so a failed start needs its own slot.
   const [startError, setStartError] = useState('')
   const [sourceLanguage, setSourceLanguageState] = useState<Language>(savedLanguage)
-  const [audioInput, setAudioInputState] = useState<AudioInput>('system')
+  // The main window records the room and the computer; the island starts with the computer's audio only.
+  const [audioInput, setAudioInputState] = useState<AudioInput>('both')
   const [translateForeign, setTranslateForeignState] = useState(() => localStorage.getItem('translateForeign') !== 'false')
   const [entries, setEntries] = useState<Subtitle[]>([])
   const [interimTranscripts, setInterimTranscripts] = useState<InterimTranscript[]>([])
@@ -79,7 +80,9 @@ export function useAppModel() {
   const spokenLanguageRef = useRef(new Map<string, SpokenLanguage>())
   // Speaker per utterance id, so its translation is read in that speaker's voice.
   const speakerRef = useRef(new Map<string, string>())
-  const audioRef = useRef<AudioInput>('system')
+  const audioRef = useRef<AudioInput>('both')
+  // What the current (or pending) recording captures; the island may differ from the main window's choice.
+  const captureInputRef = useRef<AudioInput>('both')
   // The microphone and system audio can each be switched off and on while a recording runs.
   const [microphoneOn, setMicrophoneOn] = useState(false)
   // The microphone opened but hears pure silence: usually the system blocks it.
@@ -306,7 +309,7 @@ export function useAppModel() {
       }
       case 'transcript_interim': {
         if (!capturingRef.current || message.generation !== generationRef.current || !message.text) break
-        if (audioIssueRef.current) { audioIssueRef.current = false; setStatus(`● Listening — ${audioRef.current}`) }
+        if (audioIssueRef.current) { audioIssueRef.current = false; setStatus(`● Listening — ${captureInputRef.current}`) }
         const source = message.source ?? 'system'
         const language = spokenLanguage(message)
         if (message.id) spokenLanguageRef.current.set(message.id, language)
@@ -345,16 +348,17 @@ export function useAppModel() {
   const handleWorkerRef = useRef(handleWorker)
   handleWorkerRef.current = handleWorker
 
-  const start = async () => {
+  const start = async (input: AudioInput = audioRef.current) => {
     if (capturingRef.current || generationPending.current || !ready) return
+    captureInputRef.current = input
     generationPending.current = true; setBusy(true); setStartError(''); setMicrophoneSilent(false)
     generationRef.current += 1
     try {
       await desktop.sendWorker({ type: 'reset', generation: generationRef.current, language: languageRef.current })
-      await desktop.startCapture(audioRef.current)
-      microphoneRef.current = audioRef.current !== 'system'; setMicrophoneOn(microphoneRef.current)
-      systemAudioRef.current = audioRef.current !== 'microphone'; setSystemAudioOn(systemAudioRef.current)
-      capturingRef.current = true; setCapturing(true); setStatus(`● Listening — ${audioRef.current}`)
+      await desktop.startCapture(input)
+      microphoneRef.current = input !== 'system'; setMicrophoneOn(microphoneRef.current)
+      systemAudioRef.current = input !== 'microphone'; setSystemAudioOn(systemAudioRef.current)
+      capturingRef.current = true; setCapturing(true); setStatus(`● Listening — ${input}`)
       translationSession.current = meetingRef.current ? null : { startedAt: Date.now(), firstEntry: entriesRef.current.length }
     } catch (error) { setStatus(`Capture stopped: ${error}`); setStartError(`Không ghi âm được: ${error}`); meetingRef.current = false; setMeetingActive(false) }
     finally { generationPending.current = false; setBusy(false) }
@@ -390,7 +394,9 @@ export function useAppModel() {
     if (wantSystem !== systemAudioRef.current) await toggleSource('system')
     if (wantMicrophone !== microphoneRef.current) await toggleSource('microphone')
   }
-  const startMeeting = async () => {
+  /** `input` overrides the main window's source choice for this recording only (the island passes its own). */
+  const startMeeting = async (input: AudioInput = audioRef.current) => {
+    captureInputRef.current = input
     // Recognition, translation and summaries all run on the account's credit.
     if (desktop.isDesktop && !await desktop.accountSignedIn().catch(() => false)) {
       setStatus(SIGN_IN_STATUS)
@@ -408,7 +414,7 @@ export function useAppModel() {
     setSummaryStatus('Đang lắng nghe · bản tóm tắt bắt đầu sau câu đầu tiên')
     setTranslationStatus(languageRef.current === 'vi' ? 'Không cần dịch' : !translateForeignRef.current ? 'Đã tắt dịch tiếng nước ngoài' : languageRef.current === 'auto' ? 'Tự động nhận diện → Việt' : `${languageRef.current === 'en' ? 'Anh' : 'Trung'} → Việt theo đoạn`)
     meetingRef.current = true; setMeetingActive(true)
-    await start()
+    await start(input)
   }
   // `discard` ends the meeting without a final summary or a saved note.
   const stop = async (saveOptions?: { title: string; groupID: string | null }, discard = false) => {
@@ -580,7 +586,7 @@ export function useAppModel() {
   useEffect(() => {
     if (!ready || !startRequested) return
     setStartRequested(false); setBusy(false)
-    void startMeeting()
+    void startMeeting(captureInputRef.current)
   }, [ready, startRequested])
 
   const refreshAccount = useCallback(async () => {
