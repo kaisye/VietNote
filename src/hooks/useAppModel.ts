@@ -82,6 +82,8 @@ export function useAppModel() {
   const audioRef = useRef<AudioInput>('system')
   // The microphone and system audio can each be switched off and on while a recording runs.
   const [microphoneOn, setMicrophoneOn] = useState(false)
+  // The microphone opened but hears pure silence: usually the system blocks it.
+  const [microphoneSilent, setMicrophoneSilent] = useState(false)
   const [systemAudioOn, setSystemAudioOn] = useState(false)
   const microphoneRef = useRef(false)
   const systemAudioRef = useRef(false)
@@ -135,6 +137,7 @@ export function useAppModel() {
     const unlisten: Array<() => void> = []
     void desktop.loadNotes().then(data => { if (!disposed) persist([demoNote, ...data.notes.filter(n => !n.isDemo)], data.groups) }).catch(error => setStatus(`Không đọc được ghi chú: ${error}`))
     const workerEvents = desktop.onWorker(message => { if (!disposed) handleWorkerRef.current(message) }).then(fn => { unlisten.push(fn) })
+    void desktop.onMicrophoneSilent(silent => { if (!disposed) setMicrophoneSilent(silent) }).then(fn => { if (disposed) fn(); else unlisten.push(fn) })
     const statusEvents = desktop.onStatus(value => { if (!disposed) { setStatus(/loading/i.test(value) ? 'Đang khởi động…' : /closed|exited/i.test(value) ? 'Đã dừng' : /failed|missing/i.test(value) ? 'Không thể khởi động' : value); if (/loading|exited|closed|failed|missing/i.test(value)) { setReady(false); if (/exited|closed|failed|missing/i.test(value)) { setStartRequested(false); setBusy(false) } } } }).then(fn => { unlisten.push(fn) })
     void desktop.accountSignedIn().then(available => {
       if (disposed) return
@@ -344,7 +347,7 @@ export function useAppModel() {
 
   const start = async () => {
     if (capturingRef.current || generationPending.current || !ready) return
-    generationPending.current = true; setBusy(true); setStartError('')
+    generationPending.current = true; setBusy(true); setStartError(''); setMicrophoneSilent(false)
     generationRef.current += 1
     try {
       await desktop.sendWorker({ type: 'reset', generation: generationRef.current, language: languageRef.current })
@@ -366,6 +369,7 @@ export function useAppModel() {
     const enabled = !ref.current
     try {
       if (enabled) {
+        if (source === 'microphone') setMicrophoneSilent(false)
         await desktop.sendWorker({ type: 'open_source', source })
         await setNative(true)
       } else {
@@ -591,7 +595,7 @@ export function useAppModel() {
   }, [refreshAccount])
   const fileJob = useFileJob(addNote, () => void refreshAccount(), noteDocuments.write)
 
-  return { account, refreshAccount, status, startError, ready, diarizationReady, diarizationStatus, busy, capturing, meetingActive, sourceLanguage, setSourceLanguage, translateForeign, setTranslateForeign, audioInput, setAudioInput, microphoneOn, toggleMicrophone: () => void toggleSource('microphone'), systemAudioOn, toggleSystemAudio: () => void toggleSource('system'), setSources,
+  return { account, refreshAccount, status, startError, ready, diarizationReady, diarizationStatus, busy, capturing, meetingActive, sourceLanguage, setSourceLanguage, translateForeign, setTranslateForeign, audioInput, setAudioInput, microphoneOn, microphoneSilent: microphoneSilent && microphoneOn && capturing, toggleMicrophone: () => void toggleSource('microphone'), systemAudioOn, toggleSystemAudio: () => void toggleSource('system'), setSources,
     entries, interimTranscripts, translationBlocks, overallSummary, suggestedTitle, titlePending, suggestTitleNow: () => void suggestTitleNow(), summaryStatus, summaryCadence, setSummaryCadence: setCadence,
     cadenceValue, setCadenceValue: setCadenceAmount, notes, noteGroups, savingNoteID, savingNoteGroupID, vietnameseASRStatus, translationStatus,
     canStartMeeting: ready || asrKeyAvailable, canSummarizeNow: meetingActive && !summaryBusy.current && (entries.length > overallSummaryCursor.current || (translating() && entries.length > translationCursorRef.current)),

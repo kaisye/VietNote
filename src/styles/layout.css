@@ -792,3 +792,10 @@
 .app-audio-divider { height:1px; margin:0 4px; background:var(--border); }
 .app-audio-empty { margin:0; padding:4px 10px; }
 .app-audio-note { padding:0 10px 2px; }
+
+.mic-silent-notice { display:flex; align-items:flex-start; gap:12px; margin:12px 0; padding:13px 15px; border-radius:14px; border:1px solid rgba(196,81,61,.35); background:rgba(196,81,61,.09); color:var(--ink); }
+.mic-silent-notice > svg { flex:none; margin-top:2px; color:var(--danger, #c4513d); }
+.mic-silent-notice > div { flex:1; min-width:0; }
+.mic-silent-notice p { margin-top:3px; font-size:13px; line-height:1.5; color:var(--muted); }
+.mic-silent-notice b { color:var(--ink); font-weight:650; }
+.mic-silent-notice .pill-btn { flex:none; align-self:center; }

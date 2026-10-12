@@ -472,9 +472,37 @@ fn ensure_microphone_access() -> Result<(), String> {
     }
 }
 
-fn start_source(source: Source, label: &'static str, tx: mpsc::SyncSender<(String, Vec<f32>, f64)>) -> Result<Recording, String> {
+/// A blocked microphone opens without error but delivers only zeros (Windows privacy
+/// setting, a hardware mute switch). After this long of pure silence the page says so.
+const SILENT_MICROPHONE_SECONDS: f64 = 3.0;
+
+/// Watches the first microphone audio: tells the page when it is nothing but zeros, and
+/// again once real sound arrives. Room noise is never exactly zero, so silence this pure
+/// means the audio is cut off before it reaches the app.
+struct SilenceWatch { app: tauri::AppHandle, silent_seconds: f64, reported: bool, heard_sound: bool }
+
+impl SilenceWatch {
+    fn new(app: &tauri::AppHandle) -> Self { Self { app: app.clone(), silent_seconds: 0.0, reported: false, heard_sound: false } }
+
+    fn feed(&mut self, samples: &[f32], sample_rate: u32) {
+        if self.heard_sound { return; }
+        if samples.iter().any(|sample| sample.abs() > 1e-6) {
+            self.heard_sound = true;
+            if self.reported { let _ = self.app.emit("microphone-silent", false); }
+            return;
+        }
+        self.silent_seconds += samples.len() as f64 / sample_rate.max(1) as f64;
+        if !self.reported && self.silent_seconds >= SILENT_MICROPHONE_SECONDS {
+            self.reported = true;
+            let _ = self.app.emit("microphone-silent", true);
+        }
+    }
+}
+
+fn start_source(source: Source, label: &'static str, tx: mpsc::SyncSender<(String, Vec<f32>, f64)>, mut watch: Option<SilenceWatch>) -> Result<Recording, String> {
     let config = Config { source, sample_rate: 16_000, segment: Duration::from_secs(30), ..Config::default() };
     start_with_tap(config, |_| {}, Box::new(move |frames| {
+        if let Some(watch) = watch.as_mut() { watch.feed(frames.samples, frames.sample_rate); }
         let captured = frames.captured_at.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs_f64();
         let _ = tx.try_send((label.to_string(), frames.samples.to_vec(), captured));
     })).map_err(|e| match e {
@@ -489,22 +517,22 @@ fn capturing(state: &tauri::State<'_, NativeState>) -> Result<bool, String> {
     Ok(state.capture_tx.lock().map_err(|e| e.to_string())?.is_some())
 }
 
-fn start_microphone(tx: mpsc::SyncSender<(String, Vec<f32>, f64)>) -> Result<Recording, String> {
+fn start_microphone(app: &tauri::AppHandle, tx: mpsc::SyncSender<(String, Vec<f32>, f64)>) -> Result<Recording, String> {
     #[cfg(target_os = "macos")]
     ensure_microphone_access()?;
-    start_source(Source::Mic, "microphone", tx)
+    start_source(Source::Mic, "microphone", tx, Some(SilenceWatch::new(app)))
 }
 
 #[tauri::command]
-fn start_capture(state: tauri::State<'_, NativeState>, source: String) -> Result<(), String> {
+fn start_capture(app: tauri::AppHandle, state: tauri::State<'_, NativeState>, source: String) -> Result<(), String> {
     let mut slot = state.capture_tx.lock().map_err(|e| e.to_string())?;
     if slot.is_some() { return Err("Đang ghi âm".into()); }
     if !matches!(source.as_str(), "microphone" | "system" | "both") { return Err("Nguồn âm thanh không hợp lệ".into()); }
     let (tx, rx) = mpsc::sync_channel::<(String, Vec<f32>, f64)>(25);
     let writer = state.writer.clone();
     let pending = state.pending_audio.clone();
-    let microphone = if source == "system" { None } else { Some(start_microphone(tx.clone())?) };
-    let system = if source == "microphone" { None } else { Some(start_source(Source::System, "system", tx.clone())?) };
+    let microphone = if source == "system" { None } else { Some(start_microphone(&app, tx.clone())?) };
+    let system = if source == "microphone" { None } else { Some(start_source(Source::System, "system", tx.clone(), None)?) };
     *state.microphone.lock().map_err(|e| e.to_string())? = microphone;
     *state.system.lock().map_err(|e| e.to_string())? = system;
     *slot = Some(tx);
@@ -527,11 +555,11 @@ fn start_capture(state: tauri::State<'_, NativeState>, source: String) -> Result
 
 /// Turns the microphone off or on while a recording runs; other sources keep going.
 #[tauri::command]
-fn set_microphone(state: tauri::State<'_, NativeState>, enabled: bool) -> Result<(), String> {
+fn set_microphone(app: tauri::AppHandle, state: tauri::State<'_, NativeState>, enabled: bool) -> Result<(), String> {
     let tx = state.capture_tx.lock().map_err(|e| e.to_string())?.clone().ok_or("Chưa ghi âm")?;
     let mut microphone = state.microphone.lock().map_err(|e| e.to_string())?;
     if !enabled { *microphone = None; }
-    else if microphone.is_none() { *microphone = Some(start_microphone(tx)?); }
+    else if microphone.is_none() { *microphone = Some(start_microphone(&app, tx)?); }
     Ok(())
 }
 
@@ -541,7 +569,7 @@ fn set_system_audio(state: tauri::State<'_, NativeState>, enabled: bool) -> Resu
     let tx = state.capture_tx.lock().map_err(|e| e.to_string())?.clone().ok_or("Chưa ghi âm")?;
     let mut system = state.system.lock().map_err(|e| e.to_string())?;
     if !enabled { *system = None; }
-    else if system.is_none() { *system = Some(start_source(Source::System, "system", tx)?); }
+    else if system.is_none() { *system = Some(start_source(Source::System, "system", tx, None)?); }
     Ok(())
 }
 

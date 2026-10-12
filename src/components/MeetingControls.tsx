@@ -1,7 +1,9 @@
-import { Languages, Mic, MicOff, SlidersHorizontal, Volume2, VolumeX } from 'lucide-react'
+import { Languages, Mic, MicOff, Settings2, SlidersHorizontal, Volume2, VolumeX } from 'lucide-react'
 import type { AppModel } from '../hooks/useAppModel'
 import type { AudioInput, Language } from '../services/types'
 import { Choice, type ChoiceOption } from './Choice'
+import { desktop } from '../services/desktop'
+import { isMac } from '../services/island'
 
 export const audioOptions: ChoiceOption<AudioInput>[] = [{ value: 'system', label: 'Âm thanh máy' }, { value: 'microphone', label: 'Micro' }, { value: 'both', label: 'Micro + âm thanh máy' }]
 export const languageOptions: ChoiceOption<Language>[] = [{ value: 'auto', label: 'Tự động nhận diện → Tiếng Việt' }, { value: 'vi', label: 'Tiếng Việt' }, { value: 'en', label: 'Tiếng Anh → Tiếng Việt' }, { value: 'zh', label: 'Tiếng Trung → Tiếng Việt' }]
@@ -13,6 +15,19 @@ export function TranslateSwitch({ model }: { model: AppModel }) {
 export function MicrophoneToggle({ model }: { model: AppModel }) {
   const label = model.microphoneOn ? 'Tắt micro' : 'Bật micro'
   return <button type="button" className={`pill-btn mic-toggle ${model.microphoneOn ? 'on' : ''}`} onClick={model.toggleMicrophone} aria-pressed={model.microphoneOn} title={model.microphoneOn ? 'Tắt thu giọng nói từ micro' : 'Bật thu giọng nói từ micro'}>{model.microphoneOn ? <Mic size={16}/> : <MicOff size={16}/>}{label}</button>
+}
+
+/** The microphone opened but hears nothing at all: point to where the system lets the app use it. */
+export function MicrophoneSilentNotice({ model }: { model: AppModel }) {
+  if (!model.microphoneSilent) return null
+  return <div className="mic-silent-notice" role="alert"><MicOff size={18}/>
+    <div><strong>Micro không thu được tiếng nào</strong>
+      {isMac
+        ? <p>macOS có thể đang chặn micro. Mở Cài đặt hệ thống → Quyền riêng tư & Bảo mật → Micro và bật VietNote. Nếu đã bật, kiểm tra micro đầu vào trong mục Âm thanh.</p>
+        : <p>Windows có thể đang chặn micro. Trong trang cài đặt micro, bật <b>Microphone access</b> và <b>Let desktop apps access your microphone</b> (Truy cập micro, Cho ứng dụng máy tính dùng micro). Nếu đã bật, kiểm tra micro mặc định trong Settings → System → Sound → Input.</p>}
+    </div>
+    <button type="button" className="pill-btn" onClick={() => void desktop.openPermission('microphone').catch(() => {})}><Settings2 size={15}/>Mở cài đặt micro</button>
+  </div>
 }
 
 export function SystemAudioToggle({ model }: { model: AppModel }) {

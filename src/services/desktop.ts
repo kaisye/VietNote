@@ -111,4 +111,6 @@ export const desktop = {
   openLink: (url: string) => invoke<void>('open_link', { url }),
   onWorker: (callback: (event: WorkerMessage) => void): Promise<UnlistenFn> => listen<WorkerMessage>('worker-message', e => callback(e.payload)),
   onStatus: (callback: (status: string) => void): Promise<UnlistenFn> => listen<string>('worker-status', e => callback(e.payload)),
+  /** True when the microphone delivers only silence (blocked by the system), false once sound arrives. */
+  onMicrophoneSilent: (callback: (silent: boolean) => void): Promise<UnlistenFn> => listen<boolean>('microphone-silent', e => callback(e.payload)),
 }
