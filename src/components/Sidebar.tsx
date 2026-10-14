@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { BookOpen, Fish, Grid2X2, Moon, NotebookPen, Settings, Sparkles, AudioLines, ChevronLeft, FileAudio } from 'lucide-react'
+import { BookOpen, Fish, Grid2X2, Moon, NotebookPen, Settings, Sparkles, AudioLines, ChevronLeft, FileAudio, MonitorPlay } from 'lucide-react'
 import { AccountMenu } from './AccountMenu'
 import { BrandIcon } from './BrandIcon'
 import { NoteFolders } from './NoteFolders'
@@ -8,7 +8,7 @@ import type { Page, Theme } from '../services/types'
 
 const pages: { key: Page; title: string; Icon: typeof Grid2X2 }[] = [
   { key: 'home', title: 'Trang chủ', Icon: Grid2X2 }, { key: 'notes', title: 'Ghi chú', Icon: BookOpen },
-  { key: 'translate', title: 'Phiên dịch', Icon: AudioLines }, { key: 'file', title: 'Dịch file · link', Icon: FileAudio }, { key: 'settings', title: 'Cài đặt', Icon: Settings },
+  { key: 'translate', title: 'Phiên dịch', Icon: AudioLines }, { key: 'watch', title: 'Xem video', Icon: MonitorPlay }, { key: 'file', title: 'Dịch file · link', Icon: FileAudio }, { key: 'settings', title: 'Cài đặt', Icon: Settings },
 ]
 export function Sidebar({ page, setPage, theme, toggleTheme, model, noteScope, setNoteScope }: { page: Page; setPage: (page: Page) => void; theme: Theme; toggleTheme: () => void; model: AppModel; noteScope: string; setNoteScope: (scope: string) => void }) {
   const nextThemeLabel = theme === 'light' ? 'Tối' : theme === 'night' ? 'Vũ trụ' : theme === 'dark-gradient' ? 'Giấy' : theme === 'paper' ? 'Đại dương' : 'Sáng'

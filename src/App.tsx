@@ -7,6 +7,7 @@ import { NotesPage } from './pages/NotesPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { TranslatorPage } from './pages/TranslatorPage'
 import { FilePage } from './pages/FilePage'
+import { WatchPage } from './pages/WatchPage'
 import { UpdateBanner } from './components/UpdateBanner'
 import type { Page, Theme } from './services/types'
 
@@ -23,5 +24,5 @@ export default function App() {
   // A deleted folder falls back to all notes.
   useEffect(() => { if (noteScope !== 'all' && !model.noteGroups.some(group => group.id === noteScope)) setNoteScope('all') }, [model.noteGroups, noteScope])
   useIslandBridge(model, () => setPage('home'))
-  return <div className="app-shell"><Sidebar page={page} setPage={setPage} theme={theme} toggleTheme={toggleTheme} model={model} noteScope={noteScope} setNoteScope={setNoteScope}/><div className="main-stage"><div className="atmosphere"><div className="orb orb-blue"/><div className="orb orb-pink"/><div className="orb orb-lilac"/></div><UpdateBanner busy={model.meetingActive || model.capturing || Boolean(model.savingNoteID)}/><div className="page-stage" key={page}>{page === 'home' ? <HomePage model={model} setPage={setPage}/> : page === 'notes' ? <NotesPage model={model} scope={noteScope}/> : page === 'translate' ? <TranslatorPage model={model}/> : page === 'file' ? <FilePage model={model} setPage={setPage}/> : <SettingsPage model={model} theme={theme} setTheme={setTheme}/>}</div></div></div>
+  return <div className="app-shell"><Sidebar page={page} setPage={setPage} theme={theme} toggleTheme={toggleTheme} model={model} noteScope={noteScope} setNoteScope={setNoteScope}/><div className="main-stage"><div className="atmosphere"><div className="orb orb-blue"/><div className="orb orb-pink"/><div className="orb orb-lilac"/></div><UpdateBanner busy={model.meetingActive || model.capturing || Boolean(model.savingNoteID)}/><div className="page-stage" key={page}>{page === 'home' ? <HomePage model={model} setPage={setPage}/> : page === 'notes' ? <NotesPage model={model} scope={noteScope}/> : page === 'translate' ? <TranslatorPage model={model}/> : page === 'watch' ? <WatchPage model={model}/> : page === 'file' ? <FilePage model={model} setPage={setPage}/> : <SettingsPage model={model} theme={theme} setTheme={setTheme}/>}</div></div></div>
 }

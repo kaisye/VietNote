@@ -5,6 +5,8 @@ import type { AudioInput, Cadence, InterimTranscript, Language, MeetingNote, Not
 import { useNoteChat } from './useNoteChat'
 import { useLiveChat } from './useLiveChat'
 import { requestSignIn } from '../services/credits'
+import { useWatch } from './useWatch'
+import { useDub } from './useDub'
 import { useFileJob } from './useFileJob'
 import { useNoteDocuments } from './useNoteDocuments'
 import { useNoteTitles } from './useNoteTitles'
@@ -75,6 +77,7 @@ export function useAppModel() {
   const asrKeyStatusRef = useRef<'checking' | 'available' | 'missing'>('checking')
   const generationRef = useRef(0)
   const speech = useSpeech(() => generationRef.current)
+  const dub = useDub(speech)
   const languageRef = useRef<Language>(sourceLanguage)
   // Spoken language per utterance id; in auto mode Vietnamese turns get no live translation.
   const spokenLanguageRef = useRef(new Map<string, SpokenLanguage>())
@@ -266,7 +269,8 @@ export function useAppModel() {
   }
 
   const handleWorker = (message: WorkerMessage) => {
-    if (speech.handle(message)) return
+    // A dubbed video's voice comes back from the same voice as live reading.
+    if (dub.handle(message) || speech.handle(message)) return
     switch (message.type) {
       case 'diarization_status':
         setDiarizationReady(message.ready ?? false)
@@ -599,13 +603,14 @@ export function useAppModel() {
     const timer = window.setInterval(() => void refreshAccount(), 60_000)
     return () => window.clearInterval(timer)
   }, [refreshAccount])
+  const watch = useWatch(() => void refreshAccount())
   const fileJob = useFileJob(addNote, () => void refreshAccount(), noteDocuments.write)
 
   return { account, refreshAccount, status, startError, ready, diarizationReady, diarizationStatus, busy, capturing, meetingActive, sourceLanguage, setSourceLanguage, translateForeign, setTranslateForeign, audioInput, setAudioInput, microphoneOn, microphoneSilent: microphoneSilent && microphoneOn && capturing, toggleMicrophone: () => void toggleSource('microphone'), systemAudioOn, toggleSystemAudio: () => void toggleSource('system'), setSources,
     entries, interimTranscripts, translationBlocks, overallSummary, suggestedTitle, titlePending, suggestTitleNow: () => void suggestTitleNow(), summaryStatus, summaryCadence, setSummaryCadence: setCadence,
     cadenceValue, setCadenceValue: setCadenceAmount, notes, noteGroups, savingNoteID, savingNoteGroupID, vietnameseASRStatus, translationStatus,
     canStartMeeting: ready || asrKeyAvailable, canSummarizeNow: meetingActive && !summaryBusy.current && (entries.length > overallSummaryCursor.current || (translating() && entries.length > translationCursorRef.current)),
-    noteChat, noteDocuments, liveChat, speech, start, startMeeting, stop, summarizeNow: () => void summarizeNow(), newNote, addNote, updateNote, deleteNote, deleteNotes, restoreNotes, fileJob, createGroup, renameGroup, deleteGroup, meetingStartedAt: meetingStartedAt.current }
+    noteChat, noteDocuments, liveChat, speech, start, startMeeting, stop, summarizeNow: () => void summarizeNow(), newNote, addNote, updateNote, deleteNote, deleteNotes, restoreNotes, fileJob, createGroup, renameGroup, deleteGroup, watch, dub, meetingStartedAt: meetingStartedAt.current }
 }
 
 export type AppModel = ReturnType<typeof useAppModel>

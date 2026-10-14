@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>VietNote</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  #player { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+</style>
+</head>
+<body>
+<div id="player"></div>
+<script>
+// Hosts the YouTube player for the VietNote app, which frames this page, shows its subtitles on
+// top and steers playback. YouTube refuses to play inside the app's own pages, so it lives here.
+(() => {
+  const params = new URLSearchParams(location.search)
+  const id = params.get('v') || ''
+  const start = Math.max(0, Math.floor(Number(params.get('t')) || 0))
+  // Only playback position leaves this page, so any parent may listen.
+  const post = message => parent.postMessage({ vietnotePlayer: true, ...message }, '*')
+  if (!/^[\w-]{11}$/.test(id)) { post({ type: 'error', code: 2 }); return }
+
+  let player = null
+  let ready = false
+  /** Asked for before the player was ready, applied once it is. */
+  let volume = 100
+  const tick = () => {
+    if (!player || !player.getCurrentTime) return
+    post({ type: 'time', time: player.getCurrentTime(), playing: player.getPlayerState() === 1 })
+  }
+  // VietNote shows its own subtitles; YouTube's, turned on by the viewer's preferences, would sit underneath.
+  const hideCaptions = () => {
+    try { player.setOption('captions', 'track', {}); player.unloadModule('captions'); player.unloadModule('cc') } catch { /* not loaded yet */ }
+  }
+  window.onYouTubeIframeAPIReady = () => {
+    player = new YT.Player('player', {
+      videoId: id,
+      playerVars: { autoplay: 1, start, playsinline: 1, rel: 0, fs: 0, iv_load_policy: 3, cc_load_policy: 0, origin: location.origin },
+      events: {
+        onReady: () => { ready = true; player.setVolume(volume); hideCaptions(); post({ type: 'ready', duration: player.getDuration() }); setInterval(tick, 100) },
+        onApiChange: hideCaptions,
+        onStateChange: event => { if (event.data === 1) hideCaptions(); tick() },
+        onError: event => post({ type: 'error', code: event.data }),
+      },
+    })
+  }
+  window.addEventListener('message', event => {
+    if (event.source !== parent || !event.data || typeof event.data !== 'object') return
+    const { command, time } = event.data
+    if (command === 'volume' && Number.isFinite(event.data.value)) volume = Math.min(100, Math.max(0, event.data.value))
+    if (!ready) return
+    if (command === 'play') player.playVideo()
+    else if (command === 'pause') player.pauseVideo()
+    else if (command === 'toggle') player.getPlayerState() === 1 ? player.pauseVideo() : player.playVideo()
+    else if (command === 'seek' && Number.isFinite(time)) { player.seekTo(Math.max(0, time), true); tick() }
+    // Lowered while the app reads a Vietnamese dub over the video.
+    else if (command === 'volume') player.setVolume(volume)
+  })
+  const script = document.createElement('script')
+  script.src = 'https://www.youtube.com/iframe_api'
+  document.head.appendChild(script)
+})()
+</script>
+</body>
+</html>

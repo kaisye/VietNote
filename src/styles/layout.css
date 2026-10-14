@@ -910,3 +910,50 @@
 /* Before a meeting, the start button and the features sit centred in the space under the header. */
 .home-wrap:has(> .idle-meeting) { min-height:100%; display:flex; flex-direction:column; }
 .home-wrap > .idle-meeting { flex:1; justify-content:center; padding-bottom:24px; }
+
+/* Watching a video with subtitles translated ahead. */
+.watch-page .link-form { margin-top:18px; }
+.watch-layout { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:18px; margin-top:18px; align-items:start; }
+@media (max-width:1240px) { .watch-layout { grid-template-columns:minmax(0,1fr); } .watch-lines { max-height:420px; } }
+.watch-stage { display:flex; flex-direction:column; gap:10px; min-width:0; }
+.watch-screen { position:relative; aspect-ratio:16/9; border-radius:18px; overflow:hidden; background:#000; box-shadow:0 14px 30px var(--shadow); }
+.watch-frame { position:absolute; inset:0; width:100%; height:100%; border:0; }
+/* Above YouTube's control bar, and out of the way of its clicks. */
+.watch-caption { position:absolute; left:6%; right:6%; bottom:64px; display:flex; flex-direction:column; align-items:center; gap:4px; text-align:center; pointer-events:none; }
+.watch-caption p { max-width:100%; padding:3px 12px; border-radius:8px; background:rgba(8,8,16,.72); color:#fff; line-height:1.35; text-wrap:balance; box-decoration-break:clone; -webkit-box-decoration-break:clone; }
+.watch-caption-vi { font-weight:650; }
+.watch-caption-source { font-size:.72em; color:rgba(255,255,255,.86) !important; }
+.watch-caption-source.faint { font-size:.8em; color:rgba(255,255,255,.7) !important; font-style:italic; }
+.watch-waiting { position:absolute; top:12px; left:12px; display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:999px; background:rgba(8,8,16,.72); color:#fff; font-size:12px; pointer-events:none; }
+.watch-failure { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:24px; text-align:center; color:#fff; background:rgba(8,8,16,.86); }
+.watch-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
+.watch-progress { display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:12px; }
+.watch-icon { display:inline-grid; place-items:center; width:34px; height:34px; border-radius:10px; border:1px solid var(--border); background:var(--glass); color:var(--ink); transition:border-color .15s ease, background .15s ease; }
+.watch-icon:hover { border-color:var(--accent); }
+.watch-alert { display:flex; align-items:center; gap:12px; justify-content:space-between; padding:10px 14px; border-radius:12px; border:1px solid color-mix(in srgb, var(--danger, #e5484d) 40%, transparent); color:var(--danger, #e5484d); font-size:13px; }
+.watch-lines { display:flex; flex-direction:column; min-height:0; max-height:calc(100vh - 220px); overflow:hidden; }
+.watch-lines header { display:flex; flex-direction:column; gap:2px; padding:14px 16px 10px; border-bottom:1px solid var(--border); }
+.watch-lines header strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.watch-lines header small { color:var(--muted); }
+.watch-lines ol { list-style:none; margin:0; padding:6px; overflow-y:auto; }
+.watch-lines li button { display:flex; gap:10px; width:100%; padding:8px 10px; border:0; border-radius:10px; background:transparent; color:var(--ink); text-align:left; transition:background .15s ease; }
+.watch-lines li button:hover { background:rgba(var(--tint),.1); }
+.watch-lines li.active button { background:rgba(var(--tint),.2); }
+.watch-lines time { flex:none; width:40px; padding-top:2px; color:var(--muted); font-size:11px; font-variant-numeric:tabular-nums; }
+.watch-lines li span { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.watch-lines li b { font-weight:600; font-size:13px; line-height:1.4; }
+.watch-lines li small { color:var(--muted); line-height:1.4; }
+/* Full screen: the video fills the window; subtitles grow with it. The page's entry animation
+   would otherwise keep the stage inside the page, and the sidebar beside it. */
+.watch-theater .sidebar { display:none; }
+.watch-theater .animate-in { animation:none; }
+.watch-stage.theater { position:fixed; inset:0; z-index:1000; padding:0; gap:0; background:#000; }
+.watch-stage.theater .watch-screen { flex:1; aspect-ratio:auto; border-radius:0; box-shadow:none; }
+.watch-stage.theater .watch-caption { bottom:72px; zoom:1.35; }
+.watch-stage.theater .watch-toolbar { padding:8px 14px; background:#0b0b12; color:#fff; }
+.watch-stage.theater .watch-alert { display:none; }
+.watch-relisten { align-self:flex-start; margin-top:6px; padding:0; border:0; background:none; color:var(--accent); font-size:12px; font-weight:650; }
+.watch-relisten:hover { text-decoration:underline; }
+.watch-listen { display:flex; flex-direction:column; align-items:flex-start; gap:10px; padding:16px; }
+.watch-listen p { color:var(--muted); font-size:13px; }
+.watch-listen .file-progress-bar { width:100%; }

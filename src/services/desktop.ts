@@ -1,6 +1,7 @@
 import { invoke, Channel } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { FileToken } from './fileTranscript'
+import type { SpeechLine, VideoCaptions } from './youtube'
 import type { AudioChunk, AudioInput, DocumentKind, DocumentLength, Language, SpokenLanguage, MeetingNote, NoteGroup, StructuredMeetingSummary, TranscriptSegment, WorkerMessage } from './types'
 
 export interface NoteChatRequest {
@@ -100,6 +101,12 @@ export const desktop = {
     return invoke<AudioFile>('fetch_link_audio', { url, onProgress: channel })
   },
   cancelLinkAudio: () => invoke<void>('cancel_link_audio'),
+  /** A YouTube video's captions; rejects with "not_youtube", "no_captions" or "not_embeddable" when it cannot be watched with subtitles. */
+  youtubeCaptions: (url: string) => invoke<VideoCaptions>('youtube_captions', { url }),
+  /** One Vietnamese line per caption line. */
+  translateCaptions: (lines: string[], language: string, context: string[]) => invoke<string[]>('translate_captions', { lines, language, context }),
+  /** Splits recognised words into subtitles and translates them. */
+  translateSpeech: (words: string[], language: string, context: string[]) => invoke<SpeechLine[]>('translate_speech', { words, language, context }),
   fileJobStatus: (jobId: string) => invoke<FileJobStatus>('file_job_status', { jobId }),
   fileJobCleanup: (jobId: string) => invoke<void>('file_job_cleanup', { jobId }),
   fileJobCancel: (jobId: string) => invoke<void>('file_job_cancel', { jobId }),

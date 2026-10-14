@@ -169,7 +169,21 @@ export function useSpeech(currentGeneration: () => number) {
     enabledRef.current = value; setEnabledState(value)
     try { localStorage.setItem('speakTranslation', String(value)) } catch { /* private window */ }
     if (value) load()
-    else { clear(); void desktop.sendWorker({ type: 'tts_disable' }).catch(() => {}) }
+    else { clear(); if (!heldRef.current) void desktop.sendWorker({ type: 'tts_disable' }).catch(() => {}) }
+  }
+  /** Set while something other than live reading (a dubbed video) needs the voice loaded. */
+  const heldRef = useRef(false)
+  const hold = (value: boolean) => {
+    if (heldRef.current === value) return
+    heldRef.current = value
+    if (value) { if (stateRef.current !== 'ready' && stateRef.current !== 'loading') load() }
+    else if (!enabledRef.current) void desktop.sendWorker({ type: 'tts_disable' }).catch(() => {})
+  }
+  /** Reads `text` for someone other than live reading; its audio comes back under `id`. */
+  const synthesize = (id: string, text: string) => {
+    if (!installed() || stateRef.current !== 'ready' || !text.trim()) return false
+    void desktop.sendWorker({ type: 'synthesize', id, generation: currentGeneration(), text, speaker: null }).catch(() => {})
+    return true
   }
   const setRate = (value: number) => {
     rateRef.current = value; setRateState(value)
@@ -179,7 +193,7 @@ export function useSpeech(currentGeneration: () => number) {
   /** A restarted worker forgets the voice; load it again if speech is on. */
   const onConnected = (canSpeak: boolean) => {
     runtimeRef.current = canSpeak; setRuntime(canSpeak)
-    if (enabledRef.current) load()
+    if (enabledRef.current || heldRef.current) load()
     fetchInBackground()
   }
   /** Picking a voice also turns speech on: that is what the choice is for. */
@@ -248,6 +262,6 @@ export function useSpeech(currentGeneration: () => number) {
 
   const ready = runtime && Boolean(pack?.path)
   return { available: runtime && Boolean(pack?.available), installed: ready, sizeBytes: pack?.sizeBytes ?? 0, progress, packError, download, cancelDownload,
-    enabled: enabled && ready, setEnabled, state, message, rate, setRate, voice, setVoice, mode, setMode, translation, speak, handle, clear, onConnected, voiced }
+    enabled: enabled && ready, setEnabled, hold, synthesize, state, message, rate, setRate, voice, setVoice, mode, setMode, translation, speak, handle, clear, onConnected, voiced }
 }
 export type Speech = ReturnType<typeof useSpeech>
