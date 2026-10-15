@@ -35,7 +35,7 @@ pub(crate) struct LinkProgress {
     percent: u8,
 }
 
-fn tools_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn tools_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join("tools"))
 }
 
@@ -43,7 +43,7 @@ fn downloads_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(app.path().app_cache_dir().map_err(|e| e.to_string())?.join("links"))
 }
 
-fn command(tool: &Path) -> Command {
+pub(crate) fn command(tool: &Path) -> Command {
     #[cfg_attr(not(target_os = "windows"), allow(unused_mut))]
     let mut command = Command::new(tool);
     #[cfg(target_os = "windows")]
@@ -55,7 +55,7 @@ fn command(tool: &Path) -> Command {
 }
 
 /// The downloader, fetched and verified on first use, updated once it is a week old.
-async fn ensure_tool(dir: &Path, progress: &impl Fn(LinkProgress)) -> Result<PathBuf, String> {
+pub(crate) async fn ensure_tool(dir: &Path, progress: &impl Fn(LinkProgress)) -> Result<PathBuf, String> {
     let tool = dir.join(TOOL);
     if tool.is_file() {
         let age = std::fs::metadata(&tool).and_then(|m| m.modified()).ok().and_then(|at| at.elapsed().ok());
@@ -114,7 +114,7 @@ fn expected_sha256(sums: &str, name: &str) -> Option<String> {
 }
 
 /// A message for people from the downloader's last error line.
-fn friendly_error(error: &str) -> String {
+pub(crate) fn friendly_error(error: &str) -> String {
     let lower = error.to_lowercase();
     let message = if lower.contains("unsupported url") || lower.contains("is not a valid url") {
         "Link này không chứa video hay âm thanh nào VietNote đọc được."

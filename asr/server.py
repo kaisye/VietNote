@@ -161,6 +161,11 @@ def segment_size(text):
 
 SONIOX_URL = 'wss://stt-rt.soniox.com/transcribe-websocket'
 SEND_TIMEOUT = 10.0  # seconds a websocket write may wait on a congested uplink
+# Native capture normally hands over one chunk every 20 ms. Keep only a short
+# real-time window while a key/WebSocket is being opened: stale speech is less
+# useful than the words being spoken now after a reconnect.
+MAX_AUDIO_BACKLOG_CHUNKS = 250       # about 5 seconds
+QUEUE_WARNING_INTERVAL = 5.0
 SONIOX_MODEL = 'stt-rt-v5'
 SONIOX_HINTS = {'vi': ['vi', 'en'], 'en': ['en'], 'zh': ['zh'], 'auto': ['vi', 'en', 'zh']}
 # Soniox streams translation chunk by chunk with no end marker, so an utterance's
@@ -318,7 +323,8 @@ class SonioxStream:
         self.echo = echo
         self.echoed = {}           # microphone utterance id -> spoken language, dropped as echo
         self.translate = language in ('en', 'zh', 'auto')
-        self.audio = queue.Queue(maxsize=500)
+        self.audio = queue.Queue(maxsize=MAX_AUDIO_BACKLOG_CHUNKS)
+        self.last_queue_warning = 0.0
         # PCM sent on this connection, newest PITCH_HISTORY_SECONDS, to measure speakers' pitch.
         self.history = bytearray()
         self.history_ms = 0.0
@@ -350,7 +356,20 @@ class SonioxStream:
         try:
             self.audio.put_nowait((pcm, captured_at))
         except queue.Full:
-            self.send(dict(type='warning', message='ASR audio queue full; dropped a chunk.'))
+            # Keep the live edge. Dropping the newest chunk made a recovered
+            # connection transcribe increasingly stale audio before catching up.
+            try: self.audio.get_nowait()
+            except queue.Empty: pass
+            try: self.audio.put_nowait((pcm, captured_at))
+            except queue.Full: return
+            now = time.monotonic()
+            if now - self.last_queue_warning >= QUEUE_WARNING_INTERVAL:
+                self.last_queue_warning = now
+                self.send(dict(type='warning', message='ASR audio backlog full; skipped old audio.'))
+
+    def report_status(self, state):
+        self.send(dict(type='asr_status', source=self.source, state=state,
+                       generation=self.generation))
 
     def config(self, api_key=None):
         config = {
@@ -576,6 +595,7 @@ class SonioxStream:
             ws = None
             api_key, grant_id = self.api_key, None
             try:
+                self.report_status('connecting')
                 if self.broker:
                     # A key reserves credit: take one only once there is audio to send.
                     while self.audio.empty() and not self.closed.wait(.05):
@@ -585,6 +605,7 @@ class SonioxStream:
                     api_key, grant_id = self.broker.acquire(self.source)
                 ws = self.connect(api_key)
                 log(f'[ASR] {self.source} connected')
+                self.report_status('connected')
                 self.origin = None
                 self.latest_captured_at = None
                 self.history = bytearray()
@@ -650,6 +671,7 @@ class SonioxStream:
             except Exception as exc:
                 if not self.closed.is_set():
                     log(f'[ASR] {self.source} connection error: {str(exc).replace(api_key or "-", "[redacted]")}')
+                    self.report_status('reconnecting')
                     self.send(dict(type='warning', message='ASR reconnecting…'))
                     with self.lock:
                         # Token clocks restart with the next connection.

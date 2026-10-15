@@ -9,6 +9,7 @@ import { islandEnabled, islandEvents, isMac, saveIslandEnabled, shortcutLabel } 
 
 const themes: { key: Theme; label: string; hint: string }[] = [
   { key: 'light', label: 'Sáng', hint: 'Nền trắng hồng, ánh xanh băng và kính lavender.' },
+  { key: 'night', label: 'Tối', hint: 'Đêm chàm tím, ánh xanh hồng, kính mờ, điểm nhấn xanh dương.' },
   { key: 'dark-gradient', label: 'Vũ trụ', hint: 'Không gian vũ trụ: tinh vân, sao và thiên thạch.' },
   { key: 'paper', label: 'Giấy', hint: 'Giấy ngà chấm lưới, chữ màu mực.' },
   { key: 'ocean', label: 'Đại dương', hint: 'Nước biển ngọc, kính mờ và điểm nhấn san hô.' },

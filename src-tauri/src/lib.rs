@@ -10,6 +10,8 @@ mod playback;
 mod stretch;
 mod voice_pack;
 mod writer;
+mod han;
+mod youtube;
 use base64::Engine;
 use clipclip::{start_with_tap, Config, Recording, Source};
 use serde::{Deserialize, Serialize};
@@ -22,7 +24,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager};
 
 /// Console children of a GUI app open their own console window on Windows; keep them hidden.
@@ -46,10 +48,57 @@ struct NativeState {
     // Set while a recording runs; new sources send their audio through it.
     capture_tx: Mutex<Option<mpsc::SyncSender<(String, Vec<f32>, f64)>>>,
     capture_forwarder: Mutex<Option<std::thread::JoinHandle<()>>>,
+    capture_epoch: Arc<AtomicUsize>,
+    microphone_health: Arc<Mutex<CaptureHealth>>,
+    system_health: Arc<Mutex<CaptureHealth>>,
     pending_audio: Arc<AtomicUsize>,
     worker_epoch: Arc<AtomicUsize>,
     // The worker announces itself once; a reloaded page asks for it again.
     connected: Arc<Mutex<Option<Value>>>,
+}
+
+struct CaptureHealth {
+    active: bool,
+    started: Instant,
+    samples: u64,
+    peak: f32,
+    level_peak: f32,
+    silent_reported: bool,
+}
+
+impl Default for CaptureHealth {
+    fn default() -> Self {
+        Self { active: false, started: Instant::now(), samples: 0, peak: 0.0, level_peak: 0.0, silent_reported: false }
+    }
+}
+
+impl CaptureHealth {
+    fn start(&mut self) {
+        self.active = true;
+        self.started = Instant::now();
+        self.samples = 0;
+        self.peak = 0.0;
+        self.level_peak = 0.0;
+        self.silent_reported = false;
+    }
+
+    fn stop(&mut self) { self.active = false; }
+
+    fn feed(&mut self, samples: &[f32]) {
+        self.samples += samples.len() as u64;
+        let peak = samples.iter().fold(0.0_f32, |peak, sample| peak.max(sample.abs()));
+        self.peak = self.peak.max(peak);
+        self.level_peak = self.level_peak.max(peak);
+    }
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AudioSourceStatus {
+    source: &'static str,
+    state: &'static str,
+    message: String,
+    level: Option<f32>,
 }
 
 /// Developer override: a provider key in the environment bypasses the VietNote server.
@@ -500,13 +549,26 @@ impl SilenceWatch {
     }
 }
 
-fn start_source(source: Source, label: &'static str, tx: mpsc::SyncSender<(String, Vec<f32>, f64)>, mut watch: Option<SilenceWatch>) -> Result<Recording, String> {
+fn start_source(
+    source: Source,
+    label: &'static str,
+    tx: mpsc::SyncSender<(String, Vec<f32>, f64)>,
+    mut watch: Option<SilenceWatch>,
+    health: Arc<Mutex<CaptureHealth>>,
+) -> Result<Recording, String> {
+    if let Ok(mut value) = health.lock() { value.start(); }
     let config = Config { source, sample_rate: 16_000, segment: Duration::from_secs(30), ..Config::default() };
-    start_with_tap(config, |_| {}, Box::new(move |frames| {
+    let tap_health = health.clone();
+    let result = start_with_tap(config, |_| {}, Box::new(move |frames| {
         if let Some(watch) = watch.as_mut() { watch.feed(frames.samples, frames.sample_rate); }
+        if let Ok(mut value) = tap_health.lock() { value.feed(frames.samples); }
         let captured = frames.captured_at.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs_f64();
         let _ = tx.try_send((label.to_string(), frames.samples.to_vec(), captured));
-    })).map_err(|e| match e {
+    }));
+    if result.is_err() {
+        if let Ok(mut value) = health.lock() { value.stop(); }
+    }
+    result.map_err(|e| match e {
         // A desktop without a microphone (or with every output disabled) is common on Windows.
         clipclip::Error::NoDevice(_) if label == "microphone" => "không tìm thấy micro. Hãy cắm micro hoặc chọn nguồn \"Âm thanh máy\".".to_string(),
         clipclip::Error::NoDevice(_) => "không tìm thấy loa hay tai nghe đang bật để thu âm thanh máy.".to_string(),
@@ -518,10 +580,75 @@ fn capturing(state: &tauri::State<'_, NativeState>) -> Result<bool, String> {
     Ok(state.capture_tx.lock().map_err(|e| e.to_string())?.is_some())
 }
 
-fn start_microphone(app: &tauri::AppHandle, tx: mpsc::SyncSender<(String, Vec<f32>, f64)>) -> Result<Recording, String> {
+fn start_microphone(app: &tauri::AppHandle, tx: mpsc::SyncSender<(String, Vec<f32>, f64)>, health: Arc<Mutex<CaptureHealth>>) -> Result<Recording, String> {
     #[cfg(target_os = "macos")]
     ensure_microphone_access()?;
-    start_source(Source::Mic, "microphone", tx, Some(SilenceWatch::new(app)))
+    start_source(Source::Mic, "microphone", tx, Some(SilenceWatch::new(app)), health)
+}
+
+const SILENT_SYSTEM_AUDIO_SECONDS: f64 = 5.0;
+
+fn take_stopped_recording(slot: &Mutex<Option<Recording>>) -> Option<String> {
+    let recording = {
+        let mut slot = slot.lock().ok()?;
+        if slot.as_ref().is_some_and(Recording::is_running) { return None; }
+        slot.take()
+    }?;
+    Some(recording.stop().err().map(|error| error.to_string()).unwrap_or_else(|| "luồng thu âm đã dừng".into()))
+}
+
+fn emit_source_status(app: &tauri::AppHandle, source: &'static str, state: &'static str, message: impl Into<String>, level: Option<f32>) {
+    let message = message.into();
+    if state != "level" {
+        if let Ok(logs) = app_data(app) {
+            let _ = fs::create_dir_all(logs.join("logs"));
+            if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(logs.join("logs/worker.log")) {
+                let _ = writeln!(file, "[AUDIO SOURCE] {source} {state}: {message}");
+            }
+        }
+    }
+    let _ = app.emit("audio-source-status", AudioSourceStatus { source, state, message, level });
+}
+
+fn start_capture_monitor(app: tauri::AppHandle, epoch: usize) {
+    std::thread::Builder::new().name("audio-health".into()).spawn(move || loop {
+        std::thread::sleep(Duration::from_millis(500));
+        let state = app.state::<NativeState>();
+        if state.capture_epoch.load(Ordering::SeqCst) != epoch { break; }
+
+        for (source, recording, health) in [
+            ("microphone", &state.microphone, &state.microphone_health),
+            ("system", &state.system, &state.system_health),
+        ] {
+            if let Some(error) = take_stopped_recording(recording) {
+                if let Ok(mut value) = health.lock() { value.stop(); }
+                emit_source_status(&app, source, "error", format!("Nguồn âm thanh đã dừng: {error}"), None);
+            }
+        }
+
+        for (source, health) in [("microphone", &state.microphone_health), ("system", &state.system_health)] {
+            let level = health.lock().ok().and_then(|mut health| {
+                if !health.active { return None; }
+                let peak = health.level_peak;
+                health.level_peak = 0.0;
+                Some(peak)
+            });
+            if let Some(level) = level { emit_source_status(&app, source, "level", "", Some(level)); }
+        }
+
+        let event = state.system_health.lock().ok().and_then(|mut health| {
+            if !health.active || health.started.elapsed().as_secs_f64() < SILENT_SYSTEM_AUDIO_SECONDS { return None; }
+            let silent = health.peak <= 1e-6;
+            if silent && !health.silent_reported {
+                health.silent_reported = true;
+                Some(("silent", "Chưa nhận được tín hiệu âm thanh máy. Hãy phát thử âm thanh và kiểm tra quyền hoặc thiết bị đầu ra."))
+            } else if !silent && health.silent_reported {
+                health.silent_reported = false;
+                Some(("active", "Đã nhận được âm thanh máy."))
+            } else { None }
+        });
+        if let Some((status, message)) = event { emit_source_status(&app, "system", status, message, None); }
+    }).ok();
 }
 
 #[tauri::command]
@@ -532,8 +659,17 @@ fn start_capture(app: tauri::AppHandle, state: tauri::State<'_, NativeState>, so
     let (tx, rx) = mpsc::sync_channel::<(String, Vec<f32>, f64)>(25);
     let writer = state.writer.clone();
     let pending = state.pending_audio.clone();
-    let microphone = if source == "system" { None } else { Some(start_microphone(&app, tx.clone())?) };
-    let system = if source == "microphone" { None } else { Some(start_source(Source::System, "system", tx.clone(), None)?) };
+    let microphone = if source == "system" { None } else { Some(start_microphone(&app, tx.clone(), state.microphone_health.clone())?) };
+    let system = if source == "microphone" { None } else {
+        match start_source(Source::System, "system", tx.clone(), None, state.system_health.clone()) {
+            Ok(recording) => Some(recording),
+            Err(error) => {
+                drop(microphone);
+                if let Ok(mut health) = state.microphone_health.lock() { health.stop(); }
+                return Err(error);
+            }
+        }
+    };
     *state.microphone.lock().map_err(|e| e.to_string())? = microphone;
     *state.system.lock().map_err(|e| e.to_string())? = system;
     *slot = Some(tx);
@@ -551,6 +687,8 @@ fn start_capture(app: tauri::AppHandle, state: tauri::State<'_, NativeState>, so
         }
     });
     *state.capture_forwarder.lock().map_err(|e| e.to_string())? = Some(forwarder);
+    let epoch = state.capture_epoch.fetch_add(1, Ordering::SeqCst) + 1;
+    start_capture_monitor(app, epoch);
     Ok(())
 }
 
@@ -559,8 +697,11 @@ fn start_capture(app: tauri::AppHandle, state: tauri::State<'_, NativeState>, so
 fn set_microphone(app: tauri::AppHandle, state: tauri::State<'_, NativeState>, enabled: bool) -> Result<(), String> {
     let tx = state.capture_tx.lock().map_err(|e| e.to_string())?.clone().ok_or("Chưa ghi âm")?;
     let mut microphone = state.microphone.lock().map_err(|e| e.to_string())?;
-    if !enabled { *microphone = None; }
-    else if microphone.is_none() { *microphone = Some(start_microphone(&app, tx)?); }
+    if !enabled {
+        *microphone = None;
+        if let Ok(mut health) = state.microphone_health.lock() { health.stop(); }
+    }
+    else if microphone.is_none() { *microphone = Some(start_microphone(&app, tx, state.microphone_health.clone())?); }
     Ok(())
 }
 
@@ -569,13 +710,19 @@ fn set_microphone(app: tauri::AppHandle, state: tauri::State<'_, NativeState>, e
 fn set_system_audio(state: tauri::State<'_, NativeState>, enabled: bool) -> Result<(), String> {
     let tx = state.capture_tx.lock().map_err(|e| e.to_string())?.clone().ok_or("Chưa ghi âm")?;
     let mut system = state.system.lock().map_err(|e| e.to_string())?;
-    if !enabled { *system = None; }
-    else if system.is_none() { *system = Some(start_source(Source::System, "system", tx, None)?); }
+    if !enabled {
+        *system = None;
+        if let Ok(mut health) = state.system_health.lock() { health.stop(); }
+    }
+    else if system.is_none() { *system = Some(start_source(Source::System, "system", tx, None, state.system_health.clone())?); }
     Ok(())
 }
 
 /// Stops every source; the forwarder ends once the last sender is dropped.
 fn end_capture(state: &tauri::State<'_, NativeState>) -> Result<(), String> {
+    state.capture_epoch.fetch_add(1, Ordering::SeqCst);
+    if let Ok(mut health) = state.system_health.lock() { health.stop(); }
+    if let Ok(mut health) = state.microphone_health.lock() { health.stop(); }
     *state.system.lock().map_err(|e| e.to_string())? = None;
     *state.microphone.lock().map_err(|e| e.to_string())? = None;
     *state.capture_tx.lock().map_err(|e| e.to_string())? = None;
@@ -754,7 +901,8 @@ async fn summarize_segments(segments: Vec<TranscriptSegment>, previous_summary: 
         format!("{context}TRANSCRIPT CÓ ID:\n{transcript}")
     };
     let raw = ai_completion( &system, user, 1800, true).await?;
-    let value = parse_json_object(&raw)?;
+    let mut value = parse_json_object(&raw)?;
+    han::repair_json(&mut value).await;
     let mut summary: MeetingSummary = serde_json::from_value(value).map_err(|error| format!("Summary không đúng schema: {error}"))?;
     map_evidence(&mut summary, &real_of);
     Ok(validate_summary_with(summary, &allowed))
@@ -772,7 +920,7 @@ async fn suggest_title(transcript: String) -> Result<String, String> {
         40,
         false,
     ).await?;
-    Ok(clean_title(raw.lines().next().unwrap_or_default()))
+    Ok(clean_title(&han::repair(raw.lines().next().unwrap_or_default().to_string()).await))
 }
 
 #[tauri::command]
@@ -787,12 +935,14 @@ async fn translate_text(text: String, source_language: String, previous_context:
     } else {
         format!("Đoạn ngay trước đó (chỉ dùng làm ngữ cảnh, không dịch lại):\n{previous_context}")
     };
-    ai_completion(
+    let translated = ai_completion(
         &format!("Bạn là biên tập viên bản ghi và phiên dịch viên từ {source} sang tiếng Việt. Đầu vào là một đoạn ghép từ nhiều kết quả ASR liên tiếp. Hãy dùng toàn bộ ngữ cảnh để sửa các lỗi nhận diện rõ ràng, nối lại câu bị ngắt, thêm dấu câu, rồi dịch cả đoạn sang tiếng Việt tự nhiên. Giữ nguyên tên riêng, số liệu và thuật ngữ chuyên môn. Không bịa nội dung. Chỉ trả về bản dịch tiếng Việt hoàn chỉnh của ĐOẠN CẦN DỊCH; không dịch lại ngữ cảnh và không giải thích."),
         format!("{context}\n\nĐOẠN CẦN DỊCH:\n{text}"),
         300,
         false,
-    ).await
+    ).await?;
+    // A Chinese source is where stray Hán tự come from most.
+    Ok(han::repair(translated).await)
 }
 
 #[tauri::command]
@@ -958,7 +1108,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(island::shortcut_plugin())
         .manage(NativeState::default())
-        .invoke_handler(tauri::generate_handler![load_notes, save_notes, account::account_status, account::account_signed_in, account::account_send_code, account::account_offers, account::account_buy, account::account_order_status, account_verify, account_sign_out, start_worker, stop_worker, send_worker, start_capture, stop_capture, set_microphone, set_system_audio, note_chat::ask_note, summarize_segments, suggest_title, translate_text, open_permission, open_link, save_export, reveal_file, print_page, #[cfg(target_os = "macos")] save_pdf, file_job::pick_audio_file, file_job::file_job_start, file_job::file_job_upload, file_job::file_job_status, file_job::file_job_cleanup, file_job::file_job_cancel, link_audio::fetch_link_audio, link_audio::cancel_link_audio, writer::write_document, diarization_model_status, download_diarization_model, cancel_diarization_download, remove_diarization_model, island::island_screens, island::island_set_frame, island::island_set_visible, island::island_focus, island::island_release, island::island_open_main, island::island_cursor, island::island_ignore_cursor, playback::play_audio, playback::stop_audio, app_audio::audio_apps, app_audio::set_excluded_apps, voice_pack_status, download_voice_pack, cancel_voice_pack_download, remove_voice_pack])
+        .invoke_handler(tauri::generate_handler![load_notes, save_notes, account::account_status, account::account_signed_in, account::account_send_code, account::account_offers, account::account_buy, account::account_order_status, account::watch_charge, account_verify, account_sign_out, start_worker, stop_worker, send_worker, start_capture, stop_capture, set_microphone, set_system_audio, note_chat::ask_note, summarize_segments, suggest_title, translate_text, open_permission, open_link, save_export, reveal_file, print_page, #[cfg(target_os = "macos")] save_pdf, file_job::pick_audio_file, file_job::file_job_start, file_job::file_job_upload, file_job::file_job_status, file_job::file_job_cleanup, file_job::file_job_cancel, link_audio::fetch_link_audio, link_audio::cancel_link_audio, youtube::youtube_captions, youtube::translate_captions, youtube::translate_speech, writer::write_document, diarization_model_status, download_diarization_model, cancel_diarization_download, remove_diarization_model, island::island_screens, island::island_set_frame, island::island_set_visible, island::island_focus, island::island_release, island::island_open_main, island::island_cursor, island::island_ignore_cursor, playback::play_audio, playback::stop_audio, app_audio::audio_apps, app_audio::set_excluded_apps, voice_pack_status, download_voice_pack, cancel_voice_pack_download, remove_voice_pack])
         .on_window_event(|window, event| {
             // Closing the main window quits VietNote; the island goes with it.
             if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {

@@ -1,5 +1,5 @@
 import { desktop, type NoteChatAnswer } from './desktop'
-import { formatStructuredSummary } from './notes'
+import { summaryText } from './notes'
 import type { ChatImage } from './chatImages'
 import type { MeetingNote, NoteChatMessage } from './types'
 
@@ -30,7 +30,7 @@ export function noteChatHistory(messages: NoteChatMessage[]) {
 export function askNoteQuestion(note: MeetingNote, question: string, onProgress?: (answer: NoteChatAnswer) => void, images: ChatImage[] = []) {
   return desktop.askNote({
     title: note.title,
-    summary: note.structuredSummary ? formatStructuredSummary(note.structuredSummary) : note.summary,
+    summary: summaryText(note),
     transcript: note.transcriptSegments?.length ? '' : note.transcript,
     segments: note.transcriptSegments ?? [],
     history: noteChatHistory(note.chatMessages ?? []),

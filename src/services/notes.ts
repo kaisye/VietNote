@@ -1,3 +1,4 @@
+import { withoutEvidence } from './summaryMarkdown'
 import type { NoteSource, MeetingNote, NoteGroup, StructuredMeetingSummary, TimedTranslation, TranscriptSegment, Subtitle } from './types'
 
 export const emptyStructuredSummary = (): StructuredMeetingSummary => ({
@@ -82,9 +83,15 @@ export function formatTime(date: string, datePart = true): string {
   return Number.isNaN(value.getTime()) ? date : new Intl.DateTimeFormat('vi-VN', datePart ? { dateStyle: 'medium', timeStyle: 'short' } : { timeStyle: 'short' }).format(value)
 }
 
+/** The summary as reading text, for copying and the AI: the user's Markdown once they edited it. */
+export function summaryText(note: MeetingNote): string {
+  if (note.summaryMarkdown !== undefined) return withoutEvidence(note.summaryMarkdown).trim()
+  return note.structuredSummary ? formatStructuredSummary(note.structuredSummary) : note.summary.trim()
+}
+
 /** Plain text for "copy content": title, meeting time and the note body. */
 export function noteContentText(note: MeetingNote): string {
-  const body = note.structuredSummary ? formatStructuredSummary(note.structuredSummary) : note.summary.trim()
+  const body = summaryText(note)
   return [note.title || 'Chưa có tiêu đề', formatTime(note.createdAt), body].filter(Boolean).join('\n\n')
 }
 
@@ -118,7 +125,7 @@ export const searchKey = (text: string) => text.normalize('NFD').replace(/\p{Dia
 export function noteMatches(note: MeetingNote, query: string): boolean {
   const words = searchKey(query).split(/\s+/).filter(Boolean)
   if (!words.length) return true
-  const text = searchKey([note.title, note.summary, note.structuredSummary?.tldr ?? '', note.transcript, ...(note.documents ?? []).map(document => document.markdown)].join('\n'))
+  const text = searchKey([note.title, note.summary, note.summaryMarkdown ?? note.structuredSummary?.tldr ?? '', note.transcript, ...(note.documents ?? []).map(document => document.markdown)].join('\n'))
   return words.every(word => text.includes(word))
 }
 

@@ -158,6 +158,7 @@ pub async fn ai_complete(system: &str, user: String, max_tokens: u32, json: bool
 }
 
 pub async fn ai_complete_with_metadata(system: &str, user: String, max_tokens: u32, json: bool) -> Result<AiCompletion, String> {
+    let system = &format!("{system}\n{}", crate::han::VIETNAMESE_ONLY);
     const SIGN_IN: &str = "Hãy đăng nhập tài khoản VietNote ở góc trái dưới";
     let (url, anon) = config().ok_or("Bản build chưa cấu hình máy chủ VietNote")?;
     let token = access_token().await.map_err(|error| if error == "signed_out" { SIGN_IN.to_string() } else { error })?;
@@ -186,6 +187,7 @@ where F: FnMut(&str) {
 /// As `ai_complete_stream`, with screenshots (`data:image/…;base64,` URLs) the model reads alongside the text.
 pub async fn ai_complete_stream_with_images<F>(system: &str, user: String, images: &[String], max_tokens: u32, progress: F) -> Result<AiCompletion, String>
 where F: FnMut(&str) {
+    let system = &format!("{system}\n{}", crate::han::VIETNAMESE_ONLY);
     let (url, anon) = config().ok_or("Bản build chưa cấu hình máy chủ VietNote")?;
     let token = access_token().await.map_err(|error| if error == "signed_out" { "Hãy đăng nhập tài khoản VietNote ở góc trái dưới".into() } else { error })?;
     let response = client()?.post(format!("{url}/functions/v1/ai-complete"))
@@ -295,6 +297,12 @@ pub async fn account_status() -> Result<AccountStatus, String> {
         email: Some(session.email),
         balance_seconds: balance.ok().and_then(|value| value.get("balance_seconds").and_then(Value::as_i64)),
     })
+}
+
+/// Idempotently charges the cumulative number of seconds watched in one player session.
+#[tauri::command]
+pub async fn watch_charge(session_id: String, video_id: String, total_seconds: u64) -> Result<Value, String> {
+    credit_call(json!({"action": "watch", "session_id": session_id, "video_id": video_id, "total_seconds": total_seconds})).await
 }
 
 fn normalized_email(email: &str) -> Result<String, String> {

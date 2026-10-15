@@ -1,12 +1,15 @@
 import { invoke, Channel } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { FileToken } from './fileTranscript'
+import type { SpeechLine, VideoCaptions } from './youtube'
 import type { AudioChunk, AudioInput, DocumentKind, DocumentLength, Language, SpokenLanguage, MeetingNote, NoteGroup, StructuredMeetingSummary, TranscriptSegment, WorkerMessage } from './types'
 
 export interface NoteChatRequest {
   title: string; summary: string; transcript: string; segments: TranscriptSegment[];
   history: { role: 'user' | 'assistant'; content: string }[]; question: string
   quote?: string; live?: boolean
+  /** Video chat flexibly combines the script with general knowledge. */
+  videoMode?: 'flexible'
   /** Screenshots as data:image/…;base64 URLs. */
   images?: string[]
 }
@@ -15,7 +18,7 @@ export interface NoteChatAnswer { answer: string; evidenceIds: string[]; followU
 export interface AudioFile { path: string; name: string; size: number; durationSeconds: number | null; modifiedMs: number | null; /** The page it was fetched from, for audio from a link. */ sourceUrl?: string }
 export interface LinkProgress { stage: 'preparing' | 'downloading'; percent: number }
 export interface FileJobStatus { status: 'uploading' | 'processing' | 'completed' | 'failed'; tokens?: FileToken[]; audio_seconds?: number; charged_seconds?: number; error?: string }
-export interface WriteRequest { title: string; lines: string[]; digest: string[]; current: string; kind: DocumentKind; length: DocumentLength; instruction: string }
+export interface WriteRequest { title: string; lines: string[]; digest: string[]; current: string; kind: DocumentKind | 'summary' | 'selection'; length: DocumentLength; instruction: string }
 export interface WriteProgress { stage: 'reading' | 'writing'; done: number; total: number; text: string }
 export interface WrittenDocument { markdown: string; digest: string[]; incomplete: boolean }
 export interface StoredNotes { notes: MeetingNote[]; groups: NoteGroup[] }
@@ -28,6 +31,7 @@ export interface DownloadProgress { downloaded: number; total: number }
 export interface VoicePackStatus { path: string | null; available: boolean; downloading: boolean; partialBytes: number; sizeBytes: number; removable: boolean }
 export interface VoicePackProgress extends DownloadProgress { unpacking: boolean }
 export interface AudioApp { id: string; name: string }
+export interface AudioSourceStatus { source: 'microphone' | 'system'; state: 'silent' | 'active' | 'error' | 'level'; message: string; level?: number | null }
 
 const isDesktop = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 let saveQueue: Promise<void> = Promise.resolve()
@@ -48,6 +52,7 @@ export const desktop = {
   accountOffers: () => invoke<CreditOffer[]>('account_offers'),
   accountBuy: (packageId: string) => invoke<number>('account_buy', { packageId }),
   accountOrderStatus: (orderCode: number) => invoke<OrderStatus>('account_order_status', { orderCode }),
+  watchCharge: (sessionId: string, videoId: string, totalSeconds: number) => invoke<{ charged_seconds: number; balance_seconds: number }>('watch_charge', { sessionId, videoId, totalSeconds }),
   stopWorker: () => invoke<void>('stop_worker'),
   sendWorker: (payload: Record<string, unknown>) => invoke<void>('send_worker', { payload }),
   startCapture: (source: AudioInput) => invoke<void>('start_capture', { source }),
@@ -87,7 +92,7 @@ export const desktop = {
   removeVoicePack: () => invoke<VoicePackStatus>('remove_voice_pack'),
   onVoicePackDownload: (callback: (progress: VoicePackProgress) => void): Promise<UnlistenFn> => listen<VoicePackProgress>('voice-pack-download', e => callback(e.payload)),
   pickAudioFile: () => invoke<AudioFile | null>('pick_audio_file'),
-  fileJobStart: (filename: string, estimatedSeconds: number | null) => invoke<{ job_id: string; reserved_seconds: number; balance_seconds: number }>('file_job_start', { filename, estimatedSeconds }),
+  fileJobStart: (filename: string, estimatedSeconds: number | null, purpose: 'file' | 'watch' = 'file') => invoke<{ job_id: string; reserved_seconds: number; balance_seconds: number }>('file_job_start', { filename, estimatedSeconds, purpose }),
   fileJobUpload: (jobId: string, path: string, language: Language, translate: boolean, onProgress: (percent: number) => void) => {
     const channel = new Channel<number>()
     channel.onmessage = onProgress
@@ -100,6 +105,12 @@ export const desktop = {
     return invoke<AudioFile>('fetch_link_audio', { url, onProgress: channel })
   },
   cancelLinkAudio: () => invoke<void>('cancel_link_audio'),
+  /** A YouTube video's captions; rejects with "not_youtube", "no_captions" or "not_embeddable" when it cannot be watched with subtitles. */
+  youtubeCaptions: (url: string) => invoke<VideoCaptions>('youtube_captions', { url }),
+  /** One Vietnamese line per caption line. */
+  translateCaptions: (lines: string[], language: string, context: string[]) => invoke<string[]>('translate_captions', { lines, language, context }),
+  /** Splits recognised words into subtitles and translates them. */
+  translateSpeech: (words: string[], language: string, context: string[]) => invoke<SpeechLine[]>('translate_speech', { words, language, context }),
   fileJobStatus: (jobId: string) => invoke<FileJobStatus>('file_job_status', { jobId }),
   fileJobCleanup: (jobId: string) => invoke<void>('file_job_cleanup', { jobId }),
   fileJobCancel: (jobId: string) => invoke<void>('file_job_cancel', { jobId }),
@@ -116,4 +127,6 @@ export const desktop = {
   onStatus: (callback: (status: string) => void): Promise<UnlistenFn> => listen<string>('worker-status', e => callback(e.payload)),
   /** True when the microphone delivers only silence (blocked by the system), false once sound arrives. */
   onMicrophoneSilent: (callback: (silent: boolean) => void): Promise<UnlistenFn> => listen<boolean>('microphone-silent', e => callback(e.payload)),
+  /** Native capture health, including a silent system source or a stream that stopped after opening. */
+  onAudioSourceStatus: (callback: (status: AudioSourceStatus) => void): Promise<UnlistenFn> => listen<AudioSourceStatus>('audio-source-status', e => callback(e.payload)),
 }

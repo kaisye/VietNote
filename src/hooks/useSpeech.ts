@@ -12,6 +12,10 @@ const voiceIds: Record<SpeechVoice, string> = { auto: 'auto', female: 'baotrang'
 /** `stream` reads each finalized phrase right away; `sentence` waits for the whole sentence. */
 export type SpeechMode = 'stream' | 'sentence'
 export const modeOptions: { value: SpeechMode; label: string }[] = [{ value: 'stream', label: 'Theo cụm · nhanh' }, { value: 'sentence', label: 'Cả câu · tự nhiên' }]
+/** Video dubbing offers one female and one male voice from the pack. */
+export const dubVoices = [
+  { id: 'quangminh', label: 'Giọng nam' }, { id: 'baotrang', label: 'Giọng nữ' },
+] as const
 export const voiceOptions: { value: SpeechVoice; label: string }[] = [{ value: 'auto', label: 'Theo người nói' }, { value: 'female', label: 'Giọng nữ' }, { value: 'male', label: 'Giọng nam' }]
 
 /** Speech queued past this falls behind the video; the newest line replaces it. */
@@ -169,7 +173,25 @@ export function useSpeech(currentGeneration: () => number) {
     enabledRef.current = value; setEnabledState(value)
     try { localStorage.setItem('speakTranslation', String(value)) } catch { /* private window */ }
     if (value) load()
-    else { clear(); void desktop.sendWorker({ type: 'tts_disable' }).catch(() => {}) }
+    else { clear(); if (!heldRef.current) void desktop.sendWorker({ type: 'tts_disable' }).catch(() => {}) }
+  }
+  /** Set while something other than live reading (a dubbed video) needs the voice loaded. */
+  const heldRef = useRef<string | null>(null)
+  /** Loads the voice in `voice` (one of `dubVoices`), or with null lets it go back to live reading's. */
+  const hold = (voice: string | null) => {
+    // The video may request a voice before the pack finishes downloading. Retry the same
+    // voice once it becomes available instead of leaving the worker silent.
+    if (heldRef.current === voice && (!voice || stateRef.current === 'loading' || stateRef.current === 'ready')) return
+    heldRef.current = voice
+    if (voice) { if (installed()) void desktop.sendWorker({ type: 'tts_enable', voice, model_dir: packRef.current?.path }).catch(() => {}) }
+    else if (enabledRef.current) load()
+    else void desktop.sendWorker({ type: 'tts_disable' }).catch(() => {})
+  }
+  /** Reads `text` for someone other than live reading; its audio comes back under `id`. */
+  const synthesize = (id: string, text: string) => {
+    if (!installed() || stateRef.current !== 'ready' || !text.trim()) return false
+    void desktop.sendWorker({ type: 'synthesize', id, generation: currentGeneration(), text, speaker: null }).catch(() => {})
+    return true
   }
   const setRate = (value: number) => {
     rateRef.current = value; setRateState(value)
@@ -179,7 +201,8 @@ export function useSpeech(currentGeneration: () => number) {
   /** A restarted worker forgets the voice; load it again if speech is on. */
   const onConnected = (canSpeak: boolean) => {
     runtimeRef.current = canSpeak; setRuntime(canSpeak)
-    if (enabledRef.current) load()
+    if (heldRef.current && installed()) void desktop.sendWorker({ type: 'tts_enable', voice: heldRef.current, model_dir: packRef.current?.path }).catch(() => {})
+    else if (enabledRef.current) load()
     fetchInBackground()
   }
   /** Picking a voice also turns speech on: that is what the choice is for. */
@@ -248,6 +271,6 @@ export function useSpeech(currentGeneration: () => number) {
 
   const ready = runtime && Boolean(pack?.path)
   return { available: runtime && Boolean(pack?.available), installed: ready, sizeBytes: pack?.sizeBytes ?? 0, progress, packError, download, cancelDownload,
-    enabled: enabled && ready, setEnabled, state, message, rate, setRate, voice, setVoice, mode, setMode, translation, speak, handle, clear, onConnected, voiced }
+    enabled: enabled && ready, setEnabled, hold, synthesize, state, message, rate, setRate, voice, setVoice, mode, setMode, translation, speak, handle, clear, onConnected, voiced }
 }
 export type Speech = ReturnType<typeof useSpeech>

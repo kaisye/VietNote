@@ -29,7 +29,7 @@ const SUMMARY_CHUNK = 300
 const load = (): SavedJob | null => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null') } catch { return null } }
 const save = (job: SavedJob | null) => { try { if (job) localStorage.setItem(STORAGE_KEY, JSON.stringify(job)); else localStorage.removeItem(STORAGE_KEY) } catch { /* Keep working without storage. */ } }
 
-function errorText(error: unknown, file: AudioFile | null): string {
+export function errorText(error: unknown, file: AudioFile | null): string {
   const code = error instanceof Error ? error.message : String(error)
   if (code === 'insufficient_credit') return file?.durationSeconds
     ? `Không đủ phút: file này cần khoảng ${Math.ceil(fileCost(file.durationSeconds) / 60)} phút. Hãy nạp thêm rồi thử lại.`
@@ -46,7 +46,7 @@ function errorText(error: unknown, file: AudioFile | null): string {
 /** The recording's start: its last write minus its length, i.e. roughly when the meeting began. */
 const recordingStart = (file: AudioFile) => file.sourceUrl ? Date.now() : (file.modifiedMs ?? Date.now()) - (file.durationSeconds ?? 0) * 1000
 
-function linkErrorText(error: unknown): string {
+export function linkErrorText(error: unknown): string {
   const code = error instanceof Error ? error.message : String(error)
   if (/^(Không|Chưa|Hãy|Đang|Link|Video|Âm thanh|Mất|Công cụ)/.test(code)) return code
   console.error('link fetch failed', code)
