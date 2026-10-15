@@ -1,6 +1,6 @@
 // Transcribes a recorded file with Soniox's async API against the caller's credit.
-// A file second costs FILE_RATE of a streaming second.
-//   POST {action:"start", filename, estimated_seconds?}   -> {job_id, reserved_seconds, balance_seconds}
+// A file second costs FILE_RATE of a streaming second; Watch Video costs 100%.
+//   POST {action:"start", filename, estimated_seconds?, purpose?} -> {job_id, reserved_seconds, balance_seconds}
 //   POST ?action=upload&job_id=&language=&translate=1    (raw file body) -> {status:"processing"}
 //   POST {action:"status", job_id}  -> {status:"processing"} | {status:"completed", tokens, audio_seconds, charged_seconds} | {status:"failed", error}
 //   POST {action:"cleanup", job_id} -> deletes the transcript at Soniox once the app saved it
@@ -8,12 +8,13 @@
 import { admin, json, SONIOX_API, sonioxKey } from '../_shared/credits.ts'
 
 const FILE_RATE = 0.75
+const WATCH_RATE = 1
 // Soniox caps a file at 300 minutes.
 const MAX_FILE_SECONDS = 300 * 60
 const MIN_RESERVE = 60
 const HINTS: Record<string, string[]> = { vi: ['vi', 'en'], en: ['en'], zh: ['zh'], auto: ['vi', 'en', 'zh'] }
 
-type Job = { id: string; user_id: string; status: string; reserved_seconds: number; charged_seconds: number | null; audio_seconds: number | null; soniox_file_id: string | null; transcription_id: string | null; error: string | null }
+type Job = { id: string; user_id: string; status: string; reserved_seconds: number; charged_seconds: number | null; audio_seconds: number | null; billing_rate: number | null; billing_source: string | null; soniox_file_id: string | null; transcription_id: string | null; error: string | null }
 
 const soniox = (path: string, init: RequestInit = {}) =>
   fetch(`${SONIOX_API}${path}`, { ...init, headers: { Authorization: `Bearer ${sonioxKey()}`, ...(init.headers ?? {}) } })
@@ -52,7 +53,7 @@ Deno.serve(async request => {
   const user = auth.user
   const url = new URL(request.url)
   const upload = url.searchParams.get('action') === 'upload'
-  const body = upload ? {} : await request.json().catch(() => ({})) as { action?: string; job_id?: string; filename?: string; estimated_seconds?: number }
+  const body = upload ? {} : await request.json().catch(() => ({})) as { action?: string; job_id?: string; filename?: string; estimated_seconds?: number; purpose?: string }
   const action = upload ? 'upload' : body.action
   const jobId = upload ? url.searchParams.get('job_id') : body.job_id
 
@@ -64,17 +65,24 @@ Deno.serve(async request => {
     const { data: profile } = await db.from('profiles').select('balance_seconds').eq('id', user.id).single()
     const balance = profile?.balance_seconds ?? 0
     const estimate = Number(body.estimated_seconds)
-    // Reserve what the estimated length costs plus a little slack; without an
-    // estimate hold what is left (up to the longest file) and settle afterwards.
+    const source = body.purpose === 'watch' ? 'watch' : 'file'
+    const rate = source === 'watch' ? WATCH_RATE : FILE_RATE
+    // Watch reserves exactly 100% of the known duration. Files retain their small
+    // metadata slack; every job is reconciled against Soniox's measured duration.
     const need = Number.isFinite(estimate) && estimate > 0
-      ? Math.max(MIN_RESERVE, Math.ceil(Math.min(estimate, MAX_FILE_SECONDS) * FILE_RATE) + 30)
-      : Math.max(MIN_RESERVE, Math.min(balance, Math.ceil(MAX_FILE_SECONDS * FILE_RATE)))
+      ? Math.max(MIN_RESERVE, Math.ceil(Math.min(estimate, MAX_FILE_SECONDS) * rate) + (source === 'file' ? 30 : 0))
+      : Math.max(MIN_RESERVE, Math.min(balance, Math.ceil(MAX_FILE_SECONDS * rate)))
     const { data, error } = await db.rpc('reserve_file_job', { p_user: user.id, p_need: need, p_filename: String(body.filename ?? '').slice(0, 300) })
     if (error) {
       if (error.message.includes('insufficient_credit')) return json({ error: 'insufficient_credit', needed_seconds: need, balance_seconds: balance }, 402)
       return json({ error: 'reserve_failed' }, 500)
     }
     const job = (data as { job_id: string; reserved_seconds: number; balance_seconds: number }[])[0]
+    const { error: billingError } = await db.from('file_jobs').update({ billing_rate: rate, billing_source: source }).eq('id', job.job_id).eq('user_id', user.id)
+    if (billingError) {
+      await db.rpc('refund_file_job', { p_job: job.job_id, p_status: 'failed', p_error: 'billing_setup_failed' })
+      return json({ error: 'billing_setup_failed' }, 500)
+    }
     return json(job)
   }
 
@@ -131,7 +139,8 @@ Deno.serve(async request => {
       }
       if (state.status !== 'completed') return json({ status: 'processing' })
       const audio = Math.ceil((state.audio_duration_ms ?? 0) / 1000)
-      const { data: charged, error } = await db.rpc('settle_file_job', { p_job: job.id, p_audio_seconds: audio, p_rate: FILE_RATE })
+      const rate = job.billing_source === 'watch' ? WATCH_RATE : Number(job.billing_rate ?? FILE_RATE)
+      const { data: charged, error } = await db.rpc('settle_file_job', { p_job: job.id, p_audio_seconds: audio, p_rate: rate })
       if (error) return json({ error: 'settle_failed' }, 500)
       job.charged_seconds = charged as number; job.audio_seconds = audio
       // The audio is no longer needed; the transcript stays until the app saved it.

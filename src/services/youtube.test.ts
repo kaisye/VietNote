@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { batchOrder, captionLines, dubbable, dubRate, heardWords, lineAt, planBatches, speechLines, youtubeId, type CaptionPiece } from './youtube'
+import { batchOrder, captionChunks, captionLines, captionPageAt, dubbable, dubRate, heardWords, lineAt, planBatches, seekSlices, speechLines, youtubeId, type CaptionPiece } from './youtube'
 
 const words = (start: number, text: string, step = 0.3): CaptionPiece[] => text.split(' ').map((word, index) => ({ start: start + index * step, end: start + (index + 1) * step, text: word }))
 
@@ -51,11 +51,53 @@ describe('lineAt', () => {
   })
 })
 
+describe('long captions', () => {
+  it('keeps clauses together without truncating the subtitle', () => {
+    const source = 'Hầu như không ai biết rằng chúng tôi vẫn thường phát các đoạn clip của ông ấy, nhưng trong 12 ngày liên tiếp, ông ấy đã hoàn toàn biến mất khỏi truyền thông, không đưa ra bất kỳ tuyên bố nào.'
+    const chunks = captionChunks(source)
+    expect(chunks.length).toBeGreaterThan(1)
+    expect(chunks[0].endsWith(',')).toBe(true)
+    expect(chunks.every(chunk => Array.from(chunk).length <= 180)).toBe(true)
+    expect(chunks.join(' ')).toBe(source)
+  })
+
+  it('does not split a near-complete clause just to satisfy a character target', () => {
+    const sentence = 'Đây là một câu nói tương đối dài nhưng vẫn thuộc cùng một ý tưởng và có thể được đọc trọn vẹn trên phụ đề mà không cần phải chuyển sang một khung mới quá sớm.'
+    expect(captionChunks(sentence)).toEqual([sentence])
+  })
+
+  it('handles words without spaces and follows the video time after seeking', () => {
+    const source = '大家好'.repeat(70)
+    expect(captionChunks(source).join('')).toBe(source)
+    const line = { start: 10, end: 16, source }
+    expect(captionPageAt(line, 9.8, 3)).toBe(0)
+    expect(captionPageAt(line, 12.2, 3)).toBe(1)
+    expect(captionPageAt(line, 16.5, 3)).toBe(2)
+  })
+})
+
 describe('batchOrder', () => {
   it('translates from the batch being watched, then the earlier ones', () => {
     expect(batchOrder(5, 2)).toEqual([2, 3, 4, 1, 0])
     expect(batchOrder(3, 0)).toEqual([0, 1, 2])
     expect(batchOrder(0, 0)).toEqual([])
+  })
+})
+
+describe('seekSlices', () => {
+  const draft = [0, 2, 4, 6].map(start => ({ start, end: start + 1.8, source: `line ${start}` }))
+
+  it('prioritizes the next two manual captions without translating them twice', () => {
+    const split = seekSlices({ start: 0, draft }, 2.5)!
+    expect(split.quick).toBe(1)
+    expect(split.parts.map(part => part.draft.map(line => line.source))).toEqual([['line 0'], ['line 2', 'line 4'], ['line 6']])
+  })
+
+  it('partitions automatic-caption words without gaps or overlap', () => {
+    const pieces = words(0, 'one two three four five six seven eight', 1)
+    const split = seekSlices({ start: 0, draft, words: pieces }, 2.5)!
+    expect(split.parts.flatMap(part => part.words)).toEqual(pieces)
+    expect(split.parts[split.quick].words?.map(word => word.text)).toEqual(['three', 'four', 'five', 'six'])
   })
 })
 
@@ -92,8 +134,8 @@ describe('heardWords', () => {
 describe('dubbing', () => {
   it('reads at normal pace when the line fits, faster when it runs long', () => {
     expect(dubRate(2, 4)).toBe(1)
-    expect(dubRate(4, 3.15)).toBeCloseTo(4 / 3)
-    expect(dubRate(10, 2)).toBe(1.6)
+    expect(dubRate(3.5, 3.15)).toBeCloseTo(3.5 / 3)
+    expect(dubRate(10, 2)).toBe(1.3)
   })
   it('does not read sound labels', () => {
     expect(dubbable({ start: 0, end: 1, source: '[Music]', translation: '[Nhạc]' })).toBe(false)

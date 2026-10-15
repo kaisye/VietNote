@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildFileTranscript, fileCost, fileNoteTranscript, type FileToken } from './fileTranscript'
+import { buildFileTranscript, fileCost, fileNoteTranscript, watchCost, type FileToken } from './fileTranscript'
 
 const original = (text: string, start: number, speaker = '1'): FileToken => [text, start, start + 200, speaker, 'en', 0]
 const translated = (text: string): FileToken => [text, 0, 0, '1', 'vi', 1]
@@ -46,5 +46,10 @@ describe('file transcripts', () => {
   it('charges 75% of the recording, rounded up', () => {
     expect(fileCost(3600)).toBe(2700)
     expect(fileCost(1)).toBe(1)
+  })
+
+  it('charges 100% of a video processed by Watch Video', () => {
+    expect(watchCost(3600)).toBe(3600)
+    expect(watchCost(1)).toBe(1)
   })
 })

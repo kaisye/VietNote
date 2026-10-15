@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown, Volume2, VolumeX } from 'lucide-react'
 import type { AppModel } from '../hooks/useAppModel'
 import { appChoiceAvailable, useAudioApps } from '../services/audioApps'
-import { SystemAudioToggle } from './MeetingControls'
+import { AudioLevelBar, MicrophoneToggle, SystemAudioToggle } from './MeetingControls'
 
 /** A whole row toggles, so the switch is easy to hit. */
 function SwitchRow({ title, detail, checked, disabled = false, onChange }: { title: string; detail: string; checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void }) {
@@ -58,11 +57,9 @@ export function SystemAudioMenu({ model }: { model: AppModel }) {
     if (on && excluded.length) listenToAll()
     if (on !== model.systemAudioOn) model.toggleSystemAudio()
   }
-  const label = !model.systemAudioOn ? 'Âm thanh máy đang tắt' : excluded.length ? `Âm thanh máy · bỏ qua ${excluded.length}` : 'Âm thanh máy'
-
   return <span className="app-audio" ref={root}>
-    <button type="button" className={`pill-btn mic-toggle ${model.systemAudioOn ? 'on' : ''}`} onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="dialog"
-      title="Bật, tắt âm thanh máy và chọn ứng dụng được nghe">{model.systemAudioOn ? <Volume2 size={16}/> : <VolumeX size={16}/>}{label}<ChevronDown size={14}/></button>
+    <button type="button" className={`source-toggle ${model.systemAudioOn ? 'on' : ''}`} onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="dialog"
+      title={excluded.length ? `Âm thanh máy đang bỏ qua ${excluded.length} ứng dụng` : 'Bật, tắt âm thanh máy và chọn ứng dụng được nghe'}><span className="source-toggle-copy"><strong>Âm thanh máy</strong><AudioLevelBar level={model.systemAudioOn ? model.audioLevels.system : 0}/></span></button>
     {open && anchor && createPortal(<div className="app-audio-popover" ref={popover} style={{ top: anchor.top, left: anchor.left }} role="dialog" aria-label="Âm thanh máy">
       <SwitchRow title="Tất cả âm thanh máy" detail={model.systemAudioOn ? (excluded.length ? `Đang bỏ qua ${excluded.length} ứng dụng · bật lại để nghe tất cả` : 'Đang nghe mọi ứng dụng') : 'Đang tắt'}
         checked={model.systemAudioOn && !excluded.length} onChange={toggleAll}/>
@@ -73,4 +70,12 @@ export function SystemAudioMenu({ model }: { model: AppModel }) {
       <small className="app-audio-note">Các tab trong cùng một trình duyệt được tính chung là một ứng dụng.</small>
     </div>, document.body)}
   </span>
+}
+
+/** One compact audio strip: both sources and their live levels, without recognition labels. */
+export function AudioSourceControls({ model }: { model: AppModel }) {
+  return <div className="audio-source-controls" role="group" aria-label="Nguồn âm thanh">
+    <MicrophoneToggle model={model}/>
+    <SystemAudioMenu model={model}/>
+  </div>
 }

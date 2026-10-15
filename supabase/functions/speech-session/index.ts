@@ -2,6 +2,7 @@
 //   POST {action:"grant", source}      -> {api_key, grant_id, seconds, balance_seconds}
 //   POST {action:"release", grant_id}  -> {used_seconds}
 //   POST {action:"balance"}            -> {balance_seconds, email}
+//   POST {action:"watch", session_id, video_id, total_seconds} -> cumulative watched usage
 import { admin, availableSeconds, json, MAX_GRANT_SECONDS, MIN_GRANT_SECONDS, SONIOX_API, sonioxKey } from '../_shared/credits.ts'
 
 const SOURCES = new Set(['system', 'microphone'])
@@ -13,7 +14,7 @@ Deno.serve(async request => {
   const { data: auth, error: authError } = await db.auth.getUser(token)
   if (authError || !auth.user) return json({ error: 'unauthorized' }, 401)
   const user = auth.user
-  const body = await request.json().catch(() => ({})) as { action?: string; source?: string; grant_id?: string }
+  const body = await request.json().catch(() => ({})) as { action?: string; source?: string; grant_id?: string; session_id?: string; video_id?: string; total_seconds?: number }
 
   if (body.action === 'balance') {
     // Streams in progress hold a reservation; show only the time they have
@@ -27,6 +28,19 @@ Deno.serve(async request => {
     const { data, error } = await db.rpc('release_soniox_grant', { p_user: user.id, p_grant: body.grant_id })
     if (error) return json({ error: 'release_failed' }, 500)
     return json({ used_seconds: data })
+  }
+
+  if (body.action === 'watch') {
+    const session = String(body.session_id ?? '')
+    const video = String(body.video_id ?? '')
+    const total = Math.floor(Number(body.total_seconds))
+    if (!/^[0-9a-f-]{36}$/i.test(session) || !/^[\w-]{11}$/.test(video) || !Number.isFinite(total) || total < 0) return json({ error: 'invalid_request' }, 400)
+    const { data, error } = await db.rpc('charge_watch_usage', { p_user: user.id, p_session: session, p_video: video, p_total: total })
+    if (error) {
+      if (error.message.includes('insufficient_credit')) return json({ error: 'insufficient_credit' }, 402)
+      return json({ error: 'watch_charge_failed' }, 500)
+    }
+    return json((data as { charged_seconds: number; balance_seconds: number }[])[0])
   }
 
   if (body.action === 'grant') {

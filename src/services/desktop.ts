@@ -8,6 +8,8 @@ export interface NoteChatRequest {
   title: string; summary: string; transcript: string; segments: TranscriptSegment[];
   history: { role: 'user' | 'assistant'; content: string }[]; question: string
   quote?: string; live?: boolean
+  /** Video chat flexibly combines the script with general knowledge. */
+  videoMode?: 'flexible'
   /** Screenshots as data:image/…;base64 URLs. */
   images?: string[]
 }
@@ -29,6 +31,7 @@ export interface DownloadProgress { downloaded: number; total: number }
 export interface VoicePackStatus { path: string | null; available: boolean; downloading: boolean; partialBytes: number; sizeBytes: number; removable: boolean }
 export interface VoicePackProgress extends DownloadProgress { unpacking: boolean }
 export interface AudioApp { id: string; name: string }
+export interface AudioSourceStatus { source: 'microphone' | 'system'; state: 'silent' | 'active' | 'error' | 'level'; message: string; level?: number | null }
 
 const isDesktop = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 let saveQueue: Promise<void> = Promise.resolve()
@@ -49,6 +52,7 @@ export const desktop = {
   accountOffers: () => invoke<CreditOffer[]>('account_offers'),
   accountBuy: (packageId: string) => invoke<number>('account_buy', { packageId }),
   accountOrderStatus: (orderCode: number) => invoke<OrderStatus>('account_order_status', { orderCode }),
+  watchCharge: (sessionId: string, videoId: string, totalSeconds: number) => invoke<{ charged_seconds: number; balance_seconds: number }>('watch_charge', { sessionId, videoId, totalSeconds }),
   stopWorker: () => invoke<void>('stop_worker'),
   sendWorker: (payload: Record<string, unknown>) => invoke<void>('send_worker', { payload }),
   startCapture: (source: AudioInput) => invoke<void>('start_capture', { source }),
@@ -88,7 +92,7 @@ export const desktop = {
   removeVoicePack: () => invoke<VoicePackStatus>('remove_voice_pack'),
   onVoicePackDownload: (callback: (progress: VoicePackProgress) => void): Promise<UnlistenFn> => listen<VoicePackProgress>('voice-pack-download', e => callback(e.payload)),
   pickAudioFile: () => invoke<AudioFile | null>('pick_audio_file'),
-  fileJobStart: (filename: string, estimatedSeconds: number | null) => invoke<{ job_id: string; reserved_seconds: number; balance_seconds: number }>('file_job_start', { filename, estimatedSeconds }),
+  fileJobStart: (filename: string, estimatedSeconds: number | null, purpose: 'file' | 'watch' = 'file') => invoke<{ job_id: string; reserved_seconds: number; balance_seconds: number }>('file_job_start', { filename, estimatedSeconds, purpose }),
   fileJobUpload: (jobId: string, path: string, language: Language, translate: boolean, onProgress: (percent: number) => void) => {
     const channel = new Channel<number>()
     channel.onmessage = onProgress
@@ -123,4 +127,6 @@ export const desktop = {
   onStatus: (callback: (status: string) => void): Promise<UnlistenFn> => listen<string>('worker-status', e => callback(e.payload)),
   /** True when the microphone delivers only silence (blocked by the system), false once sound arrives. */
   onMicrophoneSilent: (callback: (silent: boolean) => void): Promise<UnlistenFn> => listen<boolean>('microphone-silent', e => callback(e.payload)),
+  /** Native capture health, including a silent system source or a stream that stopped after opening. */
+  onAudioSourceStatus: (callback: (status: AudioSourceStatus) => void): Promise<UnlistenFn> => listen<AudioSourceStatus>('audio-source-status', e => callback(e.payload)),
 }

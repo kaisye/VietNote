@@ -1,7 +1,7 @@
 import { useEffect, useImperativeHandle, useRef, type Ref } from 'react'
 import { PLAYER_URL } from '../services/youtube'
 
-export interface PlayerControl { seek: (time: number) => void; toggle: () => void; volume: (percent: number) => void }
+export interface PlayerControl { seek: (time: number) => void; play: () => void; pause: () => void; toggle: () => void; volume: (percent: number) => void }
 
 /** Why the player could not play, by YouTube's error code. */
 export const playerError = (code: number) =>
@@ -32,7 +32,7 @@ export function YouTubePlayer({ videoId, start, onTime, onError, onReady, contro
   }, [])
 
   const send = (message: Record<string, unknown>) => frame.current?.contentWindow?.postMessage(message, '*')
-  useImperativeHandle(control, () => ({ seek: time => send({ command: 'seek', time }), toggle: () => send({ command: 'toggle' }), volume: percent => send({ command: 'volume', value: percent }) }), [])
+  useImperativeHandle(control, () => ({ seek: time => send({ command: 'seek', time }), play: () => send({ command: 'play' }), pause: () => send({ command: 'pause' }), toggle: () => send({ command: 'toggle' }), volume: percent => send({ command: 'volume', value: percent }) }), [])
 
   return <iframe ref={frame} className="watch-frame" src={src.current} title="Trình phát video" allow="autoplay; encrypted-media; picture-in-picture" referrerPolicy="strict-origin-when-cross-origin"/>
 }

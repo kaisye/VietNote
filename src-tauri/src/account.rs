@@ -299,6 +299,12 @@ pub async fn account_status() -> Result<AccountStatus, String> {
     })
 }
 
+/// Idempotently charges the cumulative number of seconds watched in one player session.
+#[tauri::command]
+pub async fn watch_charge(session_id: String, video_id: String, total_seconds: u64) -> Result<Value, String> {
+    credit_call(json!({"action": "watch", "session_id": session_id, "video_id": video_id, "total_seconds": total_seconds})).await
+}
+
 fn normalized_email(email: &str) -> Result<String, String> {
     let email = email.trim().to_lowercase();
     let valid = email.split_once('@').is_some_and(|(name, domain)| !name.is_empty() && domain.contains('.'))

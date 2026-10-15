@@ -3,8 +3,14 @@ import type { TranscriptSegment } from './types'
 /** A file second costs this share of a live (streaming) second. */
 export const FILE_RATE = 0.75
 
+/** Watching a video consumes one credit second for each second of video. */
+export const WATCH_RATE = 1
+
 /** Credit (in live seconds) a recording of this length costs. */
 export const fileCost = (audioSeconds: number) => Math.ceil(audioSeconds * FILE_RATE)
+
+/** Credit seconds charged for audio processed by the Watch Video feature. */
+export const watchCost = (videoSeconds: number) => Math.ceil(videoSeconds * WATCH_RATE)
 
 /** [text, start_ms, end_ms, speaker, language, is_translation], as the `file-job` function sends tokens. */
 export type FileToken = [string, number, number, string | null, string | null, 0 | 1]

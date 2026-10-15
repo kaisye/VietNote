@@ -100,6 +100,31 @@ export function speechLines(words: CaptionPiece[], lines: SpeechLine[]): WatchLi
 /** The batch being watched at `time`. */
 export const batchAt = (batches: Batch[], time: number) => { let found = 0; batches.forEach((batch, index) => { if (batch.start <= time + LEAD) found = index }); return found }
 
+/** Split an untranslated batch at a seek: the two lines at the playhead can be translated first.
+ * Parts contain disjoint captions/words, so the fast request is not repeated in the background. */
+export function seekSlices(batch: Batch, time: number): { parts: Batch[]; quick: number } | null {
+  const first = batch.draft.findIndex(line => line.end > time)
+  if (first < 0) return null
+  const after = Math.min(first + 2, batch.draft.length)
+  const boundaries = [0, first, after, batch.draft.length]
+  const wordAt = (line: number) => {
+    if (!batch.words || line === 0) return 0
+    if (line === batch.draft.length) return batch.words.length
+    const index = batch.words.findIndex(word => word.start >= batch.draft[line].start - 0.001)
+    return index < 0 ? batch.words.length : index
+  }
+  const parts: Batch[] = []
+  for (let index = 0; index < boundaries.length - 1; index++) {
+    const from = boundaries[index], to = boundaries[index + 1]
+    if (from === to) continue
+    const draft = batch.draft.slice(from, to)
+    const words = batch.words?.slice(wordAt(from), wordAt(to))
+    if (batch.words && !words?.length) return null
+    parts.push({ start: draft[0].start, draft, ...(words ? { words } : {}) })
+  }
+  return { parts, quick: first > 0 ? 1 : 0 }
+}
+
 /**
  * Words with their times from a transcription of the audio, whose tokens are often parts of
  * words; a token starting with a space starts a new word. Also the language most of them are in.
@@ -139,6 +164,39 @@ export function lineBefore(lines: WatchLine[], time: number) {
   return found
 }
 
+/** Keep clauses together on screen; the complete line is still used for dubbing. */
+export function captionChunks(text: string, limit = 150): string[] {
+  let remaining = text.trim().replace(/\s+/g, ' ')
+  if (!remaining) return []
+  const chunks: string[] = []
+  while (Array.from(remaining).length > limit) {
+    const characters = Array.from(remaining)
+    const target = Math.ceil(characters.length / Math.ceil(characters.length / limit))
+    const from = Math.max(65, target - 40)
+    const to = Math.min(limit + 15, characters.length - 55)
+    const boundary = (marks: string) => Array.from({ length: Math.max(0, to - from + 1) }, (_, index) => from + index)
+      .filter(at => marks.includes(characters[at - 1]))
+      .sort((a, b) => Math.abs(a - target) - Math.abs(b - target))[0]
+    // Prefer a complete sentence, then a comma/semicolon. A very long unpunctuated
+    // clause gets a word-boundary fallback; a near-complete clause may stay together.
+    let cut = boundary('.!?…。！？') ?? boundary(',;:，；：')
+    if (!cut && characters.length <= limit + 30) break
+    if (!cut) {
+      cut = Array.from({ length: Math.min(limit, characters.length - 1) }, (_, index) => index + 1)
+        .filter(at => characters[at] === ' ')
+        .sort((a, b) => Math.abs(a - target) - Math.abs(b - target))[0] ?? target
+    }
+    chunks.push(characters.slice(0, cut).join('').trim())
+    remaining = characters.slice(cut).join('').trimStart()
+  }
+  chunks.push(remaining)
+  return chunks
+}
+
+/** Pausing or seeking selects the same page as continuous playback. */
+export const captionPageAt = (line: WatchLine, time: number, pages: number) =>
+  Math.min(pages - 1, Math.max(0, Math.floor((time - line.start) / Math.max(line.end - line.start, 0.1) * pages)))
+
 /** Batches in the order to translate them: from the one being watched to the end, then the earlier ones. */
 export function batchOrder(total: number, current: number) {
   const from = Math.min(Math.max(current, 0), Math.max(total - 1, 0))
@@ -150,8 +208,8 @@ export const clock = (seconds: number) => {
   return h ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`
 }
 
-/** The fastest a dubbed line is read, so it ends before the next one starts. */
-export const MAX_DUB_RATE = 1.6
+/** Keep dubbed speech intelligible even when a translated line is longer than its time slot. */
+export const MAX_DUB_RATE = 1.3
 /** How fast to read `seconds` of voice into a `slot` of video: normal pace when it fits. */
 export const dubRate = (seconds: number, slot: number) => Math.min(MAX_DUB_RATE, Math.max(1, seconds / Math.max(slot - 0.15, 0.5)))
 /** Lines worth reading aloud: translated words, not sound labels like [Nhạc]. */

@@ -90,8 +90,12 @@ async fn call(body: Value, timeout: Duration) -> Result<Value, String> {
 }
 
 #[tauri::command]
-pub(crate) async fn file_job_start(filename: String, estimated_seconds: Option<f64>) -> Result<Value, String> {
-    call(json!({"action": "start", "filename": filename, "estimated_seconds": estimated_seconds}), Duration::from_secs(20)).await
+pub(crate) async fn file_job_start(filename: String, estimated_seconds: Option<f64>, purpose: Option<String>) -> Result<Value, String> {
+    let purpose = match purpose.as_deref() {
+        Some("watch") => "watch",
+        _ => "file",
+    };
+    call(json!({"action": "start", "filename": filename, "estimated_seconds": estimated_seconds, "purpose": purpose}), Duration::from_secs(20)).await
 }
 
 /// Streams the file to the Edge Function, reporting upload progress (0–100).

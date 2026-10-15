@@ -23,6 +23,7 @@ const SIGN_IN_STATUS = 'Bấm Đăng nhập ở góc trái dưới để bắt �
 
 function audioIssueText(message?: string) {
   if (message?.startsWith('ASR reconnecting')) return 'Mất kết nối máy chủ nhận diện · đang kết nối lại…'
+  if (message?.startsWith('ASR audio backlog full')) return 'Kết nối nhận diện chậm · đã bỏ qua âm thanh cũ để tiếp tục trực tiếp'
   if (message?.startsWith('ASR audio queue full')) return 'Mạng chậm · đã bỏ qua một đoạn âm thanh'
   if (message?.startsWith('VietNote credit exhausted')) return 'Đã hết phút sử dụng · xem tài khoản ở góc trái dưới'
   if (message?.startsWith('VietNote signed out')) return 'Phiên đăng nhập đã hết · đăng nhập lại ở góc trái dưới'
@@ -91,6 +92,10 @@ export function useAppModel() {
   // The microphone opened but hears pure silence: usually the system blocks it.
   const [microphoneSilent, setMicrophoneSilent] = useState(false)
   const [systemAudioOn, setSystemAudioOn] = useState(false)
+  const [systemAudioIssue, setSystemAudioIssue] = useState<string | null>(null)
+  const [audioLevels, setAudioLevels] = useState({ microphone: 0, system: 0 })
+  const [recognitionSources, setRecognitionSources] = useState<Record<string, string>>({})
+  const recognitionSourcesRef = useRef<Record<string, string>>({})
   const microphoneRef = useRef(false)
   const systemAudioRef = useRef(false)
   const sourceBusy = useRef(false)
@@ -144,6 +149,27 @@ export function useAppModel() {
     void desktop.loadNotes().then(data => { if (!disposed) persist([demoNote, ...data.notes.filter(n => !n.isDemo)], data.groups) }).catch(error => setStatus(`Không đọc được ghi chú: ${error}`))
     const workerEvents = desktop.onWorker(message => { if (!disposed) handleWorkerRef.current(message) }).then(fn => { unlisten.push(fn) })
     void desktop.onMicrophoneSilent(silent => { if (!disposed) setMicrophoneSilent(silent) }).then(fn => { if (disposed) fn(); else unlisten.push(fn) })
+    void desktop.onAudioSourceStatus(event => {
+      if (disposed) return
+      if (event.state === 'level') {
+        const level = Math.max(0, Math.min(1, Number(event.level) || 0))
+        setAudioLevels(current => ({ ...current, [event.source]: level }))
+        if (level > 1e-5 && !recognitionSourcesRef.current[event.source]) setStatus('● Đã nhận âm thanh · đang kết nối nhận diện…')
+        return
+      }
+      if (event.source === 'system') {
+        setSystemAudioIssue(event.state === 'active' ? null : event.message)
+        if (event.state === 'error') {
+          systemAudioRef.current = false; setSystemAudioOn(false); setAudioLevels(current => ({ ...current, system: 0 })); setStatus(event.message)
+          const next = { ...recognitionSourcesRef.current }; delete next.system
+          recognitionSourcesRef.current = next; setRecognitionSources(next)
+        }
+      } else if (event.state === 'error') {
+        microphoneRef.current = false; setMicrophoneOn(false); setAudioLevels(current => ({ ...current, microphone: 0 })); setStatus(event.message)
+        const next = { ...recognitionSourcesRef.current }; delete next.microphone
+        recognitionSourcesRef.current = next; setRecognitionSources(next)
+      }
+    }).then(fn => { if (disposed) fn(); else unlisten.push(fn) })
     const statusEvents = desktop.onStatus(value => { if (!disposed) { setStatus(/loading/i.test(value) ? 'Đang khởi động…' : /closed|exited/i.test(value) ? 'Đã dừng' : /failed|missing/i.test(value) ? 'Không thể khởi động' : value); if (/loading|exited|closed|failed|missing/i.test(value)) { setReady(false); if (/exited|closed|failed|missing/i.test(value)) { setStartRequested(false); setBusy(false) } } } }).then(fn => { unlisten.push(fn) })
     void desktop.accountSignedIn().then(available => {
       if (disposed) return
@@ -313,7 +339,7 @@ export function useAppModel() {
       }
       case 'transcript_interim': {
         if (!capturingRef.current || message.generation !== generationRef.current || !message.text) break
-        if (audioIssueRef.current) { audioIssueRef.current = false; setStatus(`● Listening — ${captureInputRef.current}`) }
+        if (audioIssueRef.current) { audioIssueRef.current = false; setStatus(`● Đang nhận diện ${message.source === 'microphone' ? 'micro' : 'âm thanh máy'}`) }
         const source = message.source ?? 'system'
         const language = spokenLanguage(message)
         if (message.id) spokenLanguageRef.current.set(message.id, language)
@@ -334,6 +360,16 @@ export function useAppModel() {
         liveTranslationRef.current = Boolean(message.live)
         setTranslationStatus(languageRef.current !== 'vi' && !translating() ? 'Đã tắt dịch tiếng nước ngoài' : message.live ? (languageRef.current === 'auto' ? 'Dịch trực tiếp · tự động nhận diện → Việt' : 'Dịch trực tiếp · Anh/Trung → Việt') : languageRef.current === 'vi' ? 'Không cần dịch' : 'Dịch theo đoạn')
         break
+      case 'asr_status': {
+        if (message.generation !== generationRef.current || !message.source || !message.state) break
+        const next = { ...recognitionSourcesRef.current, [message.source]: message.state }
+        recognitionSourcesRef.current = next; setRecognitionSources(next)
+        const sourceName = message.source === 'microphone' ? 'micro' : 'âm thanh máy'
+        if (message.state === 'connecting') setStatus(`● Đã nhận ${sourceName} · đang kết nối nhận diện…`)
+        else if (message.state === 'connected') setStatus(`● Đang nhận diện ${sourceName}`)
+        else if (message.state === 'reconnecting') setStatus(`Mất kết nối nhận diện ${sourceName} · đang kết nối lại…`)
+        break
+      }
       case 'live_translation': {
         if (!(capturingRef.current || meetingRef.current) || message.generation !== generationRef.current || !message.id || !message.text) break
         if (spokenLanguageRef.current.get(message.id) === 'vi' || !translating()) break
@@ -356,6 +392,8 @@ export function useAppModel() {
     if (capturingRef.current || generationPending.current || !ready) return
     captureInputRef.current = input
     generationPending.current = true; setBusy(true); setStartError(''); setMicrophoneSilent(false)
+    setSystemAudioIssue(null); setAudioLevels({ microphone: 0, system: 0 })
+    recognitionSourcesRef.current = {}; setRecognitionSources({}); setStatus('Đang mở nguồn âm thanh…')
     generationRef.current += 1
     try {
       await desktop.sendWorker({ type: 'reset', generation: generationRef.current, language: languageRef.current })
@@ -378,6 +416,7 @@ export function useAppModel() {
     try {
       if (enabled) {
         if (source === 'microphone') setMicrophoneSilent(false)
+        else setSystemAudioIssue(null)
         await desktop.sendWorker({ type: 'open_source', source })
         await setNative(true)
       } else {
@@ -385,6 +424,10 @@ export function useAppModel() {
         await setNative(false)
         await desktop.sendWorker({ type: 'close_source', source })
         setInterimTranscripts(current => current.filter(item => item.source !== source))
+        if (source === 'system') setSystemAudioIssue(null)
+        setAudioLevels(current => ({ ...current, [source]: 0 }))
+        const next = { ...recognitionSourcesRef.current }; delete next[source]
+        recognitionSourcesRef.current = next; setRecognitionSources(next)
       }
       ref.current = enabled; setOn(enabled)
       const other = source === 'microphone' ? systemAudioRef.current : microphoneRef.current
@@ -438,6 +481,8 @@ export function useAppModel() {
     capturingRef.current = false; setCapturing(false)
     microphoneRef.current = false; setMicrophoneOn(false)
     systemAudioRef.current = false; setSystemAudioOn(false)
+    setSystemAudioIssue(null)
+    setAudioLevels({ microphone: 0, system: 0 }); recognitionSourcesRef.current = {}; setRecognitionSources({})
     setInterimTranscripts([])
     speech.clear()
     try {
@@ -556,6 +601,13 @@ export function useAppModel() {
   const newNote = (groupID?: string | null) => { const note = createNote(groupID); persist([note, ...notesRef.current], groupsRef.current); return note.id }
   const updateNote = (id: string, patch: Partial<Pick<MeetingNote, 'title' | 'summary' | 'structuredSummary' | 'summaryMarkdown' | 'groupID'>>) => persist(notesRef.current.map(note => note.id === id && !note.isDemo ? { ...note, ...patch, ...(patch.title === undefined ? {} : { titleEdited: true }), ...(patch.summary === undefined ? {} : { structuredSummary: undefined }), updatedAt: now() } : note), groupsRef.current)
   const addNote = (note: MeetingNote) => persist([note, ...notesRef.current], groupsRef.current)
+  /** Publish a video note immediately, then confirm that exact version reached disk. */
+  const saveWatchNote = async (note: MeetingNote) => {
+    const nextNotes = [note, ...notesRef.current.filter(item => item.id !== note.id)]
+    publishNotes(nextNotes, groupsRef.current)
+    try { if (desktop.isDesktop) await desktop.saveNotes({ notes: notesForStorage(nextNotes), groups: groupsRef.current }) }
+    catch (error) { setStatus(`Không lưu được ghi chú video: ${error}`) }
+  }
   /** Removes these notes (never the demo) and hands them back, so the deletion can be undone. */
   const deleteNotes = (ids: string[]) => {
     const remove = new Set(ids)
@@ -606,11 +658,11 @@ export function useAppModel() {
   const watch = useWatch(() => void refreshAccount())
   const fileJob = useFileJob(addNote, () => void refreshAccount(), noteDocuments.write)
 
-  return { account, refreshAccount, status, startError, ready, diarizationReady, diarizationStatus, busy, capturing, meetingActive, sourceLanguage, setSourceLanguage, translateForeign, setTranslateForeign, audioInput, setAudioInput, microphoneOn, microphoneSilent: microphoneSilent && microphoneOn && capturing, toggleMicrophone: () => void toggleSource('microphone'), systemAudioOn, toggleSystemAudio: () => void toggleSource('system'), setSources,
+  return { account, refreshAccount, status, startError, ready, diarizationReady, diarizationStatus, busy, capturing, meetingActive, sourceLanguage, setSourceLanguage, translateForeign, setTranslateForeign, audioInput, setAudioInput, microphoneOn, microphoneSilent: microphoneSilent && microphoneOn && capturing, toggleMicrophone: () => void toggleSource('microphone'), systemAudioOn, systemAudioIssue: capturing ? systemAudioIssue : null, audioLevels, recognitionSources, toggleSystemAudio: () => void toggleSource('system'), setSources,
     entries, interimTranscripts, translationBlocks, overallSummary, suggestedTitle, titlePending, suggestTitleNow: () => void suggestTitleNow(), summaryStatus, summaryCadence, setSummaryCadence: setCadence,
     cadenceValue, setCadenceValue: setCadenceAmount, notes, noteGroups, savingNoteID, savingNoteGroupID, vietnameseASRStatus, translationStatus,
     canStartMeeting: ready || asrKeyAvailable, canSummarizeNow: meetingActive && !summaryBusy.current && (entries.length > overallSummaryCursor.current || (translating() && entries.length > translationCursorRef.current)),
-    noteChat, noteDocuments, liveChat, speech, start, startMeeting, stop, summarizeNow: () => void summarizeNow(), newNote, addNote, updateNote, deleteNote, deleteNotes, restoreNotes, fileJob, createGroup, renameGroup, deleteGroup, watch, dub, meetingStartedAt: meetingStartedAt.current }
+    noteChat, noteDocuments, liveChat, speech, start, startMeeting, stop, summarizeNow: () => void summarizeNow(), newNote, addNote, saveWatchNote, updateNote, deleteNote, deleteNotes, restoreNotes, fileJob, createGroup, renameGroup, deleteGroup, watch, dub, meetingStartedAt: meetingStartedAt.current }
 }
 
 export type AppModel = ReturnType<typeof useAppModel>

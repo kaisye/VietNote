@@ -103,6 +103,21 @@ class SonioxStreamTest(unittest.TestCase):
         self.stream.handle({"tokens": [token(f" word{i}", True, ms=i * 300) for i in range(40)]})
         self.assertFalse(self.of_type("transcript"))
 
+    def test_full_audio_backlog_drops_oldest_and_keeps_live_edge(self):
+        for index in range(server.MAX_AUDIO_BACKLOG_CHUNKS + 1):
+            self.stream.put(str(index).encode(), float(index))
+        self.assertEqual(self.stream.audio.qsize(), server.MAX_AUDIO_BACKLOG_CHUNKS)
+        self.assertEqual(self.stream.audio.get_nowait(), (b"1", 1.0))
+        warnings = self.of_type("warning")
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("skipped old audio", warnings[0]["message"])
+
+    def test_recognition_status_names_its_audio_source(self):
+        self.stream.report_status("connecting")
+        self.assertEqual(self.of_type("asr_status"), [{
+            "type": "asr_status", "source": "system", "state": "connecting", "generation": 1
+        }])
+
     def test_detects_spoken_language_from_transcript(self):
         self.assertEqual(detect_language("Nobody has air superiority right now."), "en")
         self.assertEqual(detect_language("Hôm nay chúng ta họp về kế hoạch quý ba."), "vi")

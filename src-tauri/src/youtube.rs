@@ -54,28 +54,57 @@ pub(crate) fn video_id(url: &str) -> Option<String> {
 /// The base of a language tag: "en-US" → "en".
 fn base(tag: &str) -> &str { tag.split(['-', '_']).next().unwrap_or(tag) }
 
+/// A parameter of a caption URL, e.g. `lang` or `tlang`.
+fn query<'a>(url: &'a str, name: &str) -> Option<&'a str> {
+    url.split(['?', '&']).find_map(|pair| pair.strip_prefix(name)?.strip_prefix('='))
+}
+
+/// The language of the video's own audio. A video can carry dubs in other languages too; its
+/// original track is marked as preferred (and "original").
+fn original_language(info: &Value) -> Option<String> {
+    info["formats"].as_array().into_iter().flatten()
+        .filter(|format| format["acodec"] != "none")
+        .filter_map(|format| Some((format["language"].as_str().filter(|tag| !tag.is_empty())?, format)))
+        .max_by_key(|(_, format)| (format["language_preference"].as_i64().unwrap_or(-1), format["format_note"].as_str().unwrap_or_default().contains("original")))
+        .map(|(language, _)| base(language).to_string())
+}
+
 /// The best caption track: Vietnamese made by people, then the spoken language's own captions
 /// made by people, then YouTube's speech recognition of it. Returns its URL and language.
+///
+/// YouTube recognises every audio track of a video (its dubs too) and machine-translates the
+/// recognition into every language (those tracks carry `tlang`); only the recognition of the
+/// original audio is the source.
 fn pick_track(info: &Value) -> Option<(String, String, &'static str)> {
     let json3 = |formats: &Value| formats.as_array()?.iter().find(|f| f["ext"] == "json3")?["url"].as_str().map(String::from);
     let manual = info["subtitles"].as_object().into_iter().flatten().filter(|(key, _)| *key != "live_chat").collect::<Vec<_>>();
-    let auto = info["automatic_captions"].as_object();
-    let spoken = info["language"].as_str().map(base).filter(|tag| !tag.is_empty());
+    let recognitions = info["automatic_captions"].as_object().into_iter().flatten()
+        .filter_map(|(key, formats)| Some((key, json3(formats)?)))
+        .filter(|(_, url)| query(url, "tlang").is_none())
+        .map(|(key, url)| { let language = query(&url, "lang").map(base).unwrap_or_else(|| base(key.trim_end_matches("-orig"))).to_string(); (key.ends_with("-orig"), url, language) })
+        .collect::<Vec<_>>();
+    // The audio says what is spoken; the language a channel declares is often unset or wrong,
+    // so it only breaks a tie between recognitions.
+    let audio = original_language(info);
+    let declared = info["language"].as_str().map(base).filter(|tag| !tag.is_empty()).map(String::from);
+    // "<lang>-orig" is the recognition itself when YouTube lists it.
+    let recognised = |language: &str| recognitions.iter().filter(|(_, _, of)| of == language).max_by_key(|(orig, _, _)| *orig).map(|(_, url, of)| (url.clone(), of.clone()));
+    let recognised = audio.as_deref().and_then(recognised)
+        .or_else(|| declared.as_deref().and_then(recognised))
+        .or_else(|| recognised("en"))
+        .or_else(|| recognitions.iter().max_by_key(|(orig, _, _)| *orig).map(|(_, url, of)| (url.clone(), of.clone())));
+    let spoken = audio.or_else(|| recognised.as_ref().map(|(_, language)| language.clone())).or(declared);
 
     let from_manual = |wanted: &dyn Fn(&str) -> bool| manual.iter().find(|(key, _)| wanted(key)).and_then(|(key, formats)| Some((json3(formats)?, base(key).to_string(), "manual")));
     if let Some(found) = from_manual(&|key| base(key) == "vi") { return Some(found); }
-    if let Some(spoken) = spoken {
+    if let Some(spoken) = &spoken {
         if let Some(found) = from_manual(&|key| base(key) == spoken) { return Some(found); }
     }
-    if let Some(auto) = auto {
-        // "<lang>-orig" is the recognition itself; the other automatic tracks are machine translations of it.
-        let original = auto.iter().find(|(key, _)| key.ends_with("-orig")).map(|(key, formats)| (key.trim_end_matches("-orig"), formats))
-            .or_else(|| spoken.and_then(|spoken| auto.get_key_value(spoken).map(|(key, formats)| (key.as_str(), formats))));
-        if let Some((key, formats)) = original {
-            if let Some(url) = json3(formats) { return Some((url, base(key).to_string(), "auto")); }
-        }
-    }
-    from_manual(&|key| base(key) == "en").or_else(|| if manual.len() == 1 { from_manual(&|_| true) } else { None })
+    if let Some((url, language)) = recognised { return Some((url, language, "auto")); }
+    // Captions in another language are someone's translation: English still reads well as a
+    // source, others (a community's Ukrainian, say) would show as the "original". Then the
+    // video is better heard. A lone track is taken only when nothing says what is spoken.
+    from_manual(&|key| base(key) == "en").or_else(|| if manual.len() == 1 && spoken.is_none() { from_manual(&|_| true) } else { None })
 }
 
 /// Caption events in YouTube's json3 form, as timed pieces: one per line, or one per word when
@@ -143,7 +172,7 @@ pub(crate) async fn youtube_captions(app: tauri::AppHandle, url: String) -> Resu
 #[tauri::command]
 pub(crate) async fn translate_captions(lines: Vec<String>, language: String, context: Vec<String>) -> Result<Vec<String>, String> {
     if lines.is_empty() { return Ok(Vec::new()); }
-    let system = format!("Bạn là phiên dịch viên phụ đề video từ ngôn ngữ có mã \"{language}\" sang tiếng Việt. Đầu vào là JSON gồm các câu phụ đề liên tiếp (lines) và vài câu ngay trước đó (context, chỉ để hiểu, không dịch). Phụ đề có thể do máy nhận dạng giọng nói nên thiếu dấu câu hoặc nghe nhầm; dùng ngữ cảnh để hiểu đúng. Dịch từng câu sang tiếng Việt tự nhiên, ngắn gọn như phụ đề phim; giữ nguyên tên riêng, số liệu và thuật ngữ chuyên môn; câu chỉ là tiếng động như [Music] thì dịch thành [Nhạc]. Mỗi câu đầu vào có đúng một câu dịch, cùng thứ tự; không gộp, không tách, không bỏ câu. Chỉ trả về JSON {{\"lines\":[\"…\"]}}.");
+    let system = format!("Bạn là phiên dịch viên phụ đề kiêm lồng tiếng video từ ngôn ngữ có mã \"{language}\" sang tiếng Việt. Đầu vào là JSON gồm các câu phụ đề liên tiếp (lines) và vài câu ngay trước đó (context, chỉ để hiểu, không dịch). Phụ đề có thể do máy nhận dạng giọng nói nên thiếu dấu câu hoặc nghe nhầm; dùng ngữ cảnh để hiểu đúng. Mỗi bản dịch sẽ vừa hiện làm phụ đề vừa được đọc thành tiếng trong khoảng thời gian nói câu gốc. Dịch tự nhiên, gọn, dễ đọc thành lời; ưu tiên cách diễn đạt ngắn có thể nói với nhịp bình thường, tránh dịch sát từng chữ, từ lặp và phần diễn giải không có trong câu gốc. Giữ đủ ý, sắc thái quan trọng, tên riêng, số liệu và thuật ngữ chuyên môn; không lược bỏ thông tin thiết yếu chỉ để rút ngắn. Câu chỉ là tiếng động như [Music] thì dịch thành [Nhạc]. Mỗi câu đầu vào có đúng một câu dịch, cùng thứ tự; không gộp, không tách, không bỏ câu. Chỉ trả về JSON {{\"lines\":[\"…\"]}}.");
     let user = json!({ "context": context, "lines": lines }).to_string();
     let mut last = String::new();
     // A reply with the wrong number of lines would put subtitles on the wrong sentences: ask once more.
@@ -185,7 +214,7 @@ fn speech_lines(value: &Value, words: usize) -> Vec<SpeechLine> {
 #[tauri::command]
 pub(crate) async fn translate_speech(words: Vec<String>, language: String, context: Vec<String>) -> Result<Vec<SpeechLine>, String> {
     if words.is_empty() { return Ok(Vec::new()); }
-    let system = format!("Bạn là biên tập viên và phiên dịch viên phụ đề video từ ngôn ngữ có mã \"{language}\" sang tiếng Việt. Đầu vào là JSON: words là lời nói do máy nhận dạng, từng từ có số thứ tự [n], chưa có dấu câu và có thể nghe nhầm; context là vài câu ngay trước đó, chỉ để hiểu. Hãy chia words thành các câu phụ đề liên tiếp, phủ hết từ đầu đến cuối, không bỏ từ nào. Mỗi câu phụ đề trọn một ý, thường 6–16 từ; câu nói dài thì tách ở chỗ ngắt tự nhiên. Với mỗi câu, trả về from (số thứ tự của từ đầu tiên), source (câu gốc đã thêm dấu câu và sửa lỗi nhận dạng rõ ràng) và vi (bản dịch tiếng Việt tự nhiên, ngắn gọn như phụ đề phim). Giữ nguyên tên riêng, số liệu và thuật ngữ chuyên môn; tiếng động như [Music] để riêng một câu và dịch thành [Nhạc]. Bỏ từ đệm vô nghĩa như uh, um trong bản dịch. Chỉ trả về JSON {{\"lines\":[{{\"from\":0,\"source\":\"…\",\"vi\":\"…\"}}]}}.");
+    let system = format!("Bạn là biên tập viên phụ đề kiêm phiên dịch lồng tiếng video từ ngôn ngữ có mã \"{language}\" sang tiếng Việt. Đầu vào là JSON: words là lời nói do máy nhận dạng, từng từ có số thứ tự [n], chưa có dấu câu và có thể nghe nhầm; context là vài câu ngay trước đó, chỉ để hiểu. Hãy chia words thành các câu phụ đề liên tiếp, phủ hết từ đầu đến cuối, không bỏ từ nào. Mỗi câu phụ đề trọn một ý, thường 6–16 từ; câu nói dài thì tách ở chỗ ngắt tự nhiên. Với mỗi câu, trả về from (số thứ tự của từ đầu tiên), source (câu gốc đã thêm dấu câu và sửa lỗi nhận dạng rõ ràng) và vi (bản dịch tiếng Việt vừa hiện làm phụ đề vừa được đọc thành tiếng trong khoảng thời gian nói câu gốc). Viết vi tự nhiên, gọn, dễ đọc thành lời với nhịp bình thường; tránh dịch sát từng chữ, từ lặp và diễn giải không có trong câu gốc, nhưng giữ đủ ý và sắc thái quan trọng. Giữ nguyên tên riêng, số liệu và thuật ngữ chuyên môn; tiếng động như [Music] để riêng một câu và dịch thành [Nhạc]. Bỏ từ đệm vô nghĩa như uh, um trong bản dịch. Chỉ trả về JSON {{\"lines\":[{{\"from\":0,\"source\":\"…\",\"vi\":\"…\"}}]}}.");
     let numbered = words.iter().enumerate().map(|(index, word)| format!("[{index}]{word}")).collect::<Vec<_>>().join(" ");
     let user = json!({ "context": context, "words": numbered }).to_string();
     for _ in 0..2 {
@@ -218,6 +247,10 @@ mod tests {
     }
 
     fn track(key: &str) -> Value { json!([{ "ext": "vtt", "url": "x" }, { "ext": "json3", "url": key }]) }
+    /// YouTube's recognition in `lang`, machine-translated into `to` when given.
+    fn recognition(lang: &str, to: Option<&str>) -> Value {
+        track(&format!("https://www.youtube.com/api/timedtext?v=x&kind=asr&lang={lang}{}&fmt=json3", to.map(|to| format!("&tlang={to}")).unwrap_or_default()))
+    }
 
     #[test]
     fn prefers_vietnamese_then_the_spoken_language_then_recognition() {
@@ -227,6 +260,34 @@ mod tests {
         assert_eq!(pick_track(&info), Some(("en-US".into(), "en".into(), "manual")));
         let info = json!({ "language": "ja", "subtitles": { "fr": track("fr"), "en": track("en") }, "automatic_captions": { "ja-orig": track("auto"), "vi": track("vi-auto") } });
         assert_eq!(pick_track(&info), Some(("auto".into(), "ja".into(), "auto")));
+    }
+
+    #[test]
+    fn takes_the_recognition_of_the_original_audio_among_dubs() {
+        let audio = |language: &str, preference: i64, note: &str| json!({ "acodec": "opus", "language": language, "language_preference": preference, "format_note": note });
+        let info = json!({ "language": "en-US", "subtitles": {},
+            "formats": [{ "acodec": "none", "language": null }, audio("ar", -1, "Arabic - dubbed-auto"), audio("en-US", 10, "English original (default)"), audio("uk", -1, "Ukrainian")],
+            "automatic_captions": { "ar-orig": recognition("ar", None), "en-orig": recognition("en", None), "uk-orig": recognition("uk", None), "vi": recognition("en", Some("vi")) } });
+        assert_eq!(original_language(&info).as_deref(), Some("en"));
+        let (url, language, _) = pick_track(&info).unwrap();
+        assert_eq!(language, "en");
+        assert!(url.contains("lang=en") && !url.contains("tlang"));
+    }
+
+    #[test]
+    fn takes_the_spoken_language_from_recognition_not_the_declared_one() {
+        // Declared Arabic, spoken English, no "-orig" listed: the Arabic tracks are translations.
+        let info = json!({ "language": "ar", "subtitles": { "ar": track("ar-manual") }, "automatic_captions": {
+            "ar": recognition("en", Some("ar")), "en": recognition("en", None), "vi": recognition("en", Some("vi")) } });
+        let (url, language, kind) = pick_track(&info).unwrap();
+        assert_eq!((language.as_str(), kind), ("en", "auto"));
+        assert!(!url.contains("tlang"));
+        // Spoken English, no recognition, only a community's Ukrainian: no source to translate from.
+        let info = json!({ "language": "en", "subtitles": { "uk": track("uk") }, "automatic_captions": {} });
+        assert_eq!(pick_track(&info), None);
+        // Declared nothing: the same.
+        let info = json!({ "language": null, "subtitles": {}, "automatic_captions": { "ar": recognition("en", Some("ar")), "en": recognition("en", None) } });
+        assert_eq!(pick_track(&info).map(|(_, language, _)| language).as_deref(), Some("en"));
         let info = json!({ "language": null, "subtitles": { "live_chat": track("chat") }, "automatic_captions": {} });
         assert_eq!(pick_track(&info), None);
     }
