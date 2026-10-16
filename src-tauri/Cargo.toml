@@ -1,6 +1,6 @@
 [package]
 name = "vietnote"
-version = "0.8.23"
+version = "0.8.24"
 description = "VietNote desktop shell"
 authors = ["VietNote"]
 edition = "2021"

@@ -291,12 +291,12 @@ async fn ask_note_stream(
 ) -> Result<ChatAnswer, String> {
     let input = chat_input(&request)?;
     let segments = request.segments.clone();
-    let (system, max_tokens) = if request.video_mode.is_some() {
-        (VIDEO.to_string(), 1200)
+    let (feature, system, max_tokens) = if request.video_mode.is_some() {
+        ("watch_chat", VIDEO.to_string(), 1200)
     } else if request.live {
-        (format!("{SYSTEM}\n{LIVE}"), 900)
+        ("live_chat", format!("{SYSTEM}\n{LIVE}"), 900)
     } else {
-        (SYSTEM.to_string(), 1800)
+        ("note_chat", SYSTEM.to_string(), 1800)
     };
     let result = complete_chat(input, &request.segments, |input, prefix| {
         let channel = on_progress.clone();
@@ -305,7 +305,7 @@ async fn ask_note_stream(
         let images = request.images.clone();
         async move {
             let mut last_update = std::time::Instant::now() - std::time::Duration::from_secs(1);
-            crate::account::ai_complete_stream_with_images(&system, input, &images, max_tokens, |partial| {
+            crate::account::ai_complete_stream_with_images(feature, &system, input, &images, max_tokens, |partial| {
                 // Send snapshots so paragraph replacement during continuation is deterministic.
                 if last_update.elapsed() < std::time::Duration::from_millis(40) {
                     return;
@@ -642,7 +642,7 @@ mod tests {
                 // Force the original failure condition on the first real provider response.
                 let max_tokens = if calls == 1 { 80 } else { 1800 };
                 async move {
-                    crate::account::ai_complete_stream(SYSTEM, input, max_tokens, |_| {}).await
+                    crate::account::ai_complete_stream("test", SYSTEM, input, max_tokens, |_| {}).await
                 }
             },
         ))

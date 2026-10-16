@@ -1,5 +1,6 @@
 // LLM proxy for summaries, paragraph translation and meeting titles.
-//   POST {system, user, images?, max_tokens, json} -> {content, finish_reason}
+//   POST {system, user, images?, max_tokens, json, feature?} -> {content, finish_reason}
+// `feature` names the app feature asking (summary, note_chat…) for usage analytics.
 // `images` are screenshots pasted with a question, as data:image/…;base64 URLs.
 // The model and the OpenRouter key stay on the server; callers must be signed
 // in with a positive balance and are rate limited per minute.
@@ -12,6 +13,7 @@ const MAX_INPUT_CHARS = 200_000
 const REQUESTS_PER_MINUTE = 30
 const MAX_IMAGES = 3
 const MAX_IMAGE_CHARS = 4_000_000
+const FEATURE = /^[a-z_]{1,32}$/
 const IMAGE_URL = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/
 
 Deno.serve(async request => {
@@ -22,12 +24,13 @@ Deno.serve(async request => {
   if (authError || !auth.user) return json({ error: 'unauthorized' }, 401)
   const userId = auth.user.id
 
-  const body = await request.json().catch(() => ({})) as { system?: unknown; user?: unknown; images?: unknown; max_tokens?: unknown; json?: unknown; stream?: unknown }
+  const body = await request.json().catch(() => ({})) as { system?: unknown; user?: unknown; images?: unknown; max_tokens?: unknown; json?: unknown; stream?: unknown; feature?: unknown }
   if (typeof body.system !== 'string' || typeof body.user !== 'string' || !body.user.trim()) return json({ error: 'invalid_request' }, 400)
   if (body.system.length + body.user.length > MAX_INPUT_CHARS) return json({ error: 'input_too_long' }, 413)
   const images = body.images ?? []
   if (!Array.isArray(images) || images.length > MAX_IMAGES
     || !images.every(image => typeof image === 'string' && image.length <= MAX_IMAGE_CHARS && IMAGE_URL.test(image))) return json({ error: 'invalid_images' }, 400)
+  const feature = typeof body.feature === 'string' && FEATURE.test(body.feature) ? body.feature : 'unknown'
   const maxTokens = Math.min(MAX_OUTPUT_TOKENS, Math.max(1, Math.floor(Number(body.max_tokens) || 500)))
 
   // Open streams hold up to 30 minutes each; that reserved time still counts.
@@ -71,7 +74,7 @@ Deno.serve(async request => {
     if (!response.body) return json({ error: 'upstream_unavailable' }, 502)
     // Count the request before streaming, then fill in the final provider usage.
     const { data: row } = await db.from('ai_usage').insert({
-      user_id: userId, model, prompt_tokens: 0, completion_tokens: 0, cost_usd: null,
+      user_id: userId, model, feature, prompt_tokens: 0, completion_tokens: 0, cost_usd: null,
     }).select('id').single()
     const stream = relayAiStream(response.body, async usage => {
       const values = {
@@ -80,7 +83,7 @@ Deno.serve(async request => {
         cost_usd: usage.cost ?? null,
       }
       if (row) await db.from('ai_usage').update(values).eq('id', row.id)
-      else await db.from('ai_usage').insert({ user_id: userId, model, ...values })
+      else await db.from('ai_usage').insert({ user_id: userId, model, feature, ...values })
     })
     return new Response(stream, { headers: {
       'Content-Type': 'text/event-stream; charset=utf-8',
@@ -92,7 +95,7 @@ Deno.serve(async request => {
     usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number }
   }
   await db.from('ai_usage').insert({
-    user_id: userId, model,
+    user_id: userId, model, feature,
     prompt_tokens: data.usage?.prompt_tokens ?? 0,
     completion_tokens: data.usage?.completion_tokens ?? 0,
     cost_usd: data.usage?.cost ?? null,

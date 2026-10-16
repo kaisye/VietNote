@@ -1,11 +1,12 @@
 // Issues single-use Soniox temporary keys against the caller's credit.
-//   POST {action:"grant", source}      -> {api_key, grant_id, seconds, balance_seconds}
+//   POST {action:"grant", source, feature?} -> {api_key, grant_id, seconds, balance_seconds}
 //   POST {action:"release", grant_id}  -> {used_seconds}
 //   POST {action:"balance"}            -> {balance_seconds, email}
 //   POST {action:"watch", session_id, video_id, total_seconds} -> cumulative watched usage
 import { admin, availableSeconds, json, MAX_GRANT_SECONDS, MIN_GRANT_SECONDS, SONIOX_API, sonioxKey } from '../_shared/credits.ts'
 
 const SOURCES = new Set(['system', 'microphone'])
+const FEATURES = new Set(['live_translate', 'meeting_note'])
 
 Deno.serve(async request => {
   if (request.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
@@ -14,7 +15,7 @@ Deno.serve(async request => {
   const { data: auth, error: authError } = await db.auth.getUser(token)
   if (authError || !auth.user) return json({ error: 'unauthorized' }, 401)
   const user = auth.user
-  const body = await request.json().catch(() => ({})) as { action?: string; source?: string; grant_id?: string; session_id?: string; video_id?: string; total_seconds?: number }
+  const body = await request.json().catch(() => ({})) as { action?: string; source?: string; feature?: string; grant_id?: string; session_id?: string; video_id?: string; total_seconds?: number }
 
   if (body.action === 'balance') {
     // Streams in progress hold a reservation; show only the time they have
@@ -57,6 +58,8 @@ Deno.serve(async request => {
       return json({ error: 'reserve_failed' }, 500)
     }
     const grant = (data as { grant_id: string; reserved_seconds: number; balance_seconds: number }[])[0]
+    // For usage analytics only; billing does not depend on it.
+    if (FEATURES.has(body.feature ?? '')) await db.from('soniox_grants').update({ feature: body.feature }).eq('id', grant.grant_id)
     const response = await fetch(`${SONIOX_API}/auth/temporary-api-key`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${sonioxKey()}`, 'Content-Type': 'application/json' },

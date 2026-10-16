@@ -652,10 +652,11 @@ fn start_capture_monitor(app: tauri::AppHandle, epoch: usize) {
 }
 
 #[tauri::command]
-fn start_capture(app: tauri::AppHandle, state: tauri::State<'_, NativeState>, source: String) -> Result<(), String> {
+fn start_capture(app: tauri::AppHandle, state: tauri::State<'_, NativeState>, source: String, feature: Option<String>) -> Result<(), String> {
     let mut slot = state.capture_tx.lock().map_err(|e| e.to_string())?;
     if slot.is_some() { return Err("Đang ghi âm".into()); }
     if !matches!(source.as_str(), "microphone" | "system" | "both") { return Err("Nguồn âm thanh không hợp lệ".into()); }
+    account::set_speech_feature(feature.as_deref().unwrap_or_default());
     let (tx, rx) = mpsc::sync_channel::<(String, Vec<f32>, f64)>(25);
     let writer = state.writer.clone();
     let pending = state.pending_audio.clone();
@@ -737,8 +738,8 @@ fn stop_capture(state: tauri::State<'_, NativeState>) -> Result<(), String> {
     end_capture(&state)
 }
 
-async fn ai_completion(system: &str, user: String, max_tokens: u32, json: bool) -> Result<String, String> {
-    account::ai_complete(system, user, max_tokens, json).await
+async fn ai_completion(feature: &str, system: &str, user: String, max_tokens: u32, json: bool) -> Result<String, String> {
+    account::ai_complete(feature, system, user, max_tokens, json).await
 }
 
 fn parse_json_object(text: &str) -> Result<Value, String> {
@@ -900,7 +901,7 @@ async fn summarize_segments(segments: Vec<TranscriptSegment>, previous_summary: 
     } else {
         format!("{context}TRANSCRIPT CÓ ID:\n{transcript}")
     };
-    let raw = ai_completion( &system, user, 1800, true).await?;
+    let raw = ai_completion("summary", &system, user, 1800, true).await?;
     let mut value = parse_json_object(&raw)?;
     han::repair_json(&mut value).await;
     let mut summary: MeetingSummary = serde_json::from_value(value).map_err(|error| format!("Summary không đúng schema: {error}"))?;
@@ -915,6 +916,7 @@ async fn suggest_title(transcript: String) -> Result<String, String> {
     let transcript: String = transcript.chars().rev().take(6000).collect::<Vec<_>>().into_iter().rev().collect();
     if transcript.trim().is_empty() { return Ok(String::new()); }
     let raw = ai_completion(
+        "title",
         "Đặt tên cuộc họp tiếng Việt 3–8 từ nêu chủ đề chính và mục đích (ví dụ: Chốt kiến trúc thanh toán quý 4), dựa trên transcript. Không ngày giờ, không dấu ngoặc kép, không chung chung kiểu \"Cuộc họp nhóm\". Chỉ trả về tên.",
         format!("TRANSCRIPT:\n{transcript}"),
         40,
@@ -936,6 +938,7 @@ async fn translate_text(text: String, source_language: String, previous_context:
         format!("Đoạn ngay trước đó (chỉ dùng làm ngữ cảnh, không dịch lại):\n{previous_context}")
     };
     let translated = ai_completion(
+        "translate_paragraph",
         &format!("Bạn là biên tập viên bản ghi và phiên dịch viên từ {source} sang tiếng Việt. Đầu vào là một đoạn ghép từ nhiều kết quả ASR liên tiếp. Hãy dùng toàn bộ ngữ cảnh để sửa các lỗi nhận diện rõ ràng, nối lại câu bị ngắt, thêm dấu câu, rồi dịch cả đoạn sang tiếng Việt tự nhiên. Giữ nguyên tên riêng, số liệu và thuật ngữ chuyên môn. Không bịa nội dung. Chỉ trả về bản dịch tiếng Việt hoàn chỉnh của ĐOẠN CẦN DỊCH; không dịch lại ngữ cảnh và không giải thích."),
         format!("{context}\n\nĐOẠN CẦN DỊCH:\n{text}"),
         300,

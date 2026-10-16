@@ -26,6 +26,9 @@ const MAX_SECONDS: f64 = 5.0 * 3600.0;
 
 static FETCHING: Mutex<Option<Child>> = Mutex::new(None);
 static CANCELLED: AtomicBool = AtomicBool::new(false);
+/// What people see when YouTube holds back requests from their network as a bot's.
+const BOT_BLOCKED: &str = "YouTube đang tạm chặn mạng của bạn. Hãy đổi mạng khác hoặc thử lại sau ít phút.";
+
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -116,7 +119,9 @@ fn expected_sha256(sums: &str, name: &str) -> Option<String> {
 /// A message for people from the downloader's last error line.
 pub(crate) fn friendly_error(error: &str) -> String {
     let lower = error.to_lowercase();
-    let message = if lower.contains("unsupported url") || lower.contains("is not a valid url") {
+    let message = if lower.contains("not a bot") {
+        BOT_BLOCKED
+    } else if lower.contains("unsupported url") || lower.contains("is not a valid url") {
         "Link này không chứa video hay âm thanh nào VietNote đọc được."
     } else if lower.contains("private") || lower.contains("sign in") || lower.contains("login") || lower.contains("members-only") || lower.contains("cookies") {
         "Video này cần đăng nhập hoặc ở chế độ riêng tư. Hãy tải file về máy rồi chọn file."
@@ -236,6 +241,7 @@ mod tests {
     fn explains_common_failures_without_naming_tools() {
         assert!(friendly_error("ERROR: [youtube] abc: Private video. Sign in if you've been granted access").contains("riêng tư"));
         assert!(friendly_error("ERROR: Unsupported URL: https://example.com").contains("không chứa"));
+        assert_eq!(friendly_error("ERROR: [youtube] abc: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies"), BOT_BLOCKED);
         assert!(friendly_error("ERROR: [generic] nope: Unable to download webpage: HTTP Error 404").contains("Không tìm thấy"));
     }
 

@@ -116,13 +116,11 @@ pub fn play_audio(chunks: Vec<AudioChunk>, rate: f32, end: Option<bool>) -> Resu
         if let Some(stretcher) = stretch.as_mut() { let from = stretcher.rate(); play(stretcher.finish(rate), from)?; }
     }
     let queued = output.queue.lock().map_err(|e| e.to_string())?.len();
-    eprintln!("[DEBUG PLAY] chunks={} rate={rate} end={end:?} queued={:.2}s alive={}", chunks.len(), queued as f32 / output.rate as f32, output.alive.load(Ordering::SeqCst));
     Ok(queued as f32 / output.rate as f32)
 }
 
 #[tauri::command]
 pub fn stop_audio() -> Result<(), String> {
-    eprintln!("[DEBUG STOP]");
     let Some(slot) = OUTPUT.get() else { return Ok(()) };
     let slot = slot.lock().map_err(|e| e.to_string())?;
     if let Some(output) = slot.as_ref() { output.queue.lock().map_err(|e| e.to_string())?.clear(); }

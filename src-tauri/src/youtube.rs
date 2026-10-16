@@ -177,7 +177,7 @@ pub(crate) async fn translate_captions(lines: Vec<String>, language: String, con
     let mut last = String::new();
     // A reply with the wrong number of lines would put subtitles on the wrong sentences: ask once more.
     for _ in 0..2 {
-        let raw = crate::account::ai_complete(&system, user.clone(), 4000, true).await?;
+        let raw = crate::account::ai_complete("watch_captions", &system, user.clone(), 4000, true).await?;
         let value: Value = raw.find('{').zip(raw.rfind('}')).and_then(|(start, end)| serde_json::from_str(&raw[start..=end]).ok()).unwrap_or(Value::Null);
         let mut translated: Vec<String> = value["lines"].as_array().into_iter().flatten().map(|line| line.as_str().unwrap_or_default().trim().to_string()).collect();
         if translated.len() == lines.len() {
@@ -218,7 +218,7 @@ pub(crate) async fn translate_speech(words: Vec<String>, language: String, conte
     let numbered = words.iter().enumerate().map(|(index, word)| format!("[{index}]{word}")).collect::<Vec<_>>().join(" ");
     let user = json!({ "context": context, "words": numbered }).to_string();
     for _ in 0..2 {
-        let raw = crate::account::ai_complete(&system, user.clone(), 6000, true).await?;
+        let raw = crate::account::ai_complete("watch_listen", &system, user.clone(), 6000, true).await?;
         let value: Value = raw.find('{').zip(raw.rfind('}')).and_then(|(start, end)| serde_json::from_str(&raw[start..=end]).ok()).unwrap_or(Value::Null);
         let mut lines = speech_lines(&value, words.len());
         if !lines.is_empty() {

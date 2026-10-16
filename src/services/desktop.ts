@@ -55,7 +55,7 @@ export const desktop = {
   watchCharge: (sessionId: string, videoId: string, totalSeconds: number) => invoke<{ charged_seconds: number; balance_seconds: number }>('watch_charge', { sessionId, videoId, totalSeconds }),
   stopWorker: () => invoke<void>('stop_worker'),
   sendWorker: (payload: Record<string, unknown>) => invoke<void>('send_worker', { payload }),
-  startCapture: (source: AudioInput) => invoke<void>('start_capture', { source }),
+  startCapture: (source: AudioInput, feature: 'live_translate' | 'meeting_note') => invoke<void>('start_capture', { source, feature }),
   stopCapture: () => invoke<void>('stop_capture'),
   /** Returns the seconds of speech still queued. */
   /** `end`: the line is complete, so the last of it plays out too. */

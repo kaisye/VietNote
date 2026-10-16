@@ -397,7 +397,7 @@ export function useAppModel() {
     generationRef.current += 1
     try {
       await desktop.sendWorker({ type: 'reset', generation: generationRef.current, language: languageRef.current })
-      await desktop.startCapture(input)
+      await desktop.startCapture(input, meetingRef.current ? 'meeting_note' : 'live_translate')
       microphoneRef.current = input !== 'system'; setMicrophoneOn(microphoneRef.current)
       systemAudioRef.current = input !== 'microphone'; setSystemAudioOn(systemAudioRef.current)
       capturingRef.current = true; setCapturing(true); setStatus(`● Listening — ${input}`)

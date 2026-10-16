@@ -135,9 +135,19 @@ pub(crate) async fn function_call(name: &str, body: Value) -> Result<Value, Stri
     }
 }
 
+/// The feature live speech is serving (live_translate or meeting_note), sent with each
+/// key request for usage analytics.
+static SPEECH_FEATURE: std::sync::Mutex<&'static str> = std::sync::Mutex::new("live_translate");
+
+pub fn set_speech_feature(feature: &str) {
+    let feature = if feature == "meeting_note" { "meeting_note" } else { "live_translate" };
+    if let Ok(mut slot) = SPEECH_FEATURE.lock() { *slot = feature; }
+}
+
 /// Reply for the worker's `soniox_key_request`.
 pub async fn soniox_grant(source: &str) -> Value {
-    match credit_call(json!({"action": "grant", "source": source})).await {
+    let feature = SPEECH_FEATURE.lock().map(|slot| *slot).unwrap_or("live_translate");
+    match credit_call(json!({"action": "grant", "source": source, "feature": feature})).await {
         Ok(value) => json!({
             "api_key": value.get("api_key"), "grant_id": value.get("grant_id"),
             "seconds": value.get("seconds"), "balance_seconds": value.get("balance_seconds"),
@@ -147,17 +157,18 @@ pub async fn soniox_grant(source: &str) -> Value {
 }
 
 /// Chat completion through the `ai-complete` Edge Function; the model and the
-/// provider key are fixed on the server.
+/// provider key are fixed on the server. `feature` names the app feature asking
+/// (summary, note_chat…), for usage analytics.
 pub struct AiCompletion {
     pub content: String,
     pub finish_reason: Option<String>,
 }
 
-pub async fn ai_complete(system: &str, user: String, max_tokens: u32, json: bool) -> Result<String, String> {
-    ai_complete_with_metadata(system, user, max_tokens, json).await.map(|result| result.content)
+pub async fn ai_complete(feature: &str, system: &str, user: String, max_tokens: u32, json: bool) -> Result<String, String> {
+    ai_complete_with_metadata(feature, system, user, max_tokens, json).await.map(|result| result.content)
 }
 
-pub async fn ai_complete_with_metadata(system: &str, user: String, max_tokens: u32, json: bool) -> Result<AiCompletion, String> {
+pub async fn ai_complete_with_metadata(feature: &str, system: &str, user: String, max_tokens: u32, json: bool) -> Result<AiCompletion, String> {
     let system = &format!("{system}\n{}", crate::han::VIETNAMESE_ONLY);
     const SIGN_IN: &str = "Hãy đăng nhập tài khoản VietNote ở góc trái dưới";
     let (url, anon) = config().ok_or("Bản build chưa cấu hình máy chủ VietNote")?;
@@ -165,7 +176,7 @@ pub async fn ai_complete_with_metadata(system: &str, user: String, max_tokens: u
     let response = client()?.post(format!("{url}/functions/v1/ai-complete"))
         .timeout(Duration::from_secs(90))
         .header("apikey", anon).bearer_auth(token)
-        .json(&json!({"system": system, "user": user, "max_tokens": max_tokens, "json": json}))
+        .json(&json!({"system": system, "user": user, "max_tokens": max_tokens, "json": json, "feature": feature}))
         .send().await.map_err(unreachable)?;
     let status = response.status().as_u16();
     let value: Value = response.json().await.unwrap_or(Value::Null);
@@ -179,13 +190,13 @@ pub async fn ai_complete_with_metadata(system: &str, user: String, max_tokens: u
 }
 
 /// Stream real provider output from the authenticated proxy to a per-request Tauri channel.
-pub async fn ai_complete_stream<F>(system: &str, user: String, max_tokens: u32, progress: F) -> Result<AiCompletion, String>
+pub async fn ai_complete_stream<F>(feature: &str, system: &str, user: String, max_tokens: u32, progress: F) -> Result<AiCompletion, String>
 where F: FnMut(&str) {
-    ai_complete_stream_with_images(system, user, &[], max_tokens, progress).await
+    ai_complete_stream_with_images(feature, system, user, &[], max_tokens, progress).await
 }
 
 /// As `ai_complete_stream`, with screenshots (`data:image/…;base64,` URLs) the model reads alongside the text.
-pub async fn ai_complete_stream_with_images<F>(system: &str, user: String, images: &[String], max_tokens: u32, progress: F) -> Result<AiCompletion, String>
+pub async fn ai_complete_stream_with_images<F>(feature: &str, system: &str, user: String, images: &[String], max_tokens: u32, progress: F) -> Result<AiCompletion, String>
 where F: FnMut(&str) {
     let system = &format!("{system}\n{}", crate::han::VIETNAMESE_ONLY);
     let (url, anon) = config().ok_or("Bản build chưa cấu hình máy chủ VietNote")?;
@@ -193,7 +204,7 @@ where F: FnMut(&str) {
     let response = client()?.post(format!("{url}/functions/v1/ai-complete"))
         .timeout(Duration::from_secs(90))
         .header("apikey", anon).bearer_auth(token)
-        .json(&json!({"system": system, "user": user, "images": images, "max_tokens": max_tokens, "json": false, "stream": true}))
+        .json(&json!({"system": system, "user": user, "images": images, "max_tokens": max_tokens, "json": false, "stream": true, "feature": feature}))
         .send().await.map_err(unreachable)?;
     match response.status().as_u16() {
         200..=299 => {},

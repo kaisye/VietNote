@@ -74,7 +74,7 @@ pub async fn repair_all(texts: &mut [String]) {
     if sentences.is_empty() { return; }
     let size: usize = sentences.iter().map(|sentence| sentence.chars().count()).sum();
     let max_tokens = (size as u32 * 2 + 200).min(4000);
-    let Ok(raw) = crate::account::ai_complete(REPAIR, json!({ "sentences": sentences }).to_string(), max_tokens, true).await else { return };
+    let Ok(raw) = crate::account::ai_complete("han_repair", REPAIR, json!({ "sentences": sentences }).to_string(), max_tokens, true).await else { return };
     let Some(rewrites) = parse_rewrites(&raw, sentences.len()) else { return };
     let mut rewrites = rewrites.into_iter();
     for (text, ranges) in texts.iter_mut().zip(&ranges) {

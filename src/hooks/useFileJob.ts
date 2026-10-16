@@ -48,7 +48,7 @@ const recordingStart = (file: AudioFile) => file.sourceUrl ? Date.now() : (file.
 
 export function linkErrorText(error: unknown): string {
   const code = error instanceof Error ? error.message : String(error)
-  if (/^(Không|Chưa|Hãy|Đang|Link|Video|Âm thanh|Mất|Công cụ)/.test(code)) return code
+  if (/^(Không|Chưa|Hãy|Đang|Link|Video|YouTube|Âm thanh|Mất|Công cụ)/.test(code)) return code
   console.error('link fetch failed', code)
   return 'Không lấy được âm thanh từ link này. Hãy thử lại sau.'
 }

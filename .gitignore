@@ -25,3 +25,9 @@ marketing/
 website/
 supabase/.temp/
 .wrangler/
+
+# Local-only: editor workspace, notes, screenshots and experiments
+*.code-workspace
+docs/
+screenshots/
+scripts/vertex_asr_test.py

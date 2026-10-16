@@ -171,7 +171,7 @@ async fn read_part(title: &str, index: usize, total: usize, part: &str) -> Resul
     let mut last = String::new();
     // One retry covers a dropped request; a failed part fails the document.
     for _ in 0..2 {
-        match crate::account::ai_complete(READ, input.clone(), READ_TOKENS, false).await {
+        match crate::account::ai_complete("writer", READ, input.clone(), READ_TOKENS, false).await {
             Ok(notes) => return Ok(notes),
             Err(error) => last = error,
         }
@@ -230,7 +230,7 @@ async fn write(request: WriteRequest, send: impl Fn(WriteProgress)) -> Result<Wr
     for part in 0..MAX_WRITE_PARTS {
         let (input, kept) = if part == 0 { (base.to_string(), String::new()) } else { (continuation(&base, &written), completed_prefix(&written).to_string()) };
         let mut last_update = std::time::Instant::now() - std::time::Duration::from_secs(1);
-        let result = crate::account::ai_complete_stream(&system, input, WRITE_TOKENS, |partial| {
+        let result = crate::account::ai_complete_stream("writer", &system, input, WRITE_TOKENS, |partial| {
             if last_update.elapsed() < std::time::Duration::from_millis(60) { return; }
             last_update = std::time::Instant::now();
             progress("writing", 0, 0, clean_markdown(&join(&kept, partial)));
