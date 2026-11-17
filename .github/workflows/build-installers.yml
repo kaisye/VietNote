@@ -1,0 +1,185 @@
+#
+# Public repositories get Actions minutes for free. The source stays private: each job checks it
+# out with a read-only deploy key, runs scripts/release/* from it, and only the finished
+# installers are published. Build output never reaches the public log: it is written to a file,
+# and on failure that file is attached encrypted with LOG_PASSWORD (no build artifacts otherwise,
+# and no caches, which pull requests could read).
+name: Build installers
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag in the source repository to build and publish (for example v0.8.53)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installers-${{ inputs.tag }}
+  cancel-in-progress: true
+
+env:
+  SOURCE_REPO: kaisye/VietNote-src
+  RELEASE_REPO: ${{ github.repository }}
+
+jobs:
+  prepare:
+    name: Prepare draft release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Check the tag
+        id: tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::The tag must look like v1.2.3"; exit 1; }
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create or check the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          if gh release view "$TAG" --repo "$RELEASE_REPO" >/dev/null 2>&1; then
+            test "$(gh release view "$TAG" --repo "$RELEASE_REPO" --json isDraft --jq .isDraft)" = true
+          else
+            gh release create "$TAG" --repo "$RELEASE_REPO" --draft --title "$TAG" --notes "Preparing installers."
+          fi
+
+  build:
+    name: ${{ matrix.name }}
+    needs: prepare
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS Apple Silicon
+            runner: macos-15
+            script: macos.sh aarch64
+          - name: macOS Intel
+            runner: macos-15-intel
+            script: macos.sh x64
+          - name: Windows x64
+            runner: windows-2022
+            script: windows.sh
+          - name: Linux x64
+            runner: ubuntu-22.04
+            script: linux.sh
+    runs-on: ${{ matrix.runner }}
+    # Apple's notary queue sometimes holds a submission for most of an hour.
+    timeout-minutes: 150
+    env:
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: refs/tags/${{ needs.prepare.outputs.tag }}
+          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq >/dev/null
+          sudo apt-get install -y -qq build-essential pkg-config libwebkit2gtk-4.1-dev libxdo-dev \
+            libayatana-appindicator3-dev librsvg2-dev libssl-dev libasound2-dev libpulse-dev libdbus-1-dev >/dev/null
+
+      - name: Build
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          LOG_PASSWORD: ${{ secrets.LOG_PASSWORD }}
+          SCRIPT: ${{ matrix.script }}
+        run: |
+          log="$RUNNER_TEMP/build.log"
+          started=$SECONDS
+          if bash scripts/release/$SCRIPT > "$log" 2>&1; then
+            echo "Built in $(( (SECONDS - started) / 60 )) min: $(ls release-out | tr '\n' ' ')"
+          else
+            echo "::error::Build failed after $(( (SECONDS - started) / 60 )) min. The log is attached encrypted (build-log)."
+            openssl enc -aes-256-cbc -pbkdf2 -salt -in "$log" -out "$RUNNER_TEMP/build.log.enc" -pass env:LOG_PASSWORD
+            exit 1
+          fi
+
+      - name: Attach the encrypted log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/build.log.enc
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Add the installers to the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh release view "$RELEASE_TAG" --repo "$RELEASE_REPO" --json isDraft --jq .isDraft)" = true
+          gh release upload "$RELEASE_TAG" --repo "$RELEASE_REPO" --clobber release-out/*
+
+  publish:
+    name: Publish the release
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: refs/tags/${{ needs.prepare.outputs.tag }}
+          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+          persist-credentials: false
+
+      - name: Write the updater manifest and the fixed-name copies
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh release view "$RELEASE_TAG" --repo "$RELEASE_REPO" --json isDraft --jq .isDraft)" = true
+          gh release download "$RELEASE_TAG" --repo "$RELEASE_REPO" --dir "$RUNNER_TEMP/installers"
+          bash scripts/release/publish.sh "$RUNNER_TEMP/installers"
+
+      # The draft the build jobs filled is published in place (the installers it already holds stay).
+      - name: Publish the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$RELEASE_TAG" --repo "$RELEASE_REPO" --clobber release-out/*
+          gh release edit "$RELEASE_TAG" --repo "$RELEASE_REPO" --draft=false --latest --notes-file release-out.notes.md
+          gh release view "$RELEASE_TAG" --repo "$RELEASE_REPO" --json isDraft,assets --jq '"draft=\(.isDraft) assets=\(.assets|length)"'
